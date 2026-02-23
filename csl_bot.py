@@ -567,20 +567,24 @@ def run_hapag_lloyd(browser, url, bol, container):
         title = page.title()
         print(f"    Page title: {title!r}")
         if "just a moment" in title.lower() or "attention required" in title.lower():
-            print(f"    WARNING: Cloudflare challenge detected — cannot proceed")
+            print(f"    WARNING: Cloudflare challenge on page load — cannot proceed")
             return None, None, None, None
         _dismiss_dialogs(page)
         input_loc = page.locator(
             "input[placeholder*='B/L' i], input[placeholder*='Container' i], input.hal-input"
         ).first
         _submit(page, input_loc, bol)
+        # Results render in an SPA overlay — wait generously for them to appear
         try:
             page.wait_for_load_state("networkidle", timeout=20_000)
         except PlaywrightTimeout:
             pass
-        page.wait_for_timeout(2_000)
+        page.wait_for_timeout(5_000)
         title_after = page.title()
         print(f"    Results title: {title_after!r}")
+        if "just a moment" in title_after.lower() or "attention required" in title_after.lower():
+            print(f"    WARNING: Cloudflare challenge after submit — cannot scrape results")
+            return None, None, None, None
         eta, pickup, ret = _scrape_dates(page)
         status = "Returned to Port" if ret else "Released" if pickup else "Vessel" if eta else None
         return eta, pickup, ret, status
@@ -628,20 +632,25 @@ def run_one_line(browser, url, bol, container):
                 page.wait_for_timeout(1_000)
         except Exception:
             pass
-        # Wait for any input to appear (Headless UI may omit explicit type attr)
-        _INPUT_SEL = (
-            "input[type='text'], input[type='search'], "
-            "input:not([type='hidden']):not([type='checkbox']):not([type='radio']):not([type='submit']):not([type='button']), "
-            "[role='textbox']"
+        # Wait for the search input — use the stable data-testid when present,
+        # fall back to the known placeholder text
+        _ONE_SEL = (
+            "input[data-testid='tnt-search-multiple-placeholder'], "
+            "input[placeholder*='BL No' i], "
+            "input[placeholder*='Booking No' i], "
+            "input[placeholder*='B/L' i]"
         )
         try:
-            page.wait_for_selector(_INPUT_SEL, timeout=20_000)
+            page.wait_for_selector(_ONE_SEL, timeout=20_000)
         except PlaywrightTimeout:
             print(f"    WARNING: ONE Line form did not render in time")
             return None, None, None, None
         print(f"    Page title: {page.title()!r}")
-        input_loc = page.locator(_INPUT_SEL).first
-        _submit(page, input_loc, bol)
+        input_loc = page.locator(_ONE_SEL).first
+        # Use fill() + Enter directly — click() times out when a cookie overlay
+        # is present even after _dismiss_dialogs, because it intercepts pointer events
+        input_loc.fill(bol)
+        input_loc.press("Enter")
         try:
             page.wait_for_load_state("networkidle", timeout=20_000)
         except PlaywrightTimeout:
