@@ -343,184 +343,201 @@ SHIPMENTLINK_RETURN_STATUSES = [
 _CONTAINER_ID_RE = re.compile(r'\b[A-Z]{4}\d{7}\b', re.IGNORECASE)
 
 
+_SHIPMENTLINK_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/121.0.0.0 Safari/537.36"
+)
+
+
 def run_shipmentlink(browser, url, bol, container):
     """
     Shipmentlink (ct.shipmentlink.com) scraper.
+    Uses a real-browser User-Agent and retries once on timeout.
     """
-    page = browser.new_page()
-    try:
-        print(f"    Loading {url}")
-        page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_timeout(3_000)
-
+    for attempt in range(1, 3):
+        context = browser.new_context(user_agent=_SHIPMENTLINK_UA)
+        page = context.new_page()
         try:
-            if page.locator("#btn_cookie_accept_all").is_visible(timeout=2_000):
-                page.locator("#btn_cookie_accept_all").click()
-                page.wait_for_timeout(800)
-        except Exception:
-            pass
+            label = " (retry)" if attempt == 2 else ""
+            print(f"    Loading {url}{label}")
+            page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+            page.wait_for_timeout(3_000)
 
-        page.locator("#s_bl").check()
-        inp = page.locator("input#NO")
-        inp.fill(bol)
-        inp.press("Enter")
-        try:
-            page.wait_for_load_state("networkidle", timeout=20_000)
-        except PlaywrightTimeout:
-            pass
-        page.wait_for_timeout(3_000)
+            try:
+                if page.locator("#btn_cookie_accept_all").is_visible(timeout=2_000):
+                    page.locator("#btn_cookie_accept_all").click()
+                    page.wait_for_timeout(800)
+            except Exception:
+                pass
 
-        if bol not in page.inner_text("body"):
-            print(f"    WARNING: B/L {bol} not found in results page")
-            return None, None, None, None
+            page.locator("#s_bl").check()
+            inp = page.locator("input#NO")
+            inp.fill(bol)
+            inp.press("Enter")
+            try:
+                page.wait_for_load_state("networkidle", timeout=20_000)
+            except PlaywrightTimeout:
+                pass
+            page.wait_for_timeout(3_000)
 
-        try:
-            page.evaluate("getDispInfo('PickupRefTitle','PickupRefInfo')")
-            page.wait_for_function(
-                "document.getElementById('PickupRefInfo') && "
-                "document.getElementById('PickupRefInfo').innerText.trim().length > 0",
-                timeout=8_000,
-            )
-        except Exception:
-            pass
-        page.wait_for_timeout(1_500)
+            if bol not in page.inner_text("body"):
+                print(f"    WARNING: B/L {bol} not found in results page")
+                return None, None, None, None
 
-        try:
-            page.evaluate("getDispInfo('RlsStatusTitle','RlsStatusInfo')")
-            page.wait_for_function(
-                "document.getElementById('RlsStatusInfo') && "
-                "document.getElementById('RlsStatusInfo').innerText.trim().length > 0",
-                timeout=5_000,
-            )
-        except Exception:
-            pass
-        page.wait_for_timeout(1_000)
+            try:
+                page.evaluate("getDispInfo('PickupRefTitle','PickupRefInfo')")
+                page.wait_for_function(
+                    "document.getElementById('PickupRefInfo') && "
+                    "document.getElementById('PickupRefInfo').innerText.trim().length > 0",
+                    timeout=8_000,
+                )
+            except Exception:
+                pass
+            page.wait_for_timeout(1_500)
 
-        body_text = page.inner_text("body")
-        lines = [l.strip() for l in body_text.split("\n") if l.strip()]
-        container_upper = container.upper()
+            try:
+                page.evaluate("getDispInfo('RlsStatusTitle','RlsStatusInfo')")
+                page.wait_for_function(
+                    "document.getElementById('RlsStatusInfo') && "
+                    "document.getElementById('RlsStatusInfo').innerText.trim().length > 0",
+                    timeout=5_000,
+                )
+            except Exception:
+                pass
+            page.wait_for_timeout(1_000)
 
-        # ── ETA ──────────────────────────────────────────────────────────────
-        eta = None
-        eta_status_kw = None
-        for line in lines:
-            if container_upper in line.upper():
-                ll = line.lower()
-                for kw in SHIPMENTLINK_ETA_STATUSES:
-                    if kw in ll:
-                        m = DATE_RE.search(line)
-                        if m:
-                            eta = m.group(0)
-                            eta_status_kw = kw
-                            break
-            if eta:
-                break
+            body_text = page.inner_text("body")
+            lines = [l.strip() for l in body_text.split("\n") if l.strip()]
+            container_upper = container.upper()
 
-        # ── Pickup Date — popup scrape ────────────────────────────────────────
-        pickup = None
-        pickup_status_kw = None
-        popup_eta = None
-        popup_eta_kw = None
-        try:
-            cont_link = page.locator(f"a:has-text('{container_upper}')").first
-            if cont_link.is_visible(timeout=3_000):
-                with page.expect_popup(timeout=15_000) as popup_info:
-                    cont_link.click()
-                popup = popup_info.value
-                try:
-                    popup.wait_for_load_state("domcontentloaded", timeout=15_000)
-                    popup.wait_for_timeout(2_000)
-                    popup_lines = [
-                        l.strip()
-                        for l in popup.inner_text("body").split("\n")
-                        if l.strip()
-                    ]
-                    popup_matches = []
-                    for line in popup_lines:
-                        ll = line.lower()
-                        for kw in SHIPMENTLINK_PICKUP_STATUSES:
-                            if kw in ll:
-                                m = DATE_RE.search(line)
-                                if m:
-                                    popup_matches.append((m.group(0), kw))
+            # ── ETA ──────────────────────────────────────────────────────────────
+            eta = None
+            eta_status_kw = None
+            for line in lines:
+                if container_upper in line.upper():
+                    ll = line.lower()
+                    for kw in SHIPMENTLINK_ETA_STATUSES:
+                        if kw in ll:
+                            m = DATE_RE.search(line)
+                            if m:
+                                eta = m.group(0)
+                                eta_status_kw = kw
                                 break
-                    if popup_matches:
-                        pickup, pickup_status_kw = popup_matches[-1]
-                    print(f"    Popup pickup: {pickup!r}  (kw={pickup_status_kw!r})")
-
-                    popup_eta_matches = []
-                    for line in popup_lines:
-                        ll = line.lower()
-                        for kw in SHIPMENTLINK_ETA_STATUSES:
-                            if kw in ll:
-                                m = DATE_RE.search(line)
-                                if m:
-                                    popup_eta_matches.append((m.group(0), kw))
-                                break
-                    if popup_eta_matches:
-                        popup_eta, popup_eta_kw = popup_eta_matches[-1]
-                    print(f"    Popup ETA:    {popup_eta!r}  (kw={popup_eta_kw!r})")
-                finally:
-                    popup.close()
-            else:
-                print(f"    WARNING: container link not visible for {container_upper}")
-        except Exception as exc:
-            print(f"    WARNING: pickup popup scrape failed: {exc}")
-
-        if eta is None and popup_eta is not None:
-            eta = popup_eta
-            eta_status_kw = popup_eta_kw
-
-        # ── Return Date ───────────────────────────────────────────────────────
-        return_date = None
-        return_status_kw = None
-        for line in lines:
-            if container_upper in line.upper():
-                ll = line.lower()
-                for kw in SHIPMENTLINK_RETURN_STATUSES:
-                    if kw in ll:
-                        m = DATE_RE.search(line)
-                        if m:
-                            return_date = m.group(0)
-                            return_status_kw = kw
-                            break
-            if return_date:
-                break
-
-        # ── Rail transit detection ────────────────────────────────────────────
-        rail_detected = False
-        for line in lines:
-            if container_upper in line.upper():
-                ll = line.lower()
-                if any(kw in ll for kw in SHIPMENTLINK_RAIL_STATUSES):
-                    rail_detected = True
+                if eta:
                     break
 
-        # ── Status dropdown value ─────────────────────────────────────────────
-        if return_status_kw:
-            status = SHIPMENTLINK_STATUS_MAP.get(return_status_kw, "Returned to Port")
-        elif pickup_status_kw:
-            status = SHIPMENTLINK_STATUS_MAP.get(pickup_status_kw, "Released")
-        elif rail_detected:
-            status = "Rail"
-        elif eta_status_kw:
-            if eta_status_kw in SHIPMENTLINK_PRE_ARRIVAL_STATUSES:
-                status = "Vessel"
+            # ── Pickup Date — popup scrape ────────────────────────────────────────
+            pickup = None
+            pickup_status_kw = None
+            popup_eta = None
+            popup_eta_kw = None
+            try:
+                cont_link = page.locator(f"a:has-text('{container_upper}')").first
+                if cont_link.is_visible(timeout=3_000):
+                    with page.expect_popup(timeout=15_000) as popup_info:
+                        cont_link.click()
+                    popup = popup_info.value
+                    try:
+                        popup.wait_for_load_state("domcontentloaded", timeout=15_000)
+                        popup.wait_for_timeout(2_000)
+                        popup_lines = [
+                            l.strip()
+                            for l in popup.inner_text("body").split("\n")
+                            if l.strip()
+                        ]
+                        popup_matches = []
+                        for line in popup_lines:
+                            ll = line.lower()
+                            for kw in SHIPMENTLINK_PICKUP_STATUSES:
+                                if kw in ll:
+                                    m = DATE_RE.search(line)
+                                    if m:
+                                        popup_matches.append((m.group(0), kw))
+                                    break
+                        if popup_matches:
+                            pickup, pickup_status_kw = popup_matches[-1]
+                        print(f"    Popup pickup: {pickup!r}  (kw={pickup_status_kw!r})")
+
+                        popup_eta_matches = []
+                        for line in popup_lines:
+                            ll = line.lower()
+                            for kw in SHIPMENTLINK_ETA_STATUSES:
+                                if kw in ll:
+                                    m = DATE_RE.search(line)
+                                    if m:
+                                        popup_eta_matches.append((m.group(0), kw))
+                                    break
+                        if popup_eta_matches:
+                            popup_eta, popup_eta_kw = popup_eta_matches[-1]
+                        print(f"    Popup ETA:    {popup_eta!r}  (kw={popup_eta_kw!r})")
+                    finally:
+                        popup.close()
+                else:
+                    print(f"    WARNING: container link not visible for {container_upper}")
+            except Exception as exc:
+                print(f"    WARNING: pickup popup scrape failed: {exc}")
+
+            if eta is None and popup_eta is not None:
+                eta = popup_eta
+                eta_status_kw = popup_eta_kw
+
+            # ── Return Date ───────────────────────────────────────────────────────
+            return_date = None
+            return_status_kw = None
+            for line in lines:
+                if container_upper in line.upper():
+                    ll = line.lower()
+                    for kw in SHIPMENTLINK_RETURN_STATUSES:
+                        if kw in ll:
+                            m = DATE_RE.search(line)
+                            if m:
+                                return_date = m.group(0)
+                                return_status_kw = kw
+                                break
+                if return_date:
+                    break
+
+            # ── Rail transit detection ────────────────────────────────────────────
+            rail_detected = False
+            for line in lines:
+                if container_upper in line.upper():
+                    ll = line.lower()
+                    if any(kw in ll for kw in SHIPMENTLINK_RAIL_STATUSES):
+                        rail_detected = True
+                        break
+
+            # ── Status dropdown value ─────────────────────────────────────────────
+            if return_status_kw:
+                status = SHIPMENTLINK_STATUS_MAP.get(return_status_kw, "Returned to Port")
+            elif pickup_status_kw:
+                status = SHIPMENTLINK_STATUS_MAP.get(pickup_status_kw, "Released")
+            elif rail_detected:
+                status = "Rail"
+            elif eta_status_kw:
+                if eta_status_kw in SHIPMENTLINK_PRE_ARRIVAL_STATUSES:
+                    status = "Vessel"
+                else:
+                    status = SHIPMENTLINK_STATUS_MAP.get(eta_status_kw, "Vessel Arrived")
             else:
-                status = SHIPMENTLINK_STATUS_MAP.get(eta_status_kw, "Vessel Arrived")
-        else:
-            status = None
+                status = None
 
-        return eta, pickup, return_date, status
+            return eta, pickup, return_date, status
 
-    except PlaywrightTimeout as exc:
-        print(f"    TIMEOUT: {exc}")
-        return None, None, None, None
-    except Exception as exc:
-        print(f"    ERROR: {exc}")
-        return None, None, None, None
-    finally:
-        page.close()
+        except PlaywrightTimeout as exc:
+            print(f"    TIMEOUT: {exc}")
+            if attempt < 2:
+                print(f"    Retrying once more...")
+            else:
+                return None, None, None, None
+        except Exception as exc:
+            print(f"    ERROR: {exc}")
+            return None, None, None, None
+        finally:
+            page.close()
+            context.close()
+
+    return None, None, None, None
 
 
 # ─────────────────────────────────────────────
