@@ -825,7 +825,7 @@ def main():
             headless=True,
             proxy={
                 "server":   "http://pr.oxylabs.io:7777",
-                "username": "CSLogix_raNhv",
+                "username": "customer-CSLogix_raNhv-cc-US",
                 "password": "MFDoom113+12",
             },
         )
