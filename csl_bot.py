@@ -541,13 +541,125 @@ def run_shipmentlink(browser, url, bol, container):
 
 
 # ─────────────────────────────────────────────
+# Hapag-Lloyd scraper
+# ─────────────────────────────────────────────
+
+def run_hapag_lloyd(browser, url, bol, container):
+    """
+    Hapag-Lloyd (hapag-lloyd.com) scraper.
+    The site is Next.js/React — waits for hydration before looking for the input.
+    """
+    context = browser.new_context(user_agent=_SHIPMENTLINK_UA)
+    page = context.new_page()
+    try:
+        print(f"    Loading {url}")
+        page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        # Wait for React to render the tracking input
+        try:
+            page.wait_for_selector(
+                "input[placeholder*='B/L' i], input[placeholder*='Container' i], input.hal-input",
+                timeout=20_000,
+            )
+        except PlaywrightTimeout:
+            print(f"    WARNING: Hapag-Lloyd form did not render in time")
+            return None, None, None, None
+        _dismiss_dialogs(page)
+        input_loc = page.locator(
+            "input[placeholder*='B/L' i], input[placeholder*='Container' i], input.hal-input"
+        ).first
+        _submit(page, input_loc, bol)
+        try:
+            page.wait_for_load_state("networkidle", timeout=20_000)
+        except PlaywrightTimeout:
+            pass
+        page.wait_for_timeout(2_000)
+        eta, pickup, ret = _scrape_dates(page)
+        status = "Returned to Port" if ret else "Released" if pickup else "Vessel" if eta else None
+        return eta, pickup, ret, status
+    except PlaywrightTimeout as exc:
+        print(f"    TIMEOUT: {exc}")
+        return None, None, None, None
+    except Exception as exc:
+        print(f"    ERROR: {exc}")
+        return None, None, None, None
+    finally:
+        page.close()
+        context.close()
+
+
+# ─────────────────────────────────────────────
+# ONE Line scraper
+# ─────────────────────────────────────────────
+
+def run_one_line(browser, url, bol, container):
+    """
+    ONE Line (one-line.com) scraper.
+    The site is Next.js/React with a tabbed search form — clicks the BL/Booking
+    tab before filling the input.
+    """
+    context = browser.new_context(user_agent=_SHIPMENTLINK_UA)
+    page = context.new_page()
+    try:
+        print(f"    Loading {url}")
+        page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        # Wait for React to hydrate the search form
+        try:
+            page.wait_for_load_state("networkidle", timeout=20_000)
+        except PlaywrightTimeout:
+            pass
+        page.wait_for_timeout(3_000)
+        _dismiss_dialogs(page)
+        # Click the BL / Booking No. search tab
+        try:
+            bl_tab = page.locator(
+                "button:has-text('BL'), [role='tab']:has-text('BL'), "
+                "button:has-text('B/L'), button:has-text('Booking')"
+            ).first
+            if bl_tab.is_visible(timeout=5_000):
+                bl_tab.click()
+                page.wait_for_timeout(1_000)
+        except Exception:
+            pass
+        # Wait for the text input to appear and submit
+        try:
+            page.wait_for_selector("input[type='text'], input[type='search']", timeout=10_000)
+        except PlaywrightTimeout:
+            print(f"    WARNING: ONE Line form did not render in time")
+            return None, None, None, None
+        input_loc = page.locator("input[type='text'], input[type='search']").first
+        _submit(page, input_loc, bol)
+        try:
+            page.wait_for_load_state("networkidle", timeout=20_000)
+        except PlaywrightTimeout:
+            pass
+        page.wait_for_timeout(3_000)
+        eta, pickup, ret = _scrape_dates(page)
+        status = "Returned to Port" if ret else "Released" if pickup else "Vessel" if eta else None
+        return eta, pickup, ret, status
+    except PlaywrightTimeout as exc:
+        print(f"    TIMEOUT: {exc}")
+        return None, None, None, None
+    except Exception as exc:
+        print(f"    ERROR: {exc}")
+        return None, None, None, None
+    finally:
+        page.close()
+        context.close()
+
+
+# ─────────────────────────────────────────────
 # Workflow dispatcher
 # ─────────────────────────────────────────────
 
 def dray_import_workflow(browser, ws, sheet_row, url, bol, container):
     print(f"\n  [Dray Import] row {sheet_row} — Container: {container}  BOL: {bol}")
-    if url and "shipmentlink.com" in url.lower():
+    url_lower = url.lower() if url else ""
+    if "shipmentlink.com" in url_lower:
         eta, pickup, ret, status = run_shipmentlink(browser, url, bol, container)
+    elif "hapag-lloyd.com" in url_lower:
+        eta, pickup, ret, status = run_hapag_lloyd(browser, url, bol, container)
+    elif "one-line.com" in url_lower:
+        eta, pickup, ret, status = run_one_line(browser, url, bol, container)
     else:
         eta, pickup, ret, status = run_dray_import(browser, url, bol)
     print(f"    ETA={eta!r}  Pickup={pickup!r}  Return={ret!r}  Status={status!r}")
