@@ -342,6 +342,7 @@ def get_ftl_rows(creds, gc, tab_name: str):
             "existing_delivery": existing_delivery,
             "existing_status":   existing_status,
             "existing_notes":    existing_notes,
+            "row_data":          list(row),
         })
 
     return ws, ftl_rows
@@ -393,6 +394,31 @@ def mark_sent(sent: dict, key: str, status: str):
 
 
 # ── Email notification ───────────────────────────────────────────────────────────
+def _send_email(to_email: str, cc_email: str | None, subject: str, body: str):
+    """Send a plain-text email via Office 365 SMTP/STARTTLS."""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = SMTP_USER
+    msg["To"]      = to_email
+    if cc_email and cc_email != to_email:
+        msg["Cc"] = cc_email
+    msg.attach(MIMEText(body, "plain"))
+
+    recipients = [to_email]
+    if cc_email and cc_email != to_email:
+        recipients.append(cc_email)
+
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(SMTP_USER, SMTP_PASSWORD)
+            smtp.sendmail(SMTP_USER, recipients, msg.as_string())
+        print(f"    Email sent → {to_email}  (cc: {cc_email or 'none'})")
+    except Exception as exc:
+        print(f"    WARNING: Email failed: {exc}")
+
+
 def send_ftl_email(efj: str, load_num: str, status: str, tab_name: str, account_lookup: dict):
     """Send an FTL status alert email routed to the rep for this account tab."""
     info      = account_lookup.get(tab_name, {})
@@ -438,6 +464,122 @@ def send_ftl_email(efj: str, load_num: str, status: str, tab_name: str, account_
         print(f"    Email sent → {to_email}: {subject}")
     except Exception as exc:
         print(f"    WARNING: Email failed: {exc}")
+
+
+# ── Archive helpers ──────────────────────────────────────────────────────────────
+def _ftl_completed_tab_for(tab_name: str, account_lookup: dict) -> str | None:
+    """Return 'Completed Eli', 'Completed Radka', or None based on rep name."""
+    rep_name = account_lookup.get(tab_name, {}).get("rep", "")
+    rl = rep_name.lower()
+    if "eli" in rl:
+        return "Completed Eli"
+    if "radka" in rl:
+        return "Completed Radka"
+    return None
+
+
+def archive_ftl_row(gc, tab_name: str, sheet_row: int, row_data: list,
+                    url: str, efj: str, load_num: str,
+                    pickup_val: str, delivery_val: str, notes_val: str,
+                    account_lookup: dict) -> bool:
+    """
+    Copy a Delivered FTL row to the rep's Completed tab, then delete it.
+    Performs a duplicate EFJ# check before appending.
+    Sends an archive email to the rep, or writes a note to Col O if no email.
+    Returns True on success, False on skip or failure.
+    """
+    rep_info  = account_lookup.get(tab_name, {})
+    rep_name  = rep_info.get("rep", "unknown")
+    rep_email = rep_info.get("email", "")
+    dest_tab  = _ftl_completed_tab_for(tab_name, account_lookup)
+
+    # ── No completed tab — write note to Col O on source tab, bail ───────────
+    if not dest_tab:
+        note = f"No completed tab for rep '{rep_name}' — manual archive needed"
+        print(f"  WARNING: {note} (account '{tab_name}', row {sheet_row})")
+        try:
+            ws = gc.open_by_key(SHEET_ID).worksheet(tab_name)
+            ws.update_cell(sheet_row, GCOL_NOTES, note)
+        except Exception as exc:
+            print(f"  WARNING: Could not write fallback note: {exc}")
+        return False
+
+    try:
+        dest_ws = gc.open_by_key(SHEET_ID).worksheet(dest_tab)
+    except Exception as exc:
+        print(f"  WARNING: Could not open '{dest_tab}': {exc}")
+        return False
+
+    # ── Duplicate check — skip if EFJ# already in completed tab ──────────────
+    if efj:
+        try:
+            existing_efjs = dest_ws.col_values(1)  # Col A
+            if efj in existing_efjs:
+                dup_note = (f"WARNING: EFJ# {efj} already in '{dest_tab}' "
+                            f"— archive skipped")
+                print(f"  {dup_note}")
+                try:
+                    ws = gc.open_by_key(SHEET_ID).worksheet(tab_name)
+                    ws.update_cell(sheet_row, GCOL_NOTES, dup_note)
+                except Exception:
+                    pass
+                return False
+        except Exception as exc:
+            print(f"  WARNING: Duplicate EFJ# check failed: {exc}")
+
+    # ── Build archive row — patch with freshly written values ────────────────
+    timestamp = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
+    row = list(row_data)
+    while len(row) < GCOL_NOTES:
+        row.append("")
+    row[COL_PICKUP_R]   = pickup_val   or ""
+    row[COL_DELIVERY_R] = delivery_val or ""
+    row[COL_STATUS_R]   = "Delivered"
+    # Col O: notes + timestamp if emailing, fallback note otherwise
+    if rep_email:
+        row[COL_NOTES_R] = notes_val or timestamp
+    else:
+        row[COL_NOTES_R] = "No rep email found — alert not sent"
+
+    # Reconstruct Col C as =HYPERLINK so the link is preserved
+    if url and len(row) > COL_TRACKING:
+        display      = (row_data[COL_LOAD] if len(row_data) > COL_LOAD else "") or ""
+        safe_url     = url.replace('"', '%22')
+        safe_display = str(display).replace('"', "'")
+        row[COL_TRACKING] = f'=HYPERLINK("{safe_url}","{safe_display}")'
+
+    # ── Append to completed tab ───────────────────────────────────────────────
+    try:
+        dest_ws.append_row(row, value_input_option="USER_ENTERED")
+        print(f"  Archived FTL row {sheet_row} ({efj}|{load_num}) → '{dest_tab}'")
+    except Exception as exc:
+        print(f"  WARNING: Archive append failed for row {sheet_row}: {exc}")
+        return False
+
+    # ── Send archive email ────────────────────────────────────────────────────
+    if rep_email:
+        subject = f"CSL Archived | {efj} | {load_num} | Delivered"
+        body = (
+            f"FTL load {load_num} (EFJ# {efj}) has been archived.\n\n"
+            f"Account:  {tab_name}\n"
+            f"Rep:      {rep_name}\n\n"
+            f"Pickup:   {pickup_val or '—'}\n"
+            f"Delivery: {delivery_val or '—'}\n"
+            f"Status:   Delivered\n"
+            f"Archived: {timestamp}\n"
+        )
+        _send_email(rep_email, EMAIL_CC, subject, body)
+
+    # ── Delete from source tab ────────────────────────────────────────────────
+    try:
+        ws = gc.open_by_key(SHEET_ID).worksheet(tab_name)
+        ws.delete_rows(sheet_row)
+        print(f"  Deleted FTL row {sheet_row} from '{tab_name}'")
+    except Exception as exc:
+        print(f"  WARNING: Delete failed for row {sheet_row} in '{tab_name}': {exc}")
+        return False
+
+    return True
 
 
 # ── One-time cleanup ─────────────────────────────────────────────────────────────
@@ -578,6 +720,8 @@ def run_once(account_lookup: dict):
 
             print(f"  Found {len(ftl_rows)} FTL row(s)")
 
+            archive_jobs_ftl = []
+
             for row in ftl_rows:
                 key = row["key"]
                 print(f"  → {key}")
@@ -603,8 +747,11 @@ def run_once(account_lookup: dict):
                             f"on row {row['sheet_row']}"
                         )
 
-                sheet_updates = []
-                note_parts    = []
+                sheet_updates  = []
+                note_parts     = []
+                final_pickup   = row["existing_pickup"]
+                final_delivery = row["existing_delivery"]
+                final_notes    = row["existing_notes"]
 
                 if stop1_date and not row["existing_pickup"]:
                     k_val = stop1_planned if stop1_planned else stop1_date
@@ -612,6 +759,7 @@ def run_once(account_lookup: dict):
                         {"range": f"K{row['sheet_row']}", "values": [[k_val]]}
                     )
                     note_parts.append(f"Pickup {k_val}")
+                    final_pickup = k_val
                     print(f"    Writing Stop 1 → K{row['sheet_row']} = {k_val!r}")
                 elif stop1_date and row["existing_pickup"]:
                     print(f"    K{row['sheet_row']} already has {row['existing_pickup']!r} — not overwriting")
@@ -622,6 +770,7 @@ def run_once(account_lookup: dict):
                         {"range": f"L{row['sheet_row']}", "values": [[l_val]]}
                     )
                     note_parts.append(f"Delivery {l_val}")
+                    final_delivery = l_val
                     print(f"    Writing Stop 2 → L{row['sheet_row']} = {l_val!r}")
                 elif stop2_date and row["existing_delivery"]:
                     print(f"    L{row['sheet_row']} already has {row['existing_delivery']!r} — not overwriting")
@@ -640,6 +789,7 @@ def run_once(account_lookup: dict):
                     sheet_updates.append(
                         {"range": f"O{row['sheet_row']}", "values": [[note]]}
                     )
+                    final_notes = note
                     try:
                         ws.batch_update(sheet_updates, value_input_option="RAW")
                         print(f"    Sheet updated — note → O{row['sheet_row']}")
@@ -655,6 +805,30 @@ def run_once(account_lookup: dict):
                 else:
                     send_ftl_email(row["efj"], row["load_num"], status, tab_name, account_lookup)
                     mark_sent(sent, key, status)
+
+                # Queue for archiving after all rows processed
+                if status == "Delivered":
+                    archive_jobs_ftl.append({
+                        "sheet_row":    row["sheet_row"],
+                        "row_data":     row["row_data"],
+                        "url":          row["url"],
+                        "efj":          row["efj"],
+                        "load_num":     row["load_num"],
+                        "pickup_val":   final_pickup,
+                        "delivery_val": final_delivery,
+                        "notes_val":    final_notes,
+                    })
+
+            # ── Archive delivered rows bottom-to-top to keep row numbers valid ─
+            if archive_jobs_ftl:
+                print(f"\n  Archiving {len(archive_jobs_ftl)} delivered FTL row(s)...")
+                for aj in sorted(archive_jobs_ftl, key=lambda j: j["sheet_row"], reverse=True):
+                    archive_ftl_row(
+                        gc, tab_name, aj["sheet_row"], aj["row_data"],
+                        aj["url"], aj["efj"], aj["load_num"],
+                        aj["pickup_val"], aj["delivery_val"], aj["notes_val"],
+                        account_lookup,
+                    )
 
         browser.close()
 

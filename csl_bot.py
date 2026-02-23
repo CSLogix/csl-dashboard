@@ -681,16 +681,26 @@ def archive_completed_row(sheet, tab_name, sheet_row, row_data, url, eta, pickup
                           return_date, status, account_lookup):
     """
     Copy the row to the rep's Completed tab, then delete it from the account tab.
-    row_data is the original display values; we patch in the freshly written
-    tracking fields before copying so the archive has current data.
-    Returns True on full success, False on any failure (row is not deleted if
-    the append failed, to avoid data loss).
+    Performs a duplicate EFJ# check before appending.
+    Sends an archive email to the rep, or writes a note to Col O if no email found.
+    Returns True on full success, False on any failure or skip.
     """
-    dest_tab = _completed_tab_for(tab_name, account_lookup)
+    rep_info  = account_lookup.get(tab_name, {})
+    rep_name  = rep_info.get("rep", "unknown")
+    rep_email = rep_info.get("email", "")
+    dest_tab  = _completed_tab_for(tab_name, account_lookup)
+    efj_num   = (row_data[0].strip() if row_data else "") or ""
+    container = (row_data[2].strip() if len(row_data) > 2 else "") or ""
+
+    # ── No completed tab — write note to Col O on source tab, bail ───────────
     if not dest_tab:
-        rep = account_lookup.get(tab_name, {}).get("rep", "unknown")
-        print(f"  WARNING: No completed tab for rep '{rep}' (account '{tab_name}') "
-              f"— row {sheet_row} not archived")
+        note = f"No completed tab for rep '{rep_name}' — manual archive needed"
+        print(f"  WARNING: {note} (account '{tab_name}', row {sheet_row})")
+        try:
+            src_ws = sheet.worksheet(tab_name)
+            src_ws.update_cell(sheet_row, COL_TIMESTAMP, note)
+        except Exception as exc:
+            print(f"  WARNING: Could not write fallback note to Col O: {exc}")
         return False
 
     try:
@@ -699,26 +709,47 @@ def archive_completed_row(sheet, tab_name, sheet_row, row_data, url, eta, pickup
         print(f"  WARNING: Could not open '{dest_tab}': {exc}")
         return False
 
-    # Build archive row — patch tracking columns with current values
+    # ── Duplicate check — skip if EFJ# already in completed tab ──────────────
+    if efj_num:
+        try:
+            existing_efjs = dest_ws.col_values(1)  # Col A
+            if efj_num in existing_efjs:
+                dup_note = (f"WARNING: EFJ# {efj_num} already in '{dest_tab}' "
+                            f"— archive skipped")
+                print(f"  {dup_note}")
+                try:
+                    src_ws = sheet.worksheet(tab_name)
+                    src_ws.update_cell(sheet_row, COL_TIMESTAMP, dup_note)
+                except Exception:
+                    pass
+                return False
+        except Exception as exc:
+            print(f"  WARNING: Duplicate EFJ# check failed: {exc}")
+
+    # ── Build archive row — patch tracking columns with current values ────────
     timestamp = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
     row = list(row_data)
-    # Pad so index assignments don't go out of range
     max_col = max(COL_ETA, COL_PICKUP, COL_RETURN, COL_STATUS, COL_TIMESTAMP)
     while len(row) < max_col:
         row.append("")
-    row[COL_ETA - 1]       = eta          or ""
-    row[COL_PICKUP - 1]    = pickup       or ""
-    row[COL_RETURN - 1]    = return_date  or ""
-    row[COL_STATUS - 1]    = status       or ""
-    row[COL_TIMESTAMP - 1] = timestamp
+    row[COL_ETA - 1]    = eta         or ""
+    row[COL_PICKUP - 1] = pickup      or ""
+    row[COL_RETURN - 1] = return_date or ""
+    row[COL_STATUS - 1] = status      or ""
+    # Col O: timestamp if we have an email to send, fallback note otherwise
+    if rep_email:
+        row[COL_TIMESTAMP - 1] = timestamp
+    else:
+        row[COL_TIMESTAMP - 1] = "No rep email found — alert not sent"
 
     # Reconstruct Col C as =HYPERLINK formula so the link is preserved
     if url and len(row) > 2:
-        display = row[2] or ""
+        display      = row[2] or ""
         safe_url     = url.replace('"', '%22')
         safe_display = display.replace('"', "'")
         row[2] = f'=HYPERLINK("{safe_url}","{safe_display}")'
 
+    # ── Append to completed tab ───────────────────────────────────────────────
     try:
         dest_ws.append_row(row, value_input_option="USER_ENTERED")
         print(f"  Archived row {sheet_row} → '{dest_tab}'")
@@ -726,6 +757,22 @@ def archive_completed_row(sheet, tab_name, sheet_row, row_data, url, eta, pickup
         print(f"  WARNING: Archive append failed for row {sheet_row}: {exc}")
         return False
 
+    # ── Send archive email ────────────────────────────────────────────────────
+    if rep_email:
+        subject = f"CSL Archived | {efj_num} | {container} | Returned to Port"
+        body = (
+            f"Container {container} (EFJ# {efj_num}) has been archived.\n\n"
+            f"Account:  {tab_name}\n"
+            f"Rep:      {rep_name}\n\n"
+            f"ETA:      {eta or '—'}\n"
+            f"Pickup:   {pickup or '—'}\n"
+            f"Returned: {return_date or '—'}\n"
+            f"Status:   {status}\n"
+            f"Archived: {timestamp}\n"
+        )
+        _send_email(rep_email, EMAIL_CC, subject, body)
+
+    # ── Delete from source tab ────────────────────────────────────────────────
     try:
         src_ws = sheet.worksheet(tab_name)
         src_ws.delete_rows(sheet_row)
