@@ -563,6 +563,12 @@ def run_hapag_lloyd(browser, url, bol, container):
         except PlaywrightTimeout:
             print(f"    WARNING: Hapag-Lloyd form did not render in time")
             return None, None, None, None
+        # Confirm we're on the real Hapag-Lloyd page, not a Cloudflare challenge
+        title = page.title()
+        print(f"    Page title: {title!r}")
+        if "just a moment" in title.lower() or "attention required" in title.lower():
+            print(f"    WARNING: Cloudflare challenge detected — cannot proceed")
+            return None, None, None, None
         _dismiss_dialogs(page)
         input_loc = page.locator(
             "input[placeholder*='B/L' i], input[placeholder*='Container' i], input.hal-input"
@@ -573,6 +579,8 @@ def run_hapag_lloyd(browser, url, bol, container):
         except PlaywrightTimeout:
             pass
         page.wait_for_timeout(2_000)
+        title_after = page.title()
+        print(f"    Results title: {title_after!r}")
         eta, pickup, ret = _scrape_dates(page)
         status = "Returned to Port" if ret else "Released" if pickup else "Vessel" if eta else None
         return eta, pickup, ret, status
@@ -620,13 +628,19 @@ def run_one_line(browser, url, bol, container):
                 page.wait_for_timeout(1_000)
         except Exception:
             pass
-        # Wait for the text input to appear and submit
+        # Wait for any input to appear (Headless UI may omit explicit type attr)
+        _INPUT_SEL = (
+            "input[type='text'], input[type='search'], "
+            "input:not([type='hidden']):not([type='checkbox']):not([type='radio']):not([type='submit']):not([type='button']), "
+            "[role='textbox']"
+        )
         try:
-            page.wait_for_selector("input[type='text'], input[type='search']", timeout=10_000)
+            page.wait_for_selector(_INPUT_SEL, timeout=20_000)
         except PlaywrightTimeout:
             print(f"    WARNING: ONE Line form did not render in time")
             return None, None, None, None
-        input_loc = page.locator("input[type='text'], input[type='search']").first
+        print(f"    Page title: {page.title()!r}")
+        input_loc = page.locator(_INPUT_SEL).first
         _submit(page, input_loc, bol)
         try:
             page.wait_for_load_state("networkidle", timeout=20_000)
