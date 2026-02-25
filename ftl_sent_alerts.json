@@ -1,4 +1,10 @@
 {
+  "EFJ106767|EGSU1128841": [
+    "Delivered"
+  ],
+  "EFJ106758|GAOU7258106": [
+    "Delivered"
+  ],
   "EFJ106759|EITU9455257": [
     "Delivered"
   ],
@@ -29,10 +35,45 @@
   "EFJ106964|NAM8324557": [
     "Delivered"
   ],
-  "EFJ106767|EGSU1128841": [
+  "EFJ106935|NAM8324557": [
     "Delivered"
   ],
-  "EFJ106758|GAOU7258106": [
-    "Delivered"
+  "BSTT-022426P|EFJ107092": [
+    "Departed Delivery",
+    "Arrived at Delivery"
+  ],
+  "BSTT-022426P|EFJ107095": [
+    "Departed Delivery",
+    "Arrived at Delivery"
+  ],
+  "BSTT-022426P|EFJ107099": [
+    "Departed Delivery",
+    "Arrived at Delivery"
+  ],
+  "BSTT-022426P|EFJ107100": [
+    "Departed Delivery",
+    "Arrived at Delivery"
+  ],
+  "BSTT-022426P|EFJ107101": [
+    "Departed Delivery",
+    "Arrived at Delivery"
+  ],
+  "BSTT-022426P|EFJ107102": [
+    "Departed Delivery",
+    "Arrived at Delivery"
+  ],
+  "BSTT-022426P|EFJ107103": [
+    "Departed Delivery",
+    "Arrived at Delivery"
+  ],
+  "BSTT-022426P|EFJ107104": [
+    "Departed Delivery",
+    "Arrived at Delivery"
+  ],
+  "pro_alert:EShipping:MATU2083360:MATU2083360": "2026-02-25",
+  "pro_alert:EShipping:MATU2118106:MATU2118106": "2026-02-25",
+  "EFJ106936|NAM8324557": [
+    "Departed Delivery",
+    "Arrived at Delivery"
   ]
 }
