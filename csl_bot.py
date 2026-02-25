@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from playwright_stealth import stealth
 
 SHEET_ID         = "19MB5HmmWwsVXY_nADCYYLJL-zWXYt8yWrfeRBSfB2S0"
 CREDENTIALS_FILE = "/root/csl-credentials.json"
@@ -18,10 +19,10 @@ STATUS_FILTER    = "Tracking Waiting for Update"
 LAST_CHECK_FILE  = "/root/csl-bot/last_check.json"
 
 # ── SMTP / email ────────────────────────────────────────────────────────────────
-SMTP_HOST      = "smtp.office365.com"
+SMTP_HOST      = "smtp.gmail.com"
 SMTP_PORT      = 587
-SMTP_USER      = "efj-operations@evansdelivery.com"
-SMTP_PASSWORD  = "9rWWcm-9kEbs"
+SMTP_USER      = "jfeltzjr@gmail.com"
+SMTP_PASSWORD  = "birxmwdoafjxhfdh"
 EMAIL_CC       = "efj-operations@evansdelivery.com"
 EMAIL_FALLBACK = "efj-operations@evansdelivery.com"
 
@@ -545,49 +546,73 @@ def run_shipmentlink(browser, url, bol, container):
 # ─────────────────────────────────────────────
 
 def run_hapag_lloyd(browser, url, bol, container):
-    """
-    Hapag-Lloyd (hapag-lloyd.com) scraper.
-    The site is Next.js/React — waits for hydration before looking for the input.
-    """
     context = browser.new_context(user_agent=_SHIPMENTLINK_UA)
     page = context.new_page()
     try:
-        print(f"    Loading {url}")
-        page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-        # Wait for React to render the tracking input
-        try:
-            page.wait_for_selector(
-                "input[placeholder*='B/L' i], input[placeholder*='Container' i], input.hal-input",
-                timeout=20_000,
-            )
-        except PlaywrightTimeout:
-            print(f"    WARNING: Hapag-Lloyd form did not render in time")
-            return None, None, None, None
-        # Confirm we're on the real Hapag-Lloyd page, not a Cloudflare challenge
-        title = page.title()
-        print(f"    Page title: {title!r}")
-        if "just a moment" in title.lower() or "attention required" in title.lower():
-            print(f"    WARNING: Cloudflare challenge on page load — cannot proceed")
-            return None, None, None, None
-        _dismiss_dialogs(page)
-        input_loc = page.locator(
-            "input[placeholder*='B/L' i], input[placeholder*='Container' i], input.hal-input"
-        ).first
-        _submit(page, input_loc, bol)
-        # Results render in an SPA overlay — wait generously for them to appear
+        direct_url = f"https://www.hapag-lloyd.com/en/online-business/track/track-by-booking-solution.html?blno={bol}"
+        print(f"    Loading {direct_url}")
+        page.goto(direct_url, wait_until="domcontentloaded", timeout=60_000)
         try:
             page.wait_for_load_state("networkidle", timeout=20_000)
         except PlaywrightTimeout:
             pass
-        page.wait_for_timeout(5_000)
-        title_after = page.title()
-        print(f"    Results title: {title_after!r}")
-        if "just a moment" in title_after.lower() or "attention required" in title_after.lower():
-            print(f"    WARNING: Cloudflare challenge after submit — cannot scrape results")
+        page.wait_for_timeout(4_000)
+        title = page.title()
+        print(f"    Page title: {title!r}")
+        if "just a moment" in title.lower() or "attention required" in title.lower():
+            print(f"    WARNING: Cloudflare challenge")
             return None, None, None, None
-        eta, pickup, ret = _scrape_dates(page)
-        status = "Returned to Port" if ret else "Released" if pickup else "Vessel" if eta else None
-        return eta, pickup, ret, status
+        _dismiss_dialogs(page)
+        try:
+            result_row = page.locator("table tbody tr:first-child").first
+            if result_row.is_visible(timeout=5_000):
+                result_row.click()
+                page.wait_for_timeout(1_500)
+        except Exception:
+            pass
+        try:
+            details_btn = page.locator("button:has-text('Details'), a:has-text('Details')").first
+            if details_btn.is_visible(timeout=5_000):
+                details_btn.click()
+                try:
+                    page.wait_for_load_state("networkidle", timeout=15_000)
+                except PlaywrightTimeout:
+                    pass
+                page.wait_for_timeout(3_000)
+        except Exception:
+            pass
+        body_text = page.inner_text("body")
+        lines = [l.strip() for l in body_text.split("\n") if l.strip()]
+        eta = None
+        discharged = None
+        pickup = None
+        ret = None
+        for i, line in enumerate(lines):
+            ll = line.lower()
+            if "vessel arrival" in ll:
+                ctx = " ".join(lines[i:i+3])
+                m = DATE_RE.search(ctx)
+                if m: eta = m.group(0)
+            if "discharg" in ll:
+                ctx = " ".join(lines[i:i+3])
+                m = DATE_RE.search(ctx)
+                if m: discharged = m.group(0)
+            if any(kw in ll for kw in ["gate out","full out","merchant haulage","pick-up"]):
+                ctx = " ".join(lines[i:i+3])
+                m = DATE_RE.search(ctx)
+                if m and not pickup: pickup = m.group(0)
+            if any(kw in ll for kw in ["empty return","empty in","gate in empty"]):
+                ctx = " ".join(lines[i:i+3])
+                m = DATE_RE.search(ctx)
+                if m and not ret: ret = m.group(0)
+        final_eta = discharged or eta
+        if ret: status = "Returned to Port"
+        elif pickup: status = "Released"
+        elif discharged: status = "Discharged"
+        elif final_eta: status = "Vessel"
+        else: status = None
+        print(f"    Hapag result: eta={final_eta!r} pickup={pickup!r} ret={ret!r} status={status!r}")
+        return final_eta, pickup, ret, status
     except PlaywrightTimeout as exc:
         print(f"    TIMEOUT: {exc}")
         return None, None, None, None
@@ -598,48 +623,27 @@ def run_hapag_lloyd(browser, url, bol, container):
         page.close()
         context.close()
 
-
-# ─────────────────────────────────────────────
-# ONE Line scraper
-# ─────────────────────────────────────────────
-
 def run_one_line(browser, url, bol, container):
-    """
-    ONE Line (one-line.com) scraper.
-    The site is Next.js/React with a tabbed search form — clicks the BL/Booking
-    tab before filling the input.
-    """
     context = browser.new_context(user_agent=_SHIPMENTLINK_UA)
     page = context.new_page()
     try:
         print(f"    Loading {url}")
         page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-        # Wait for React to hydrate the search form
         try:
             page.wait_for_load_state("networkidle", timeout=20_000)
         except PlaywrightTimeout:
             pass
         page.wait_for_timeout(3_000)
         _dismiss_dialogs(page)
-        # Click the BL / Booking No. search tab
         try:
-            bl_tab = page.locator(
-                "button:has-text('BL'), [role='tab']:has-text('BL'), "
-                "button:has-text('B/L'), button:has-text('Booking')"
-            ).first
+            bl_tab = page.locator("button:has-text('BL'), button:has-text('B/L'), button:has-text('Booking')").first
             if bl_tab.is_visible(timeout=5_000):
                 bl_tab.click()
                 page.wait_for_timeout(1_000)
         except Exception:
             pass
-        # Wait for the search input — use the stable data-testid when present,
-        # fall back to the known placeholder text
-        _ONE_SEL = (
-            "input[data-testid='tnt-search-multiple-placeholder'], "
-            "input[placeholder*='BL No' i], "
-            "input[placeholder*='Booking No' i], "
-            "input[placeholder*='B/L' i]"
-        )
+        _ONE_SEL = ("input[data-testid='tnt-search-multiple-placeholder'], "
+                    "input[placeholder*='BL No' i], input[placeholder*='B/L' i]")
         try:
             page.wait_for_selector(_ONE_SEL, timeout=20_000)
         except PlaywrightTimeout:
@@ -647,17 +651,51 @@ def run_one_line(browser, url, bol, container):
             return None, None, None, None
         print(f"    Page title: {page.title()!r}")
         input_loc = page.locator(_ONE_SEL).first
-        # Use fill() + Enter directly — click() times out when a cookie overlay
-        # is present even after _dismiss_dialogs, because it intercepts pointer events
-        input_loc.fill(bol)
+        # ONE Line wants the last 12 chars only, no 'ONEY' prefix
+        one_bol = bol.upper().replace('ONEY', '').strip()[-12:]
+        print(f"    ONE BOL submitted: {one_bol!r}")
+        input_loc.fill(one_bol)
         input_loc.press("Enter")
         try:
             page.wait_for_load_state("networkidle", timeout=20_000)
         except PlaywrightTimeout:
             pass
-        page.wait_for_timeout(3_000)
-        eta, pickup, ret = _scrape_dates(page)
-        status = "Returned to Port" if ret else "Released" if pickup else "Vessel" if eta else None
+        page.wait_for_timeout(4_000)
+        try:
+            result_row = page.locator("table tbody tr:first-child").first
+            if result_row.is_visible(timeout=5_000):
+                result_row.click()
+                try:
+                    page.wait_for_load_state("networkidle", timeout=15_000)
+                except PlaywrightTimeout:
+                    pass
+                page.wait_for_timeout(3_000)
+        except Exception:
+            pass
+        body_text = page.inner_text("body")
+        lines = [l.strip() for l in body_text.split("\n") if l.strip()]
+        eta = None
+        pickup = None
+        ret = None
+        for i, line in enumerate(lines):
+            ll = line.lower()
+            if any(kw in ll for kw in ["vessel arrival","eta","estimated arrival","ata","discharg"]):
+                ctx = " ".join(lines[i:i+3])
+                m = DATE_RE.search(ctx)
+                if m and not eta: eta = m.group(0)
+            if any(kw in ll for kw in ["gate out","full out","merchant haulage","pick-up","available"]):
+                ctx = " ".join(lines[i:i+3])
+                m = DATE_RE.search(ctx)
+                if m and not pickup: pickup = m.group(0)
+            if any(kw in ll for kw in ["empty return","empty in","gate in empty","empty container"]):
+                ctx = " ".join(lines[i:i+3])
+                m = DATE_RE.search(ctx)
+                if m and not ret: ret = m.group(0)
+        if ret: status = "Returned to Port"
+        elif pickup: status = "Released"
+        elif eta: status = "Vessel"
+        else: status = None
+        print(f"    ONE result: eta={eta!r} pickup={pickup!r} ret={ret!r} status={status!r}")
         return eta, pickup, ret, status
     except PlaywrightTimeout as exc:
         print(f"    TIMEOUT: {exc}")
@@ -668,11 +706,6 @@ def run_one_line(browser, url, bol, container):
     finally:
         page.close()
         context.close()
-
-
-# ─────────────────────────────────────────────
-# Workflow dispatcher
-# ─────────────────────────────────────────────
 
 def dray_import_workflow(browser, ws, sheet_row, url, bol, container):
     print(f"\n  [Dray Import] row {sheet_row} — Container: {container}  BOL: {bol}")
@@ -749,6 +782,37 @@ def get_account_tabs(sheet, account_lookup):
 # ─────────────────────────────────────────────
 # Email notification
 # ─────────────────────────────────────────────
+
+# ── EFJ Pro alert ───────────────────────────────────────────────────────────────
+def send_pro_alert(row, tab_name, account_lookup):
+    """Email rep daily when a row has no EFJ# pro number."""
+    info      = account_lookup.get(tab_name, {})
+    rep_email = info.get("email", "")
+    rep_name  = info.get("rep", "")
+    to_email  = rep_email if rep_email else EMAIL_FALLBACK
+    cc_email  = EMAIL_CC if rep_email else None
+    headers   = ["EFJ#","Move Type","Container/Load#","BOL/Booking#","SSL/Vessel",
+                 "Carrier","Origin","Destination","ETA/ERD","LFD/Cutoff",
+                 "Pickup Date","Delivery Date","Status","Driver/Truck","Notes"]
+    parts = []
+    for i, val in enumerate(row):
+        if val and str(val).strip():
+            label = headers[i] if i < len(headers) else f"Col {i+1}"
+            parts.append(f"{label}: {str(val).strip()}")
+    detail    = "\n".join(parts) if parts else "No data available"
+    container = str(row[2]).strip() if len(row) > 2 and row[2] else "Unknown"
+    vessel    = str(row[4]).strip() if len(row) > 4 and row[4] else "Unknown"
+    origin    = str(row[6]).strip() if len(row) > 6 and row[6] else ""
+    dest      = str(row[7]).strip() if len(row) > 7 and row[7] else ""
+    extra     = " | ".join(filter(None, [container, vessel, origin, dest]))
+    subject   = f"Please Pro Load ASAP: Load Needs EFJ Pro - {extra}"
+    body      = (
+        f"Please Pro Load ASAP\n\n"
+        f"Account: {tab_name}\n"
+        + (f"Rep: {rep_name}\n" if rep_name else "")
+        + f"\nLoad Details:\n{detail}\n"
+    )
+    _send_email(to_email, cc_email, subject, body)
 
 def _send_email(to_email, cc_email, subject, body):
     """Send a plain-text email via Office 365 SMTP/STARTTLS."""
@@ -999,8 +1063,26 @@ def main():
             print(f"  Data rows: {len(display_rows) - 2}")
 
             dray_jobs = []
+            pro_alerts_file = "/root/csl-bot/pro_alerts.json"
+            try:
+                import json as _json
+                with open(pro_alerts_file) as _f: pro_alerts = _json.load(_f)
+            except: pro_alerts = {}
             for row_idx, row in enumerate(display_rows[2:], start=2):
                 if len(row) <= 1 or row[1].strip().lower() != "dray import":
+                    continue
+                efj_val = row[0].strip() if row else ""
+                if not efj_val:
+                    import json as _json
+                    from datetime import datetime as _dt
+                    from zoneinfo import ZoneInfo as _ZI
+                    container_val = row[2].strip() if len(row)>2 else ""
+                    pro_key = f"pro:{tab_name}:{container_val}:{row_idx}"
+                    today = _dt.now(_ZI("America/New_York")).strftime("%Y-%m-%d")
+                    if pro_alerts.get(pro_key) != today:
+                        send_pro_alert(list(row), tab_name, account_lookup)
+                        pro_alerts[pro_key] = today
+                        with open(pro_alerts_file,"w") as _f: _json.dump(pro_alerts,_f)
                     continue
                 sheet_row = row_idx + 1
                 link_row  = hyperlinks[row_idx] if row_idx < len(hyperlinks) else []

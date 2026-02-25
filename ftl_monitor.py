@@ -20,6 +20,21 @@ from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
+
+def _retry_on_quota(func, *args, max_retries=3, **kwargs):
+    """Retry a function call on Google Sheets 429 quota errors."""
+    for attempt in range(max_retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as exc:
+            if "429" in str(exc) and attempt < max_retries - 1:
+                wait = 60 * (attempt + 1)
+                print(f"    QUOTA HIT (429) — waiting {wait}s before retry {attempt+2}/{max_retries}...")
+                time.sleep(wait)
+            else:
+                raise
+    return None
+
 # ── Config ──────────────────────────────────────────────────────────────────────
 SHEET_ID         = "19MB5HmmWwsVXY_nADCYYLJL-zWXYt8yWrfeRBSfB2S0"
 CREDENTIALS_FILE = "/root/csl-credentials.json"
@@ -28,10 +43,10 @@ POLL_INTERVAL    = 30 * 60  # seconds
 DEBUG            = False    # save Macropoint inner_text to /tmp/mp_debug_[load_num].txt
 
 # ── SMTP / email ─────────────────────────────────────────────────────────────────
-SMTP_HOST      = "smtp.office365.com"
+SMTP_HOST      = "smtp.gmail.com"
 SMTP_PORT      = 587
-SMTP_USER      = "efj-operations@evansdelivery.com"
-SMTP_PASSWORD  = "9rWWcm-9kEbs"
+SMTP_USER      = "jfeltzjr@gmail.com"
+SMTP_PASSWORD  = "birxmwdoafjxhfdh"
 EMAIL_CC       = "efj-operations@evansdelivery.com"
 EMAIL_FALLBACK = "efj-operations@evansdelivery.com"
 
@@ -110,21 +125,37 @@ def _parse_planned_dt(dt_str: str) -> datetime | None:
 
 # ── Macropoint page parser ───────────────────────────────────────────────────────
 def _split_stops(text: str) -> tuple[str, str]:
+    # Try "Stop Order" table header first — split after Stop 1 / Stop 2 content
+    s1 = re.search(r"\bStop\s+Order\b", text, re.I)
+    if s1:
+        after_header = text[s1.start():]
+        # Find the standalone "1" and "2" that mark stop sections after the header
+        stops = list(re.finditer(r"(?:^|\n)\s*([12])\s*\n", after_header))
+        stop1_pos = None
+        stop2_pos = None
+        for m in stops:
+            if m.group(1) == "1" and stop1_pos is None:
+                stop1_pos = s1.start() + m.start()
+            elif m.group(1) == "2" and stop1_pos is not None and stop2_pos is None:
+                stop2_pos = s1.start() + m.start()
+        if stop1_pos is not None and stop2_pos is not None:
+            return text[stop1_pos:stop2_pos], text[stop2_pos:]
+        if stop1_pos is not None:
+            return text[stop1_pos:], ""
+    # Fallback: look for "Stop 1" / "Stop 2" literally
     s1 = re.search(r"\bStop\s*1\b", text, re.I)
     s2 = re.search(r"\bStop\s*2\b", text, re.I)
-    if not s1:
-        s1 = re.search(r"(?:^|\n)[ \t]*1[ \t]*\n", text)
-        s2 = re.search(r"(?:^|\n)[ \t]*2[ \t]*\n", text)
-    if not s1:
-        return "", ""
-    if s2 and s2.start() > s1.start():
-        return text[s1.start():s2.start()], text[s2.start():]
-    return text[s1.start():], ""
+    if s1:
+        if s2 and s2.start() > s1.start():
+            return text[s1.start():s2.start()], text[s2.start():]
+        return text[s1.start():], ""
+    return "", ""
 
 
 def _find_event_date(section: str, event: str) -> str | None:
+    # Match "Arrived @ 02/24 13:12 - ET" or "Departed @ 02/24 07:40 - CT"
     m = re.search(
-        rf"\b{re.escape(event)}\s*@\s*(\d{{1,2}}/\d{{1,2}})\b",
+        rf"\b{re.escape(event)}\s*@\s*(\d{{1,2}}/\d{{1,2}})",
         section, re.I,
     )
     if m:
@@ -133,6 +164,10 @@ def _find_event_date(section: str, event: str) -> str | None:
 
     lines = [l.strip() for l in section.split("\n") if l.strip()]
     for i, line in enumerate(lines):
+        if re.search(rf"\b{re.escape(event)}\s*@", line, re.I):
+            m = re.search(r"(\d{1,2})/(\d{1,2})", line)
+            if m:
+                return f"{int(m.group(1)):02d}-{int(m.group(2)):02d}"
         if re.search(rf"\b{re.escape(event)}\b", line, re.I):
             context = " ".join(lines[i:i + 3])
             m = _DATE_RE.search(context)
@@ -178,13 +213,26 @@ def _has_events(section: str) -> bool:
 
 def _parse_macropoint(
     text: str,
-) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
     stop1_text, stop2_text = _split_stops(text)
     stop1_arrived       = _find_event_date(stop1_text,   "Arrived")  if stop1_text else None
+    stop1_departed      = _find_event_date(stop1_text,   "Departed") if stop1_text else None
+    stop2_arrived       = _find_event_date(stop2_text,   "Arrived")  if stop2_text else None
     stop2_departed      = _find_event_date(stop2_text,   "Departed") if stop2_text else None
     stop1_planned_start = _find_planned_start(stop1_text)             if stop1_text else None
     stop2_planned_start = _find_planned_start(stop2_text)             if stop2_text else None
 
+    # Extract Macropoint Load ID
+    load_id_match = re.search(r"Load\s+Id\s*\n\s*(\S+)", text)
+    if not load_id_match:
+        load_id_match = re.search(r"\bLoad\s+([A-Z0-9][\w\-]+\d)", text)
+    mp_load_id = load_id_match.group(1) if load_id_match else None
+
+    # Statuses we IGNORE — no alert needed
+    IGNORE_STATUSES = {"ready to track", "tracking now"}
+    text_lower = text.lower()
+
+    # ── FraudGuard / phone issues ─────────────────────────────────────────
     if re.search(
         r"FraudGuard"
         r"|phone\s*(unresponsive|unreachable|not\s*respond)"
@@ -192,30 +240,53 @@ def _parse_macropoint(
         r"|driver.{0,20}(unreachable|unresponsive)",
         text, re.I,
     ):
-        return "Driver Phone Unresponsive", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start
+        return "Driver Phone Unresponsive", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id
 
-    if re.search(r"Tracking\s+Completed\s+Successfully", text, re.I):
-        return "Delivered", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start
+    # ── Tracking completed = Delivered ────────────────────────────────────
+    if re.search(r"Tracking\s*Completed\s*Successfully", text, re.I):
+        return "Delivered", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id
 
+    # ── Stop 2 Departed = left delivery ───────────────────────────────────
+    if stop2_departed:
+        return "Departed Delivery", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id
+
+    # ── Stop 2 Arrived = at delivery ──────────────────────────────────────
+    if stop2_arrived:
+        return "Arrived at Delivery", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id
+
+    # ── Stop 1 Departed = left pickup, en route ───────────────────────────
+    if stop1_departed:
+        return "Departed Pickup - En Route", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id
+
+    # ── Stop 1 Arrived = at pickup ────────────────────────────────────────
     if stop1_arrived:
-        return "Driver Arrived at Pickup", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start
+        return "Driver Arrived at Pickup", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id
 
+    # ── Running late — past planned pickup time, no arrival ───────────────
     planned_dt = _find_planned_dt(stop1_text)
     if planned_dt:
         now = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
         if now > planned_dt:
-            return "Running Late", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start
+            return "Running Late", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id
 
+    # ── Tracking behind / falling behind schedule ─────────────────────────
+    if re.search(r"(tracking\s+behind|behind\s+schedule|falling\s+behind)", text, re.I):
+        return "Tracking Behind Schedule", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id
+
+    # ── No events yet = waiting for update ────────────────────────────────
     if stop1_text and not _has_events(stop1_text) and not _has_events(stop2_text):
-        return "Tracking Waiting for Update", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start
+        # Check if this is just "Ready to Track" or "Tracking Now" — skip those
+        if any(s in text_lower for s in IGNORE_STATUSES):
+            return None, stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id
+        return "Tracking Waiting for Update", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id
 
-    return None, stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start
+    return None, stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id
 
 
 # ── Playwright scraper ───────────────────────────────────────────────────────────
 def scrape_macropoint(
     browser, url: str
-) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
     page = browser.new_page()
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30_000)
@@ -227,10 +298,10 @@ def scrape_macropoint(
         text = page.inner_text("body")
     except PlaywrightTimeout as exc:
         print(f"    TIMEOUT: {exc}")
-        return None, None, None, None, None
+        return None, None, None, None, None, None
     except Exception as exc:
         print(f"    ERROR: {exc}")
-        return None, None, None, None, None
+        return None, None, None, None, None, None
     finally:
         page.close()
 
@@ -299,7 +370,7 @@ def get_account_tabs(sheet, account_lookup: dict) -> list:
     return [t for t in all_tabs if t not in SKIP_TABS and t in account_lookup]
 
 
-def get_ftl_rows(creds, gc, tab_name: str):
+def get_ftl_rows(creds, gc, tab_name: str, sent_alerts: dict = None, account_lookup: dict = None):
     """
     Returns (ws, ftl_rows) for the given tab.
     ftl_rows contains ALL rows where Col B = 'FTL'.
@@ -307,6 +378,11 @@ def get_ftl_rows(creds, gc, tab_name: str):
     ws       = gc.open_by_key(SHEET_ID).worksheet(tab_name)
     all_rows = ws.get_all_values()
     links    = _get_hyperlinks(creds, tab_name)
+
+    if sent_alerts is None:
+        sent_alerts = {}
+    if account_lookup is None:
+        account_lookup = {}
 
     ftl_rows = []
     for i, row in enumerate(all_rows):
@@ -317,6 +393,15 @@ def get_ftl_rows(creds, gc, tab_name: str):
 
         efj      = row[COL_EFJ].strip()  if len(row) > COL_EFJ  else ""
         load_num = row[COL_LOAD].strip() if len(row) > COL_LOAD else ""
+        if not efj:
+            pro_key = f"pro_alert:{tab_name}:{load_num}:{row[COL_TRACKING].strip() if len(row)>COL_TRACKING else i}"
+            last    = sent_alerts.get(pro_key, "")
+            today   = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+            if last != today:
+                send_pro_alert(list(row), tab_name, account_lookup)
+                sent_alerts[pro_key] = today
+                save_sent_alerts(sent_alerts)
+            continue
 
         link_row = links[i] if i < len(links) else []
         url = (
@@ -393,9 +478,40 @@ def mark_sent(sent: dict, key: str, status: str):
         sent[key].append(status)
 
 
+# ── EFJ Pro alert ───────────────────────────────────────────────────────────────
+def send_pro_alert(row: list, tab_name: str, account_lookup: dict):
+    """Email rep daily when a row has no EFJ# pro number."""
+    info      = account_lookup.get(tab_name, {})
+    rep_email = info.get("email", "")
+    rep_name  = info.get("rep", "")
+    to_email  = rep_email if rep_email else EMAIL_FALLBACK
+    cc_email  = EMAIL_CC if rep_email else None
+    headers   = ["EFJ#","Move Type","Container/Load#","BOL/Booking#","SSL/Vessel",
+                 "Carrier","Origin","Destination","ETA/ERD","LFD/Cutoff",
+                 "Pickup Date","Delivery Date","Status","Driver/Truck","Notes"]
+    parts = []
+    for i, val in enumerate(row):
+        if val and val.strip():
+            label = headers[i] if i < len(headers) else f"Col {i+1}"
+            parts.append(f"{label}: {val.strip()}")
+    detail = "\n".join(parts) if parts else "No data available"
+    container = row[2].strip() if len(row) > 2 and row[2].strip() else "Unknown"
+    vessel    = row[4].strip() if len(row) > 4 and row[4].strip() else "Unknown"
+    origin    = row[6].strip() if len(row) > 6 and row[6].strip() else ""
+    dest      = row[7].strip() if len(row) > 7 and row[7].strip() else ""
+    extra = " | ".join(filter(None, [container, vessel, origin, dest]))
+    subject = f"Please Pro Load ASAP: Load Needs EFJ Pro - {extra}"
+    body = (
+        f"Please Pro Load ASAP\n\n"
+        f"Account: {tab_name}\n"
+        + (f"Rep: {rep_name}\n" if rep_name else "")
+        + f"\nLoad Details:\n{detail}\n"
+    )
+    _send_email(to_email, cc_email, subject, body)
+
 # ── Email notification ───────────────────────────────────────────────────────────
 def _send_email(to_email: str, cc_email: str | None, subject: str, body: str):
-    """Send a plain-text email via Office 365 SMTP/STARTTLS."""
+    """Send a plain-text email via Gmail SMTP/STARTTLS."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = SMTP_USER
@@ -419,7 +535,7 @@ def _send_email(to_email: str, cc_email: str | None, subject: str, body: str):
         print(f"    WARNING: Email failed: {exc}")
 
 
-def send_ftl_email(efj: str, load_num: str, status: str, tab_name: str, account_lookup: dict):
+def send_ftl_email(efj: str, load_num: str, status: str, tab_name: str, account_lookup: dict, mp_load_id: str = None):
     """Send an FTL status alert email routed to the rep for this account tab."""
     info      = account_lookup.get(tab_name, {})
     rep_email = info.get("email", "")
@@ -427,43 +543,27 @@ def send_ftl_email(efj: str, load_num: str, status: str, tab_name: str, account_
 
     if rep_email:
         to_email = rep_email
-        cc_email = EMAIL_CC
+        # Skip CC to efj-operations for Boviet tab
+        cc_email = None if tab_name.lower() == "boviet" else EMAIL_CC
     else:
         to_email = EMAIL_FALLBACK
         cc_email = None
 
     now     = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
-    subject = f"FTL Alert — {tab_name} — {efj} | {load_num} — {status}"
+    load_display = mp_load_id or load_num
+    subject = f"FTL Alert — {tab_name} — {load_display} — {status}"
+    load_display = mp_load_id or load_num
     body    = (
         f"FTL Status Update — {now}\n\n"
         f"Account:  {tab_name}\n"
         + (f"Rep:      {rep_name}\n" if rep_name else "")
         + f"EFJ #:    {efj}\n"
           f"Load #:   {load_num}\n"
-          f"Status:   {status}\n"
+        + (f"MP Load:  {mp_load_id}\n" if mp_load_id else "")
+        + f"Status:   {status}\n"
     )
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = SMTP_USER
-    msg["To"]      = to_email
-    if cc_email and cc_email != to_email:
-        msg["Cc"] = cc_email
-    msg.attach(MIMEText(body, "plain"))
-
-    recipients = [to_email]
-    if cc_email and cc_email != to_email:
-        recipients.append(cc_email)
-
-    try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
-            smtp.ehlo()
-            smtp.starttls()
-            smtp.login(SMTP_USER, SMTP_PASSWORD)
-            smtp.sendmail(SMTP_USER, recipients, msg.as_string())
-        print(f"    Email sent → {to_email}: {subject}")
-    except Exception as exc:
-        print(f"    WARNING: Email failed: {exc}")
+    _send_email(to_email, cc_email, subject, body)
 
 
 # ── Archive helpers ──────────────────────────────────────────────────────────────
@@ -568,7 +668,7 @@ def archive_ftl_row(gc, tab_name: str, sheet_row: int, row_data: list,
             f"Status:   Delivered\n"
             f"Archived: {timestamp}\n"
         )
-        _send_email(rep_email, EMAIL_CC, subject, body)
+        _send_email(rep_email, None if tab_name.lower() == "boviet" else EMAIL_CC, subject, body)
 
     # ── Delete from source tab ────────────────────────────────────────────────
     try:
@@ -638,7 +738,7 @@ def backfill_planned_times(creds, gc, account_tabs: list):
 
     for tab_name in account_tabs:
         try:
-            ws, ftl_rows = get_ftl_rows(creds, gc, tab_name)
+            ws, ftl_rows = get_ftl_rows(creds, gc, tab_name, sent_alerts=sent, account_lookup=account_lookup)
             ws_map[tab_name] = ws
         except Exception as exc:
             print(f"  WARNING: could not read '{tab_name}' for backfill: {exc}")
@@ -695,7 +795,12 @@ def run_once(account_lookup: dict):
 
     creds = _load_credentials()
     gc    = gspread.authorize(creds)
-    sheet = gc.open_by_key(SHEET_ID)
+    try:
+        sheet = _retry_on_quota(gc.open_by_key, SHEET_ID)
+    except Exception as exc:
+        print(f"  ERROR opening sheet: {exc}")
+        print(f"  Will retry next poll cycle.")
+        return
 
     account_tabs = get_account_tabs(sheet, account_lookup)
     if not account_tabs:
@@ -711,9 +816,10 @@ def run_once(account_lookup: dict):
         for tab_name in account_tabs:
             print(f"\n  {'─'*50}")
             print(f"  Checking '{tab_name}'...")
+            time.sleep(2)  # rate-limit between tabs
 
             try:
-                ws, ftl_rows = get_ftl_rows(creds, gc, tab_name)
+                ws, ftl_rows = _retry_on_quota(get_ftl_rows, creds, gc, tab_name, sent_alerts=sent, account_lookup=account_lookup)
             except Exception as exc:
                 print(f"  ERROR reading '{tab_name}': {exc}")
                 continue
@@ -726,12 +832,13 @@ def run_once(account_lookup: dict):
                 key = row["key"]
                 print(f"  → {key}")
 
-                status, stop1_date, stop2_date, stop1_planned, stop2_planned = (
+                status, stop1_date, stop2_date, stop1_planned, stop2_planned, mp_load_id = (
                     scrape_macropoint(browser, row["url"])
                 )
                 print(
                     f"    Status: {status}  |  stop1={stop1_date!r}  stop2={stop2_date!r}"
                     f"  |  planned1={stop1_planned!r}  planned2={stop2_planned!r}"
+                    f"  |  mp_load_id={mp_load_id!r}"
                 )
 
                 if status == "Delivered":
@@ -775,14 +882,26 @@ def run_once(account_lookup: dict):
                 elif stop2_date and row["existing_delivery"]:
                     print(f"    L{row['sheet_row']} already has {row['existing_delivery']!r} — not overwriting")
 
-                if status == "Delivered" and row["existing_status"] != "Delivered":
+                # Map bot statuses to Column M dropdown values
+                STATUS_TO_DROPDOWN = {
+                    "Driver Arrived at Pickup": "At Pickup",
+                    "Departed Pickup - En Route": "In Transit",
+                    "Arrived at Delivery": "At Delivery",
+                    "Departed Delivery": "Departed Delivery",
+                    "Running Late": "Running Behind",
+                    "Tracking Behind Schedule": "Running Behind",
+                    "Tracking Waiting for Update": "Tracking Waiting for",
+                    "Delivered": "Delivered",
+                }
+                dropdown_val = STATUS_TO_DROPDOWN.get(status)
+                if dropdown_val and row["existing_status"] != dropdown_val:
                     sheet_updates.append(
-                        {"range": f"M{row['sheet_row']}", "values": [["Delivered"]]}
+                        {"range": f"M{row['sheet_row']}", "values": [[dropdown_val]]}
                     )
-                    note_parts.append("Delivered")
-                    print(f"    Writing 'Delivered' → M{row['sheet_row']}")
-                elif status == "Delivered":
-                    print(f"    M{row['sheet_row']} already 'Delivered' — not overwriting")
+                    note_parts.append(dropdown_val)
+                    print(f"    Writing '{dropdown_val}' → M{row['sheet_row']}")
+                elif dropdown_val and row["existing_status"] == dropdown_val:
+                    print(f"    M{row['sheet_row']} already '{dropdown_val}' — not overwriting")
 
                 if sheet_updates:
                     note = _build_note(row["existing_notes"], ", ".join(note_parts))
@@ -803,7 +922,7 @@ def run_once(account_lookup: dict):
                 if already_sent(sent, key, status):
                     print(f"    Already alerted for '{status}' — skipping")
                 else:
-                    send_ftl_email(row["efj"], row["load_num"], status, tab_name, account_lookup)
+                    send_ftl_email(row["efj"], row["load_num"], status, tab_name, account_lookup, mp_load_id=mp_load_id)
                     mark_sent(sent, key, status)
 
                 # Queue for archiving after all rows processed
@@ -846,8 +965,7 @@ def main():
     account_tabs = get_account_tabs(sheet, account_lookup)
     print(f"Account tabs: {account_tabs}")
 
-    clear_incorrect_pickup_dates(creds, gc, account_tabs)
-    backfill_planned_times(creds, gc, account_tabs)
+    # cleanup and backfill removed — no longer needed, saves API quota
 
     while True:
         run_once(account_lookup)
