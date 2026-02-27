@@ -23,13 +23,18 @@ else
     echo "[1/6] PostgreSQL already installed."
 fi
 
-# 3. Start PostgreSQL
+# 3. Start PostgreSQL (detect installed version)
 echo "[2/6] Starting PostgreSQL..."
-pg_ctlcluster 16 main start 2>/dev/null || true
+PG_VER=$(pg_lsclusters -h 2>/dev/null | head -1 | awk '{print $1}')
+PG_VER=${PG_VER:-17}
+pg_ctlcluster "$PG_VER" main start 2>/dev/null || true
 
 # Enable TCP listening
-sed -i "s/^#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" /etc/postgresql/16/main/postgresql.conf 2>/dev/null || true
-pg_ctlcluster 16 main restart 2>/dev/null || true
+PG_CONF="/etc/postgresql/${PG_VER}/main/postgresql.conf"
+if [ -f "$PG_CONF" ]; then
+    sed -i "s/^#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" "$PG_CONF" 2>/dev/null || true
+    pg_ctlcluster "$PG_VER" main restart 2>/dev/null || true
+fi
 
 # 4. Create database and user
 echo "[3/6] Setting up database..."
