@@ -14,9 +14,11 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
+import httplib2
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 
 import config
@@ -53,7 +55,11 @@ def _get_gmail_service():
         with open(token_path, "w") as f:
             f.write(creds.to_json())
 
-    return build("gmail", "v1", credentials=creds)
+    # Use system CA bundle so connections work behind corporate/proxy TLS.
+    authorized_http = AuthorizedHttp(
+        creds, http=httplib2.Http(ca_certs="/etc/ssl/certs/ca-certificates.crt")
+    )
+    return build("gmail", "v1", http=authorized_http)
 
 
 def _detect_mailbox_origin(headers: dict) -> str:
