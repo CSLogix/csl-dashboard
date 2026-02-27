@@ -40,10 +40,15 @@ def _get_gmail_service():
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
-                config.GMAIL_CREDENTIALS_PATH, config.GMAIL_SCOPES
+                config.GMAIL_CREDENTIALS_PATH, config.GMAIL_SCOPES,
             )
-            # Use console flow for headless VPS (no browser available)
-            creds = flow.run_console()
+            creds = flow.run_local_server(
+                host="0.0.0.0",
+                port=8090,
+                open_browser=False,
+                success_message="Authorization complete! You can close this tab.",
+            )
+            print("Gmail authorization successful.")
         with open(token_path, "w") as f:
             f.write(creds.to_json())
 
