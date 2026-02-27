@@ -87,19 +87,27 @@ def sync_once():
             continue
 
         header = rows[0]
-        # Build column index mapping: header_name → column_index
+        # Build column index mapping: normalized header → column_index
         header_index = {h.strip(): i for i, h in enumerate(header)}
+        header_index_lower = {h.strip().lower(): i for i, h in enumerate(header)}
 
-        # Find the columns that map to reference types
+        # Find the columns that map to reference types (case-insensitive)
         ref_columns = {}  # ref_type → col_index
         for header_name, ref_type in column_mapping.items():
             if header_name in header_index:
                 ref_columns[ref_type] = header_index[header_name]
+            elif header_name.lower() in header_index_lower:
+                ref_columns[ref_type] = header_index_lower[header_name.lower()]
 
         if "efj" not in ref_columns:
-            # Can't process rows without an EFJ column
-            log.debug("Tab '%s' has no EFJ column — skipping", ws.title)
-            continue
+            # Fallback: use known fixed column positions from the sheet layout
+            # Col A (0) = EFJ#, Col C (2) = Container#, Col D (3) = BOL/Booking#
+            if rows and len(rows[0]) >= 4 and rows[0][0].strip().upper().startswith("EFJ"):
+                ref_columns = {"efj": 0, "container": 2, "bol": 3}
+                log.debug("Tab '%s': using fallback column positions", ws.title)
+            else:
+                log.debug("Tab '%s' has no EFJ column — skipping", ws.title)
+                continue
 
         efj_col = ref_columns["efj"]
         account = _determine_account(ws.title)

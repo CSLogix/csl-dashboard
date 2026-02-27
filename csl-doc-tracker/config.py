@@ -27,14 +27,16 @@ SHEET_TAB_NAME = os.getenv("SHEET_TAB_NAME", "Active Loads")
 SHEET_SYNC_INTERVAL_MINUTES = int(os.getenv("SHEET_SYNC_INTERVAL_MINUTES", "5"))
 
 # Google Sheet column mapping: header name -> reference type.
-# Fill in with actual column headers from your sheet.
 # reference_type values: "efj", "container", "po", "bol", "company_ref"
+# Multiple header variants are supported (matched case-insensitively).
 SHEET_COLUMN_MAPPING = {
+    "EFJ#": "efj",
     "EFJ #": "efj",
     "Container#": "container",
+    "Container/Load#": "container",
+    "BOL/Booking#": "bol",
     "BOL / Booking#": "bol",
-    # "PO#": "po",
-    # "Customer Ref": "company_ref",
+    "BOL / Booking# / MBL#": "bol",
 }
 
 # Additional columns to pull for load metadata
