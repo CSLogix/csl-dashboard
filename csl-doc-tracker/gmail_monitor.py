@@ -43,8 +43,9 @@ def _get_gmail_service():
                 config.GMAIL_CREDENTIALS_PATH, config.GMAIL_SCOPES,
             )
             creds = flow.run_local_server(
-                host="0.0.0.0",
+                host="localhost",
                 port=8090,
+                bind_addr="0.0.0.0",
                 open_browser=False,
                 success_message="Authorization complete! You can close this tab.",
             )
