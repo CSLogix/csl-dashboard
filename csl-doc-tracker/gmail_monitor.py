@@ -42,7 +42,8 @@ def _get_gmail_service():
             flow = InstalledAppFlow.from_client_secrets_file(
                 config.GMAIL_CREDENTIALS_PATH, config.GMAIL_SCOPES
             )
-            creds = flow.run_local_server(port=0)
+            # Use console flow for headless VPS (no browser available)
+            creds = flow.run_console()
         with open(token_path, "w") as f:
             f.write(creds.to_json())
 
