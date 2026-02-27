@@ -38,6 +38,20 @@ def _determine_account(tab_name: str) -> str:
     return "EFJ-Operations"
 
 
+def _read_tab_with_retry(ws, max_retries=3):
+    """Read a worksheet tab with retry on quota (429) errors."""
+    for attempt in range(max_retries):
+        try:
+            return ws.get_all_values()
+        except gspread.exceptions.APIError as e:
+            if e.response.status_code == 429 and attempt < max_retries - 1:
+                wait = 60 * (attempt + 1)  # 60s, 120s, 180s
+                log.warning("Quota exceeded reading tab '%s' — waiting %ds", ws.title, wait)
+                time.sleep(wait)
+            else:
+                raise
+
+
 def sync_once():
     """
     Read all non-skipped tabs from the Google Sheet.
@@ -60,8 +74,11 @@ def sync_once():
         if ws.title in config.SHEET_SKIP_TABS:
             continue
 
+        # Throttle between tab reads to avoid Sheets API quota (60 reads/min)
+        time.sleep(5)
+
         try:
-            rows = ws.get_all_values()
+            rows = _read_tab_with_retry(ws)
         except Exception:
             log.warning("Failed to read tab '%s' — skipping", ws.title, exc_info=True)
             continue
