@@ -1,0 +1,495 @@
+"""
+PostgreSQL database layer for CSL Document Tracker.
+Provides a connection pool and all query/mutation functions.
+"""
+
+import logging
+from contextlib import contextmanager
+from datetime import datetime
+from typing import Optional
+
+import psycopg2
+import psycopg2.pool
+import psycopg2.extras
+
+import config
+
+log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Connection pool
+# ---------------------------------------------------------------------------
+
+_pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
+
+
+def init_pool(minconn: int = 2, maxconn: int = 10):
+    """Create the global connection pool. Call once at startup."""
+    global _pool
+    _pool = psycopg2.pool.ThreadedConnectionPool(
+        minconn,
+        maxconn,
+        host=config.DB_HOST,
+        port=config.DB_PORT,
+        dbname=config.DB_NAME,
+        user=config.DB_USER,
+        password=config.DB_PASSWORD,
+    )
+    log.info("Database connection pool initialized (min=%d, max=%d)", minconn, maxconn)
+
+
+def close_pool():
+    global _pool
+    if _pool:
+        _pool.closeall()
+        _pool = None
+        log.info("Database connection pool closed")
+
+
+@contextmanager
+def get_conn():
+    """Yield a connection from the pool, auto-commit on success, rollback on error."""
+    conn = _pool.getconn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _pool.putconn(conn)
+
+
+@contextmanager
+def get_cursor(conn=None):
+    """Yield a dict-cursor, optionally re-using an existing connection."""
+    if conn is not None:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        try:
+            yield cur
+        finally:
+            cur.close()
+    else:
+        with get_conn() as c:
+            cur = c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            try:
+                yield cur
+            finally:
+                cur.close()
+
+
+# ---------------------------------------------------------------------------
+# Loads
+# ---------------------------------------------------------------------------
+
+def upsert_load(
+    load_number: str,
+    customer_ref: str = None,
+    customer_name: str = None,
+    account: str = None,
+) -> int:
+    """Insert or update a load, returning its id."""
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                """
+                INSERT INTO loads (load_number, customer_ref, customer_name, account)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (load_number) DO UPDATE SET
+                    customer_ref  = COALESCE(EXCLUDED.customer_ref,  loads.customer_ref),
+                    customer_name = COALESCE(EXCLUDED.customer_name, loads.customer_name),
+                    account       = COALESCE(EXCLUDED.account,       loads.account),
+                    updated_at    = NOW()
+                RETURNING id
+                """,
+                (load_number, customer_ref, customer_name, account),
+            )
+            return cur.fetchone()["id"]
+
+
+def get_load_by_number(load_number: str) -> Optional[dict]:
+    with get_cursor() as cur:
+        cur.execute("SELECT * FROM loads WHERE load_number = %s", (load_number,))
+        return cur.fetchone()
+
+
+def get_load_by_id(load_id: int) -> Optional[dict]:
+    with get_cursor() as cur:
+        cur.execute("SELECT * FROM loads WHERE id = %s", (load_id,))
+        return cur.fetchone()
+
+
+def get_all_loads(account_filter: str = None, status: str = "active") -> list:
+    with get_cursor() as cur:
+        if account_filter:
+            cur.execute(
+                "SELECT * FROM loads WHERE status = %s AND account = %s ORDER BY created_at DESC",
+                (status, account_filter),
+            )
+        else:
+            cur.execute(
+                "SELECT * FROM loads WHERE status = %s ORDER BY created_at DESC",
+                (status,),
+            )
+        return cur.fetchall()
+
+
+# ---------------------------------------------------------------------------
+# Load references
+# ---------------------------------------------------------------------------
+
+def upsert_reference(load_id: int, reference_type: str, reference_value: str):
+    """Insert a reference, ignoring duplicates."""
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                """
+                INSERT INTO load_references (load_id, reference_type, reference_value)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (reference_type, reference_value) DO NOTHING
+                """,
+                (load_id, reference_type, reference_value),
+            )
+
+
+def find_load_id_by_reference(reference_value: str) -> Optional[int]:
+    """Look up a load_id by any reference value (case-insensitive)."""
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT load_id FROM load_references WHERE UPPER(reference_value) = UPPER(%s) LIMIT 1",
+            (reference_value,),
+        )
+        row = cur.fetchone()
+        return row["load_id"] if row else None
+
+
+def get_all_references() -> list:
+    """Return all (reference_value, load_id) pairs for building in-memory lookup."""
+    with get_cursor() as cur:
+        cur.execute("SELECT reference_value, load_id FROM load_references")
+        return cur.fetchall()
+
+
+def get_references_for_load(load_id: int) -> list:
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT reference_type, reference_value FROM load_references WHERE load_id = %s",
+            (load_id,),
+        )
+        return cur.fetchall()
+
+
+# ---------------------------------------------------------------------------
+# Documents
+# ---------------------------------------------------------------------------
+
+def insert_document(
+    load_id: int,
+    doc_type: str,
+    file_path: str,
+    file_name: str,
+    email_subject: str = None,
+    email_from: str = None,
+    email_date: datetime = None,
+    source_mailbox: str = None,
+) -> int:
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                """
+                INSERT INTO documents
+                    (load_id, doc_type, file_path, file_name, email_subject,
+                     email_from, email_date, source_mailbox)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (load_id, doc_type, file_path, file_name, email_subject,
+                 email_from, email_date, source_mailbox),
+            )
+            doc_id = cur.fetchone()["id"]
+
+            # Mark checklist item as received
+            cur.execute(
+                """
+                UPDATE document_checklist
+                SET received = TRUE, received_at = NOW()
+                WHERE load_id = %s AND doc_type = %s AND received = FALSE
+                """,
+                (load_id, doc_type),
+            )
+            return doc_id
+
+
+def get_documents_for_load(load_id: int) -> list:
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT * FROM documents WHERE load_id = %s ORDER BY received_at DESC",
+            (load_id,),
+        )
+        return cur.fetchall()
+
+
+def get_latest_document(load_id: int, doc_type: str) -> Optional[dict]:
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT * FROM documents
+            WHERE load_id = %s AND doc_type = %s
+            ORDER BY received_at DESC LIMIT 1
+            """,
+            (load_id, doc_type),
+        )
+        return cur.fetchone()
+
+
+# ---------------------------------------------------------------------------
+# Document checklist
+# ---------------------------------------------------------------------------
+
+def ensure_checklist(load_id: int):
+    """Create BOL and POD checklist entries for a load if they don't exist."""
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            for doc_type in ("BOL", "POD"):
+                cur.execute(
+                    """
+                    INSERT INTO document_checklist (load_id, doc_type)
+                    VALUES (%s, %s)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (load_id, doc_type),
+                )
+            # The ON CONFLICT may not fire without a unique constraint,
+            # so guard with a check.
+            cur.execute(
+                "SELECT COUNT(*) as cnt FROM document_checklist WHERE load_id = %s",
+                (load_id,),
+            )
+            if cur.fetchone()["cnt"] == 0:
+                for doc_type in ("BOL", "POD"):
+                    cur.execute(
+                        "INSERT INTO document_checklist (load_id, doc_type) VALUES (%s, %s)",
+                        (load_id, doc_type),
+                    )
+
+
+def get_checklist(load_id: int) -> list:
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT * FROM document_checklist WHERE load_id = %s ORDER BY doc_type",
+            (load_id,),
+        )
+        return cur.fetchall()
+
+
+# ---------------------------------------------------------------------------
+# Email log (deduplication)
+# ---------------------------------------------------------------------------
+
+def is_email_processed(message_id: str) -> bool:
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT id FROM email_log WHERE message_id = %s AND processed = TRUE",
+            (message_id,),
+        )
+        return cur.fetchone() is not None
+
+
+def log_email(
+    message_id: str,
+    mailbox_origin: str = None,
+    subject: str = None,
+    sender: str = None,
+    received_date: datetime = None,
+    attachments_count: int = 0,
+    processed: bool = False,
+    matched_load_id: int = None,
+):
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                """
+                INSERT INTO email_log
+                    (message_id, mailbox_origin, subject, sender, received_date,
+                     attachments_count, processed, processed_at, matched_load_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (message_id) DO UPDATE SET
+                    processed       = EXCLUDED.processed,
+                    processed_at    = EXCLUDED.processed_at,
+                    matched_load_id = COALESCE(EXCLUDED.matched_load_id, email_log.matched_load_id)
+                """,
+                (
+                    message_id, mailbox_origin, subject, sender, received_date,
+                    attachments_count, processed,
+                    datetime.utcnow() if processed else None,
+                    matched_load_id,
+                ),
+            )
+
+
+def mark_email_processed(message_id: str, matched_load_id: int = None):
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                """
+                UPDATE email_log
+                SET processed = TRUE, processed_at = NOW(), matched_load_id = COALESCE(%s, matched_load_id)
+                WHERE message_id = %s
+                """,
+                (matched_load_id, message_id),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Unmatched emails
+# ---------------------------------------------------------------------------
+
+def insert_unmatched_email(
+    message_id: str,
+    subject: str = None,
+    sender: str = None,
+    received_date: datetime = None,
+    attachment_names: str = None,
+):
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                """
+                INSERT INTO unmatched_emails
+                    (message_id, subject, sender, received_date, attachment_names)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (message_id, subject, sender, received_date, attachment_names),
+            )
+
+
+def get_unmatched_emails(status: str = "pending") -> list:
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT * FROM unmatched_emails WHERE review_status = %s ORDER BY received_date DESC",
+            (status,),
+        )
+        return cur.fetchall()
+
+
+def resolve_unmatched_email(unmatched_id: int, load_id: int):
+    """Manually match an unmatched email to a load."""
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                """
+                UPDATE unmatched_emails
+                SET review_status = 'matched', matched_load_id = %s, reviewed_at = NOW()
+                WHERE id = %s
+                """,
+                (load_id, unmatched_id),
+            )
+
+
+def ignore_unmatched_email(unmatched_id: int):
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                """
+                UPDATE unmatched_emails
+                SET review_status = 'ignored', reviewed_at = NOW()
+                WHERE id = %s
+                """,
+                (unmatched_id,),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Dashboard aggregate queries
+# ---------------------------------------------------------------------------
+
+def get_dashboard_loads(account_filter: str = None) -> list:
+    """
+    Return loads with BOL/POD status for the dashboard.
+    Each row includes: load info + bol_received, pod_received, bol_file_path, pod_file_path.
+    """
+    with get_cursor() as cur:
+        query = """
+            SELECT
+                l.id,
+                l.load_number,
+                l.customer_ref,
+                l.customer_name,
+                l.account,
+                l.status,
+                l.created_at,
+                -- BOL
+                (SELECT d.file_path FROM documents d
+                 WHERE d.load_id = l.id AND d.doc_type = 'BOL'
+                 ORDER BY d.received_at DESC LIMIT 1) AS bol_file_path,
+                (SELECT d.file_name FROM documents d
+                 WHERE d.load_id = l.id AND d.doc_type = 'BOL'
+                 ORDER BY d.received_at DESC LIMIT 1) AS bol_file_name,
+                EXISTS(SELECT 1 FROM documents d
+                       WHERE d.load_id = l.id AND d.doc_type = 'BOL') AS bol_received,
+                -- POD
+                (SELECT d.file_path FROM documents d
+                 WHERE d.load_id = l.id AND d.doc_type = 'POD'
+                 ORDER BY d.received_at DESC LIMIT 1) AS pod_file_path,
+                (SELECT d.file_name FROM documents d
+                 WHERE d.load_id = l.id AND d.doc_type = 'POD'
+                 ORDER BY d.received_at DESC LIMIT 1) AS pod_file_name,
+                EXISTS(SELECT 1 FROM documents d
+                       WHERE d.load_id = l.id AND d.doc_type = 'POD') AS pod_received
+            FROM loads l
+            WHERE l.status = 'active'
+        """
+        params = []
+        if account_filter:
+            query += " AND l.account = %s"
+            params.append(account_filter)
+        query += " ORDER BY l.created_at DESC"
+        cur.execute(query, params)
+        return cur.fetchall()
+
+
+def get_dashboard_stats(account_filter: str = None) -> dict:
+    """Return aggregate stats for the dashboard header."""
+    with get_cursor() as cur:
+        where = "WHERE l.status = 'active'"
+        params = []
+        if account_filter:
+            where += " AND l.account = %s"
+            params.append(account_filter)
+
+        cur.execute(f"SELECT COUNT(*) as total FROM loads l {where}", params)
+        total = cur.fetchone()["total"]
+
+        cur.execute(
+            f"""
+            SELECT COUNT(*) as missing_bol FROM loads l {where}
+            AND NOT EXISTS (
+                SELECT 1 FROM documents d WHERE d.load_id = l.id AND d.doc_type = 'BOL'
+            )
+            """,
+            params,
+        )
+        missing_bol = cur.fetchone()["missing_bol"]
+
+        cur.execute(
+            f"""
+            SELECT COUNT(*) as missing_pod FROM loads l {where}
+            AND NOT EXISTS (
+                SELECT 1 FROM documents d WHERE d.load_id = l.id AND d.doc_type = 'POD'
+            )
+            """,
+            params,
+        )
+        missing_pod = cur.fetchone()["missing_pod"]
+
+        cur.execute(
+            "SELECT COUNT(*) as cnt FROM unmatched_emails WHERE review_status = 'pending'"
+        )
+        unmatched = cur.fetchone()["cnt"]
+
+        return {
+            "total_loads": total,
+            "missing_bol": missing_bol,
+            "missing_pod": missing_pod,
+            "unmatched_emails": unmatched,
+        }
