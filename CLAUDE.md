@@ -2,7 +2,7 @@
 
 ## Overview
 
-CSL Bot is an automated logistics operations system for Evans Delivery / EFJ Operations. It monitors freight loads across three move types — **Dray Import**, **Dray Export**, and **FTL (Full Truckload)** — using a shared Google Sheet as the source of truth. The bot scrapes Macropoint for live tracking data, queries the JsonCargo API for container status, writes updates back to the sheet, sends email alerts to account reps, and archives completed loads.
+CSL Bot is an automated logistics operations system for Evans Delivery / EFJ Operations. It monitors freight loads across three move types — **Dray Import**, **Dray Export**, and **FTL (Full Truckload)** — using a shared Google Sheet as the source of truth. The bot scrapes carrier tracking websites, queries the JsonCargo API for container status, writes updates back to the sheet, sends email alerts to account reps, and archives completed loads.
 
 ---
 
@@ -10,7 +10,7 @@ CSL Bot is an automated logistics operations system for Evans Delivery / EFJ Ope
 
 ```
 /root/csl-bot/
-├── csl_bot.py              # Main Dray Import monitor (Macropoint scraper + sheet updater)
+├── csl_bot.py              # Main Dray Import monitor (carrier scraper + sheet updater)
 ├── export_monitor.py       # Dray Export monitor (JsonCargo API + cutoff alerts)
 ├── ftl_monitor.py          # FTL monitor (Macropoint scraper, pickup/delivery tracking)
 ├── ftl_email_alerts.py     # Legacy supplementary email alert module for FTL
@@ -20,31 +20,36 @@ CSL Bot is an automated logistics operations system for Evans Delivery / EFJ Ope
 ├── mp_login_save.py        # One-time script: logs into Macropoint and saves session cookies
 ├── mk_export.py            # Utility: writes/regenerates export_monitor.py from embedded code
 │
+├── .env                    # All credentials (SMTP, API keys, proxy, etc.) — gitignored
 ├── last_check.json         # State: last seen ETA/LFD/Return/Status per import container
 ├── export_state.json       # State: last seen ERD/Cutoff per export row
 ├── ftl_sent_alerts.json    # State: FTL alert dedup (keyed by efj|load_num → [statuses sent])
 ├── ftl_email_alerts.json   # State: legacy FTL email dedup (keyed by load_id_status)
 ├── mp_cookies.json         # Saved Macropoint browser session cookies
 ├── webhook_payloads.log    # Raw log of all inbound webhook POSTs
-└── csl_bot.log             # Runtime log for csl_bot.py
+├── csl_bot.log             # Runtime log for csl_bot.py
+└── csl_bot.py.pre-optimization  # Backup of csl_bot.py before Stage 1-3 changes
 ```
 
 ---
 
 ## Infrastructure & Credentials
 
-| Resource | Value / Location |
+All secrets are centralized in `/root/csl-bot/.env` (gitignored). Scripts load via `python-dotenv`.
+
+| Resource | Env Variable |
 |---|---|
-| Google Sheet ID | `19MB5HmmWwsVXY_nADCYYLJL-zWXYt8yWrfeRBSfB2S0` |
-| Google credentials | `/root/csl-credentials.json` (service account JSON) |
-| Gmail SMTP user | `jfeltzjr@gmail.com` |
-| Gmail app password | Hardcoded in each script |
-| CC address | `efj-operations@evansdelivery.com` |
-| Macropoint URL | `https://visibility.macropoint.com/` |
-| Macropoint login | `john.feltz@evansdelivery.com` |
-| JsonCargo API key | `wiD6ZZoQLstkmQl4nRsGTYwe93cr_cpHboDTu15VLRQ` |
-| JsonCargo base URL | `https://api.jsoncargo.com/api/v1` |
-| Webhook basic auth | user: `cslbot` / password in webhook.py |
+| Google Sheet ID | `SHEET_ID` |
+| Google credentials | `GOOGLE_CREDENTIALS_FILE` → `/root/csl-credentials.json` |
+| Gmail SMTP | `SMTP_USER`, `SMTP_PASSWORD` |
+| CC address | `EMAIL_CC` |
+| Macropoint login | `MACROPOINT_USER`, `MACROPOINT_PASSWORD` |
+| Macropoint tracking phone | `MACROPOINT_TRACKING_PHONE` |
+| Webhook basic auth | `WEBHOOK_AUTH_USERNAME`, `WEBHOOK_AUTH_PASSWORD` |
+| JsonCargo API | `JSONCARGO_API_KEY` (base URL: `https://api.jsoncargo.com/api/v1`) |
+| Oxylabs proxy | `PROXY_SERVER`, `PROXY_USERNAME`, `PROXY_PASSWORD` |
+| Upload server auth | `UPLOAD_SERVER_USERNAME`, `UPLOAD_SERVER_PASSWORD` |
+| Upload server allowed IPs | `UPLOAD_SERVER_ALLOWED_IPS` |
 
 ---
 
@@ -52,7 +57,7 @@ CSL Bot is an automated logistics operations system for Evans Delivery / EFJ Ope
 
 ### Tab Layout
 
-- **Account tabs** (one per customer): DHL, DSV, MGF, Kripke, Rose, EShipping, IWS, MAO, Boviet, etc.
+- **Account tabs** (one per customer): Allround, Cadi, Boviet, DHL, DSV, EShipping, IWS, Kripke, MAO, MGF, Rose, USHA
 - **Account Rep tab**: Maps account name → rep name + rep email. Loaded once at startup.
 - **Completed Eli**: Archive for loads handled by rep Eli.
 - **Completed Radka**: Archive for loads handled by rep Radka.
@@ -64,7 +69,7 @@ CSL Bot is an automated logistics operations system for Evans Delivery / EFJ Ope
 |-----|-----------------|-------------------|-------|
 | A | 0 | 1 | EFJ # (e.g. `EFJ106996`) |
 | B | 1 | 2 | Move Type (`FTL` / `Dray Export` / `Dray Import`) |
-| C | 2 | 3 | Container# or Load# — hyperlinked to Macropoint URL |
+| C | 2 | 3 | Container# or Load# — hyperlinked to carrier/Macropoint URL |
 | D | 3 | 4 | BOL / Booking# / MBL# |
 | E | 4 | 5 | SSL / Vessel name |
 | F | 5 | 6 | Carrier |
@@ -85,19 +90,66 @@ CSL Bot is an automated logistics operations system for Evans Delivery / EFJ Ope
 
 ### `csl_bot.py` — Dray Import Monitor
 
-Polls the sheet for rows where **Col B** contains import move types and **Col M (Status) = "Tracking Waiting for Update"**. Uses **Playwright with playwright-stealth** to scrape the Macropoint tracking URL in Col C.
+Runs twice daily via cron (7:30 AM and 1:30 PM ET, Mon-Fri). Processes all account tabs for rows where **Col B** contains import move types. Uses Playwright with stealth for browser scraping, and JsonCargo API for Maersk/HMM containers.
+
+**Architecture (after Stage 1-3 optimization):**
+
+```
+main()
+ ├── Proxy health check (httpbin.org, 15s timeout)
+ ├── For each account tab:
+ │   ├── Read sheet data + hyperlinks (with sheets_retry)
+ │   ├── For each Dray Import row:
+ │   │   ├── dray_import_workflow() routes by carrier URL:
+ │   │   │   ├── maersk.com → JsonCargo API (ssl_line=MAERSK)
+ │   │   │   │   └── If "Prefix not found" → browser fallback (if proxy OK)
+ │   │   │   ├── hmm21.com  → JsonCargo API (ssl_line=HMM)
+ │   │   │   │   └── If "Prefix not found" → browser fallback (if proxy OK)
+ │   │   │   ├── shipmentlink.com → run_shipmentlink() [browser]
+ │   │   │   ├── hapag-lloyd.com  → run_hapag_lloyd()  [browser]
+ │   │   │   ├── one-line.com     → run_one_line()     [browser]
+ │   │   │   └── other            → run_dray_import()  [generic browser]
+ │   │   └── Collect pending sheet updates
+ │   └── Batch write all updates for tab (single API call)
+ └── Summary
+```
+
+**Key features:**
+- **Stealth**: `playwright_stealth.Stealth().apply_stealth_sync(page)` applied to all browser scrapers
+- **Bot detection**: `detect_bot_block(page)` checks for Cloudflare ("Just a moment", "Attention Required") and Akamai ("Access Denied") challenges after every `page.goto()`
+- **Resource blocking**: Images, fonts, CSS, and analytics domains are blocked via `page.route()` to speed up page loads
+- **Proxy health check**: Tests proxy via httpbin.org before starting; skips all browser scrapers if proxy is down (API routes still run)
+- **Circuit breaker**: Skips a carrier domain after 3 consecutive browser scraper failures (resets per run). Does NOT apply to API routes or proxy-down skips.
+- **Google Sheets retry**: All Sheets API calls wrapped with `sheets_retry()` — exponential backoff on 429 quota errors (up to 5 retries)
+- **Batched writes**: Collects all cell updates during tab processing, writes once per tab instead of per-row
+- **Container trim**: `container_num.strip()` before API calls to handle trailing whitespace in sheet data
+
+**CLI flags:**
+```bash
+python3 csl_bot.py                    # Full run (all tabs, writes to sheet)
+python3 csl_bot.py --dry-run          # Scrape but skip sheet writes/emails
+python3 csl_bot.py --tab DHL          # Process only the DHL tab
+python3 csl_bot.py --tab DHL --dry-run  # Test DHL tab without writes
+```
+
+**JsonCargo API integration:**
+- Reuses the same API key as `export_monitor.py` (`JSONCARGO_API_KEY` from `.env`)
+- Detects shipping line from vessel/carrier text via `_SSL_LINE_MAP`
+- Returns `_fallback` status for unrecognized container prefixes (SELU, BMOU, etc.) → falls back to browser scraper
+- Container events parsed for status keywords: "empty return" → Returned to Port, "gate out" → Released, "discharged" → Discharged, etc.
 
 **What it does per row:**
-1. Reads ETA (Col I), LFD (Col J), Return Date (Col P), Status (Col M) from the sheet.
-2. Compares against last state in `last_check.json` (keyed by `account:container`).
-3. Scrapes Macropoint URL for live status.
-4. Writes updated values back to the sheet (ETA, LFD, Return, Status, Notes).
-5. Emails the account rep if status changes or dates change.
-6. Archives rows to the appropriate Completed tab when load is delivered/complete.
+1. Reads container, BOL, URL, vessel, carrier from sheet (URLs from hyperlinks API)
+2. Routes to appropriate scraper or API based on carrier URL domain
+3. Extracts ETA, Pickup date, Return date, Status
+4. Compares against last state in `last_check.json`
+5. Writes updated values back to sheet (batched per tab)
+6. Emails account rep on changes (if not --dry-run)
+7. Archives delivered rows to Completed tab
 
 **Key constants:**
 - `STATUS_FILTER = "Tracking Waiting for Update"` — only processes rows with this status in Col M
-- `LAST_CHECK_FILE` = `last_check.json`
+- `LAST_CHECK_FILE = last_check.json`
 
 ---
 
@@ -107,7 +159,7 @@ Polls every **60 minutes** for rows where **Col B = "Dray Export"**.
 
 **What it does per row:**
 1. Detects ERD (Col I) and Cutoff (Col J) date changes vs. previous state in `export_state.json`.
-2. Alerts if cutoff is within **48 hours** (`CUTOFF IN Xhr`).
+2. Alerts if cutoff is within **48 hours** (`CUTOFF IN Xhr`). Alert deduped via `cutoff_alerted` flag in state — only fires once per cutoff date. Resets if the cutoff date itself changes.
 3. Detects rail containers via keyword matching (rail, ramp, intermodal, BNSF, Union Pacific, CSX) and flags for manual check.
 4. Uses **JsonCargo API** to:
    - Look up container number from BOL/booking# if Col C is not yet a container number.
@@ -174,7 +226,7 @@ Creates a new Macropoint shipment via Playwright browser automation using saved 
 **Flow:**
 1. Loads cookies from `mp_cookies.json`.
 2. Navigates to Macropoint, checks for session expiry (redirects to auth.gln.com).
-3. Fills in: tracking phone (`4437614954`), load/PRO#, tracking duration (5 days), frequency (15 min), method (Driver Cell Phone).
+3. Fills in: tracking phone (from `MACROPOINT_TRACKING_PHONE`), load/PRO#, tracking duration (5 days), frequency (15 min), method (Driver Cell Phone).
 4. Fills pickup stop: name, address, city, state, zip, appointment time.
 5. Fills delivery stop: same fields.
 6. Saves and returns the resulting tracking URL.
@@ -186,7 +238,9 @@ Creates a new Macropoint shipment via Playwright browser automation using saved 
 
 ### `upload_server.py` — Flask Web UI (port 5001)
 
-Provides a browser-accessible interface for operations staff.
+Provides a browser-accessible interface for operations staff. **Protected by Basic Auth + IP whitelist.**
+
+**Auth:** Username/password from `UPLOAD_SERVER_USERNAME`/`UPLOAD_SERVER_PASSWORD` env vars. IP whitelist from `UPLOAD_SERVER_ALLOWED_IPS` (comma-separated). Uses bcrypt for password verification.
 
 **Routes:**
 
@@ -229,37 +283,46 @@ python3 mp_login_save.py   # prompts for OTP interactively
 
 ---
 
-### `ftl_email_alerts.py` — Legacy Email Alert Module
-
-An older standalone alert module (not called by ftl_monitor.py's main loop). Can be imported for `check_and_alert_on_status()`. Reads `GMAIL_APP_PASSWORD` from environment. Triggers on statuses: `Driver Phone Unresponsive`, `Tracking - Waiting for Update`, `Tracking Waiting for Update`. Deduplication state in `ftl_email_alerts.json`.
-
----
-
-### `mk_export.py` — Code Generator Utility
-
-A bootstrap/deployment script that contains the old export_monitor code as an embedded string and writes it to `export_monitor.py`. Used for redeployment only; `export_monitor.py` is now the live version.
-
----
-
 ## State Files
 
 | File | Keying | Purpose |
 |---|---|---|
 | `last_check.json` | `"account:container"` | Last seen ETA, LFD, Return, Status for import rows |
-| `export_state.json` | `"tab:efj:container"` | Last seen ERD and Cutoff for export rows |
+| `export_state.json` | `"tab:efj:container"` | Last seen ERD, Cutoff, and `cutoff_alerted` flag per export row |
 | `ftl_sent_alerts.json` | `"efj\|load_num"` → `[statuses]` | Prevents duplicate FTL emails per status |
 | `ftl_email_alerts.json` | `"load_id_status"` | Legacy dedup for ftl_email_alerts.py |
 | `mp_cookies.json` | N/A | Macropoint browser session cookies |
 
 ---
 
-## Poll Intervals
+## Services & Scheduling
 
-| Script | Interval |
-|---|---|
-| `csl_bot.py` (imports) | Runs continuously / per-cycle (not a fixed sleep loop — check script for exact timing) |
-| `export_monitor.py` | 60 minutes (`POLL_INTERVAL = 3600`) |
-| `ftl_monitor.py` | 30 minutes (`POLL_INTERVAL = 30 * 60`) |
+### systemd services (long-running)
+
+| Service | Script | Port | Restart |
+|---|---|---|---|
+| `csl-ftl.service` | `ftl_monitor.py` | — | `Restart=always, RestartSec=10` |
+| `csl-export.service` | `export_monitor.py` | — | `Restart=always, RestartSec=10` |
+| `csl-webhook.service` | `webhook.py` | 5000 | `Restart=always, RestartSec=10` |
+| `csl-upload.service` | `upload_server.py` | 5001 | `Restart=always, RestartSec=10` |
+| `csl-bot.service` | `csl_bot.py` | — | `Restart=on-failure, RestartSec=300, StartLimitBurst=3` (disabled — runs via cron) |
+
+**Disabled duplicate services:** `ftl-monitor.service`, `webhook.service`
+
+### Cron schedule
+
+```crontab
+30 7 * * 1-5  cd /root/csl-bot && python3 csl_bot.py >> /tmp/csl_bot_cron.log 2>&1
+30 13 * * 1-5 cd /root/csl-bot && python3 csl_bot.py >> /tmp/csl_bot_cron.log 2>&1
+```
+
+### Service management
+
+```bash
+systemctl status csl-ftl csl-export csl-webhook csl-upload
+systemctl restart csl-ftl       # Restart FTL monitor
+journalctl -u csl-export -f     # Tail export monitor logs
+```
 
 ---
 
@@ -267,43 +330,26 @@ A bootstrap/deployment script that contains the old export_monitor code as an em
 
 ```
 playwright           # Browser automation (headless Chromium)
-playwright_stealth   # Anti-bot detection (used in csl_bot.py only)
+playwright_stealth   # Anti-bot detection (Stealth class, apply_stealth_sync)
 gspread              # Google Sheets API client
 google-auth          # Google service account credentials
 requests             # HTTP calls (JsonCargo API, Sheets API v4 hyperlinks)
 flask                # Web server (upload_server.py, webhook.py)
 pdfplumber           # PDF text extraction (upload_server.py /macropoint route)
 openpyxl             # Excel file parsing (upload_server.py /upload route)
-```
-
----
-
-## Running the Services
-
-```bash
-# Import tracking bot
-python3 /root/csl-bot/csl_bot.py
-
-# Export monitor
-python3 /root/csl-bot/export_monitor.py
-
-# FTL monitor
-python3 /root/csl-bot/ftl_monitor.py
-
-# Web UI (report uploads + Macropoint creation)
-python3 /root/csl-bot/upload_server.py   # port 5001
-
-# Webhook receiver
-python3 /root/csl-bot/webhook.py         # port 5000
-
-# Re-authenticate Macropoint (when session expires)
-python3 /root/csl-bot/mp_login_save.py <OTP>
-# or via browser: http://<server>:5001/mp-login
+python-dotenv        # Load .env credentials
+bcrypt               # Password hashing (upload_server.py auth)
 ```
 
 ---
 
 ## Common Operations
+
+### Test dray import bot
+```bash
+python3 csl_bot.py --tab DHL --dry-run    # Test one tab, no writes
+python3 csl_bot.py --dry-run               # Test all tabs, no writes
+```
 
 ### Macropoint session expired
 Session cookies in `mp_cookies.json` expire periodically. To renew:
@@ -323,10 +369,53 @@ Session cookies in `mp_cookies.json` expire periodically. To renew:
 Set `DEBUG = True` in `ftl_monitor.py` — saves page inner text to `/tmp/mp_debug_<load>.txt` for inspection.
 
 ### Google Sheets 429 quota errors
-`ftl_monitor.py` includes `_retry_on_quota()` which retries up to 3 times with 60/120/180s backoff. Other scripts will print a WARNING and continue.
+- `csl_bot.py`: All Sheets calls wrapped in `sheets_retry()` — exponential backoff, up to 5 retries
+- `ftl_monitor.py`: Uses `_retry_on_quota()` — retries up to 3 times with 60/120/180s backoff
+- Other scripts: Print WARNING and continue
+
+### Oxylabs proxy quota exhausted
+When the proxy traffic limit is reached, `csl_bot.py` detects this via the startup health check and skips all browser-based scrapers. API routes (Maersk, HMM via JsonCargo) continue to work. Check Oxylabs dashboard for quota reset timing.
 
 ---
 
 ## Key Accounts (from state files)
 
-Active accounts seen in production: **DHL, DSV, MGF, Kripke, Rose, EShipping, IWS, MAO, Boviet**
+Active accounts: **Allround, Cadi, Boviet, DHL, DSV, EShipping, IWS, Kripke, MAO, MGF, Rose, USHA**
+
+---
+
+## Change Log
+
+### 2026-02-25 — Stages 1-3 Optimization
+
+**csl_bot.py:**
+- Applied `playwright_stealth.Stealth().apply_stealth_sync(page)` to all 4 browser scrapers (was imported but never called)
+- Added `detect_bot_block(page)` — checks page title for Cloudflare/Akamai challenges after every navigation
+- Added `block_resources(page)` — blocks images, fonts, CSS, analytics via `page.route()`
+- Added `sheets_retry()` wrapper with exponential backoff for all Google Sheets API calls (gspread + raw requests)
+- Added `CircuitBreaker` class — skips carrier domain after 3 consecutive browser scraper failures (excludes API routes)
+- Routed maersk.com through JsonCargo API (was 0% success via browser — Maersk React SPA always timed out)
+- Routed hmm21.com through JsonCargo API (was 100% blocked by Akamai)
+- Added browser fallback for unrecognized container prefixes returned by JsonCargo ("Prefix not found")
+- Added proxy health check at startup — skips browser scrapers when proxy is down
+- Batched Google Sheets writes per tab (reduced API calls from ~96 to ~12)
+- Added `--tab` and `--dry-run` CLI flags
+- Added `.strip()` to container numbers before API calls
+- Backup saved at `csl_bot.py.pre-optimization`
+
+**export_monitor.py:**
+- Fixed duplicate cutoff alert emails — added `cutoff_alerted` flag to state dict, resets when cutoff date changes
+
+**macropoint_creator.py:**
+- Fixed signature mismatch: removed unused `otp` parameter from `__main__` call
+
+**upload_server.py:**
+- Added Basic Auth (bcrypt) + IP whitelist via `@app.before_request`
+
+**All scripts:**
+- Moved all hardcoded credentials to `/root/csl-bot/.env`, loaded via `python-dotenv`
+
+**Infrastructure:**
+- Fixed systemd `csl-bot.service`: `Restart=on-failure, RestartSec=300, StartLimitBurst=3` (prevents infinite restart loops)
+- Disabled duplicate services: `ftl-monitor.service`, `webhook.service`
+- SSH key-based auth configured for deployment

@@ -3,6 +3,7 @@ PostgreSQL database layer for CSL Document Tracker.
 Provides a connection pool and all query/mutation functions.
 """
 
+import json
 import logging
 from contextlib import contextmanager
 from datetime import datetime
@@ -493,3 +494,162 @@ def get_dashboard_stats(account_filter: str = None) -> dict:
             "missing_pod": missing_pod,
             "unmatched_emails": unmatched,
         }
+
+
+# ---------------------------------------------------------------------------
+# Quotes (Rate IQ)
+# ---------------------------------------------------------------------------
+
+def create_quotes_table():
+    """Create quotes table if not exists. Called at startup."""
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS quotes (
+                    id SERIAL PRIMARY KEY,
+                    quote_number VARCHAR(32) UNIQUE NOT NULL,
+                    status VARCHAR(20) DEFAULT 'draft',
+                    pod VARCHAR(256),
+                    final_delivery VARCHAR(256),
+                    final_zip VARCHAR(20),
+                    round_trip_miles VARCHAR(32),
+                    one_way_miles VARCHAR(32),
+                    transit_time VARCHAR(64),
+                    duration_hours FLOAT,
+                    shipment_type VARCHAR(32) DEFAULT 'Dray',
+                    carrier_name VARCHAR(256),
+                    carrier_total FLOAT DEFAULT 0,
+                    margin_pct FLOAT DEFAULT 15,
+                    sell_subtotal FLOAT DEFAULT 0,
+                    accessorial_total FLOAT DEFAULT 0,
+                    estimated_total FLOAT DEFAULT 0,
+                    customer_name VARCHAR(256),
+                    customer_email VARCHAR(256),
+                    linehaul_json JSONB,
+                    accessorials_json JSONB,
+                    terms_json JSONB,
+                    route_json JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+    log.info("quotes table ready")
+
+
+def _next_quote_number() -> str:
+    """Generate next quote number like CSL-Q-0001."""
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT quote_number FROM quotes ORDER BY id DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        if row and row["quote_number"]:
+            try:
+                num = int(row["quote_number"].split("-")[-1]) + 1
+            except (ValueError, IndexError):
+                num = 1
+        else:
+            num = 1
+        return f"CSL-Q-{num:04d}"
+
+
+def insert_quote(data: dict) -> dict:
+    """Insert a new quote, auto-generating quote_number. Returns the row."""
+    qn = _next_quote_number()
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute("""
+                INSERT INTO quotes
+                    (quote_number, status, pod, final_delivery, final_zip,
+                     round_trip_miles, one_way_miles, transit_time, duration_hours,
+                     shipment_type, carrier_name, carrier_total, margin_pct,
+                     sell_subtotal, accessorial_total, estimated_total,
+                     customer_name, customer_email,
+                     linehaul_json, accessorials_json, terms_json, route_json)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING *
+            """, (
+                qn, data.get("status", "draft"),
+                data.get("pod"), data.get("final_delivery"), data.get("final_zip"),
+                data.get("round_trip_miles"), data.get("one_way_miles"),
+                data.get("transit_time"), data.get("duration_hours"),
+                data.get("shipment_type", "Dray"),
+                data.get("carrier_name"), data.get("carrier_total", 0),
+                data.get("margin_pct", 15),
+                data.get("sell_subtotal", 0), data.get("accessorial_total", 0),
+                data.get("estimated_total", 0),
+                data.get("customer_name"), data.get("customer_email"),
+                json.dumps(data.get("linehaul_items")),
+                json.dumps(data.get("accessorials")),
+                json.dumps(data.get("terms")),
+                json.dumps(data.get("route")),
+            ))
+            return dict(cur.fetchone())
+
+
+def update_quote(quote_id: int, data: dict) -> dict:
+    """Update an existing quote. Returns the updated row."""
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute("""
+                UPDATE quotes SET
+                    status = %s, pod = %s, final_delivery = %s, final_zip = %s,
+                    round_trip_miles = %s, one_way_miles = %s,
+                    transit_time = %s, duration_hours = %s,
+                    shipment_type = %s, carrier_name = %s, carrier_total = %s,
+                    margin_pct = %s, sell_subtotal = %s, accessorial_total = %s,
+                    estimated_total = %s, customer_name = %s, customer_email = %s,
+                    linehaul_json = %s, accessorials_json = %s,
+                    terms_json = %s, route_json = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+            """, (
+                data.get("status", "draft"),
+                data.get("pod"), data.get("final_delivery"), data.get("final_zip"),
+                data.get("round_trip_miles"), data.get("one_way_miles"),
+                data.get("transit_time"), data.get("duration_hours"),
+                data.get("shipment_type", "Dray"),
+                data.get("carrier_name"), data.get("carrier_total", 0),
+                data.get("margin_pct", 15),
+                data.get("sell_subtotal", 0), data.get("accessorial_total", 0),
+                data.get("estimated_total", 0),
+                data.get("customer_name"), data.get("customer_email"),
+                json.dumps(data.get("linehaul_items")),
+                json.dumps(data.get("accessorials")),
+                json.dumps(data.get("terms")),
+                json.dumps(data.get("route")),
+                quote_id,
+            ))
+            row = cur.fetchone()
+            if not row:
+                return None
+            return dict(row)
+
+
+def get_quote(quote_id: int) -> Optional[dict]:
+    with get_cursor() as cur:
+        cur.execute("SELECT * FROM quotes WHERE id = %s", (quote_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def list_quotes(status: str = None, search: str = None, limit: int = 50, offset: int = 0) -> list:
+    with get_cursor() as cur:
+        where_clauses = []
+        params = []
+        if status:
+            where_clauses.append("status = %s")
+            params.append(status)
+        if search:
+            where_clauses.append(
+                "(quote_number ILIKE %s OR customer_name ILIKE %s OR pod ILIKE %s OR final_delivery ILIKE %s)"
+            )
+            s = f"%{search}%"
+            params.extend([s, s, s, s])
+        where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        cur.execute(
+            f"SELECT * FROM quotes {where} ORDER BY created_at DESC LIMIT %s OFFSET %s",
+            params + [limit, offset],
+        )
+        return [dict(r) for r in cur.fetchall()]

@@ -1,15 +1,49 @@
 #!/usr/bin/env python3
+import os
 from flask import Flask,request,render_template_string
 import gspread,os,io,csv,openpyxl,re
 from datetime import datetime
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
+from dotenv import load_dotenv
 
-SHEET_ID="19MB5HmmWwsVXY_nADCYYLJL-zWXYt8yWrfeRBSfB2S0"
-CREDENTIALS_FILE="/root/csl-credentials.json"
+import bcrypt
+from functools import wraps
+
+load_dotenv()
+
+# ── Auth config ─────────────────────────────────────────────────────────────
+_UPLOAD_USER = os.environ["UPLOAD_SERVER_USERNAME"]
+_UPLOAD_PASS = os.environ["UPLOAD_SERVER_PASSWORD"].encode()
+_UPLOAD_HASH = bcrypt.hashpw(_UPLOAD_PASS, bcrypt.gensalt())
+_ALLOWED_IPS = set(
+    ip.strip()
+    for ip in os.environ.get("UPLOAD_SERVER_ALLOWED_IPS", "").split(",")
+    if ip.strip()
+)
+
+def _check_auth(username, password):
+    return (username == _UPLOAD_USER
+            and bcrypt.checkpw(password.encode(), _UPLOAD_HASH))
+
+def _get_remote_ip():
+    return request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+
+SHEET_ID=os.environ["SHEET_ID"]
+CREDENTIALS_FILE=os.environ.get("GOOGLE_CREDENTIALS_FILE","/root/csl-credentials.json")
 SCOPES=["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
 SKIP_TABS={"Sheet 4","Account Rep","Completed Eli","Completed Radka"}
 app=Flask(__name__)
+
+@app.before_request
+def _require_auth():
+    remote_ip = _get_remote_ip()
+    if _ALLOWED_IPS and remote_ip not in _ALLOWED_IPS:
+        return "Forbidden", 403
+    auth = request.authorization
+    if not auth or not _check_auth(auth.username, auth.password):
+        return ("Unauthorized", 401,
+                {"WWW-Authenticate": "Basic realm=\"CSL Upload Server\""})
 
 def _parse_pickup(s):
     if not s: return ''
@@ -454,7 +488,7 @@ with sync_playwright() as p:
     page.fill('input[name="UserName"]', 'john.feltz@evansdelivery.com')
     page.click('input[id="UsernameNext"]')
     page.wait_for_timeout(2000)
-    page.fill('input[name="Password"]', 'MFdoom1131@1')
+    page.fill('input[name="Password"]', os.environ["MACROPOINT_PASSWORD"])
     page.click('input[id="Login"]')
     page.wait_for_load_state('networkidle', timeout=20000)
     print('OTP_SENT' if 'Otp' in page.url or 'TwoFactor' in page.url else 'NO_OTP')

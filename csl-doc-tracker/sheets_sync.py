@@ -86,8 +86,19 @@ def sync_once():
         if not rows:
             continue
 
-        header = rows[0]
-        # Build column index mapping: normalized header → column_index
+        # Detect header row: row 0 may be a junk/banner row (e.g. "DTCELNJW"),
+        # with actual column headers in row 1.
+        header_row_idx = 0
+        if len(rows) > 1:
+            row0_nonblank = sum(1 for c in rows[0] if c.strip())
+            row1_nonblank = sum(1 for c in rows[1] if c.strip())
+            # If row 1 has more non-blank cells, it is the real header
+            if row1_nonblank > row0_nonblank:
+                header_row_idx = 1
+
+        header = rows[header_row_idx]
+        data_rows = rows[header_row_idx + 1:]
+        # Build column index mapping: normalized header -> column_index
         header_index = {h.strip(): i for i, h in enumerate(header)}
         header_index_lower = {h.strip().lower(): i for i, h in enumerate(header)}
 
@@ -102,7 +113,7 @@ def sync_once():
         if "efj" not in ref_columns:
             # Fallback: use known fixed column positions from the sheet layout
             # Col A (0) = EFJ#, Col C (2) = Container#, Col D (3) = BOL/Booking#
-            if rows and len(rows[0]) >= 4 and rows[0][0].strip().upper().startswith("EFJ"):
+            if header and len(header) >= 4 and header[0].strip().upper().startswith("EFJ"):
                 ref_columns = {"efj": 0, "container": 2, "bol": 3}
                 log.debug("Tab '%s': using fallback column positions", ws.title)
             else:
@@ -116,7 +127,7 @@ def sync_once():
         cust_ref_col = header_index.get(config.SHEET_CUSTOMER_REF_COLUMN)
         cust_name_col = header_index.get(config.SHEET_CUSTOMER_NAME_COLUMN)
 
-        for row in rows[1:]:
+        for row in data_rows:
             if efj_col >= len(row):
                 continue
             efj_num = row[efj_col].strip()

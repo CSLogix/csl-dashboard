@@ -77,6 +77,9 @@ MAILBOX_ORIGIN_MAP = {
     "tolead@evansdelivery.com": "Tolead",
 }
 
+# --- Anthropic (Claude Vision for Rate IQ) ---
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
 # --- Logging ---
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FILE = os.getenv("LOG_FILE", "csl_doc_tracker.log")

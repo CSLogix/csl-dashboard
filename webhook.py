@@ -3,12 +3,15 @@ import json
 import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import os
+from dotenv import load_dotenv
+load_dotenv()
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-BASIC_AUTH_USERNAME = "cslbot"
-BASIC_AUTH_PASSWORD = "AcGG1Mc51MhCdPd5784zr2mETZuZR8oyqceEUNiDlWw"
+BASIC_AUTH_USERNAME = os.environ["WEBHOOK_AUTH_USERNAME"]
+BASIC_AUTH_PASSWORD = os.environ["WEBHOOK_AUTH_PASSWORD"]
 LOG_FILE = "/root/csl-bot/webhook_payloads.log"
 
 
@@ -45,4 +48,4 @@ def webhook():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5003)

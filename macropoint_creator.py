@@ -7,6 +7,9 @@ import re, sys, json, time, os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from playwright.sync_api import sync_playwright
+from dotenv import load_dotenv
+
+load_dotenv()
 
 STATE_FILE  = "/tmp/mp_state.json"
 RESULT_FILE = "/tmp/mp_result.json"
@@ -44,9 +47,9 @@ MP_TZ_LABELS = {
 }
 
 MACROPOINT_URL = "https://visibility.macropoint.com/"
-MP_USER        = "john.feltz@evansdelivery.com"
-MP_PASS        = "MFdoom1131@1"
-TRACKING_PHONE = "4437614954"
+MP_USER        = os.environ["MACROPOINT_USER"]
+MP_PASS        = os.environ["MACROPOINT_PASSWORD"]
+TRACKING_PHONE = os.environ.get("MACROPOINT_TRACKING_PHONE", "4437614954")
 
 def get_tz_label(state):
     tz = STATE_TZ.get(state.upper(), "America/Chicago")
@@ -222,9 +225,9 @@ def create_macropoint(data):
 if __name__ == '__main__':
     args = json.loads(sys.argv[1])
     data = args.get("data", args)
-    otp  = args.get("otp", None)
+
     try:
-        result = create_macropoint(data, otp=otp)
+        result = create_macropoint(data)
         print(json.dumps(result))
     except Exception as e:
         print(json.dumps({"status": "error", "error": str(e)}))
