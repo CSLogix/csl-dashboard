@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useAppStore } from "./store";
+import QuoteBuilder from "./QuoteBuilder";
 
 // ─── API Configuration ───
 const API_BASE = "";
@@ -125,6 +126,14 @@ const BILLING_STATUS_COLORS = {
   cx_approved: { main: "#14B8A6", glow: "#14B8A633" },
 };
 
+// Unbilled orders billing workflow
+const UNBILLED_BILLING_FLOW = [
+  { key: "ready_to_bill", label: "Ready to Bill", color: "#fbbf24" },
+  { key: "billed_cx", label: "Billed CX", color: "#3b82f6" },
+  { key: "driver_paid", label: "Driver Paid", color: "#f97316" },
+  { key: "closed", label: "Closed", color: "#34d399" },
+];
+
 const STATUS_COLORS = {
   at_port: { main: "#F97316", glow: "#F9731633" },
   on_vessel: { main: "#2563EB", glow: "#2563EB33" },
@@ -216,6 +225,7 @@ const NAV_ITEMS = [
   { key: "dashboard", label: "Dashboard", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4" },
   { key: "dispatch", label: "Dispatch", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" },
   { key: "history", label: "History", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
+  { key: "quotes", label: "Rate IQ", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
   { key: "analytics", label: "Analytics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
   { key: "unbilled", label: "Unbilled", icon: "M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2zM10 8.5a.5.5 0 11-1 0 .5.5 0 011 0zm5 5a.5.5 0 11-1 0 .5.5 0 011 0z" },
   { key: "bol", label: "BOL Gen", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
@@ -937,7 +947,7 @@ export default function DispatchDashboard() {
       <div className="dash-sidebar" style={{ width: sidebarW, minHeight: "100vh", background: "#0D1119", borderRight: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 16, gap: 4, position: "relative", zIndex: 20, flexShrink: 0 }}>
         <div style={{ width: 40, height: 40, borderRadius: 10, background: "#0F1A14", border: "1px solid rgba(0,222,180,0.20)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20, animation: "glow-pulse 3s ease infinite", cursor: "pointer", overflow: "hidden", padding: 2 }}
           onClick={() => { setActiveView("dashboard"); setSelectedRep(null); }}>
-          <img src="/assets/logo.svg" alt="CSL" style={{ width: 34, height: 34, objectFit: "contain", filter: "hue-rotate(-15deg) saturate(1.3)" }} />
+          <img src="/logo.svg" alt="CSL" style={{ width: 34, height: 34, objectFit: "contain", filter: "hue-rotate(-15deg) saturate(1.3)" }} />
         </div>
         {NAV_ITEMS.map(item => {
           const isActive = activeView === item.key;
@@ -1028,6 +1038,9 @@ export default function DispatchDashboard() {
           )}
           {activeView === "history" && (
             <HistoryView loaded={loaded} handleLoadClick={handleLoadClick} />
+          )}
+          {activeView === "quotes" && (
+            <RateIQView />
           )}
           {activeView === "analytics" && (
             <AnalyticsView loaded={loaded} botStatus={botStatus} botHealth={botHealth} sheetLog={sheetLog} />
@@ -2065,6 +2078,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
   const [driverEditing, setDriverEditing] = useState(null); // which field is being edited
   const [driverEditVal, setDriverEditVal] = useState("");
   const [driverSaving, setDriverSaving] = useState(false);
+  const [statusExpanded, setStatusExpanded] = useState(false);
 
   // Fetch tracking + documents + driver info when slide-over opens
   useEffect(() => {
@@ -2076,6 +2090,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
       setDriverInfo({ driverName: "", driverPhone: "", driverEmail: "", carrierEmail: "", trailerNumber: "", macropointUrl: "" });
       setDriverEditing(null);
       setLoadEmails([]);
+      setStatusExpanded(false);
       return;
     }
     // Fetch documents
@@ -2180,6 +2195,30 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
   const getFileExt = (name) => name?.split(".").pop().toLowerCase() || "";
   const isImage = (name) => ["png", "jpg", "jpeg", "tiff"].includes(getFileExt(name));
   const isPdf = (name) => getFileExt(name) === "pdf";
+
+  // Parse tracking timeline for schedule grid
+  const parsedStops = useMemo(() => {
+    const pickup = { arrived: null, departed: null, eta: null };
+    const delivery = { arrived: null, departed: null, eta: null };
+    if (trackingData?.timeline?.length > 0) {
+      trackingData.timeline.forEach(ev => {
+        const e = ev.event?.toLowerCase() || "";
+        if (e.includes("pickup") || e.includes("origin")) {
+          if (ev.type === "arrived" || e.includes("arrived")) pickup.arrived = ev.time;
+          if (ev.type === "departed" || e.includes("departed")) pickup.departed = ev.time;
+        }
+        if (e.includes("delivery") || e.includes("destination")) {
+          if (ev.type === "arrived" || e.includes("arrived")) delivery.arrived = ev.time;
+          if (ev.type === "departed" || e.includes("departed")) delivery.departed = ev.time;
+        }
+        if (ev.type === "eta") {
+          if (e.includes("pickup")) pickup.eta = ev.time;
+          if (e.includes("delivery")) delivery.eta = ev.time;
+        }
+      });
+    }
+    return { pickup, delivery };
+  }, [trackingData]);
 
   if (!selectedShipment) return null;
 
@@ -2314,44 +2353,87 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
             </div>
           )}
 
-          {/* Status Selector — move-type aware */}
-          <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Status</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-              {getStatusesForShipment(selectedShipment).filter(s => s.key !== "all").map(s => {
-                const isActive = selectedShipment.status === s.key;
-                const sc2 = getStatusColors(selectedShipment)[s.key] || { main: "#94a3b8" };
-                return (
-                  <button key={s.key} onClick={() => handleStatusUpdate(selectedShipment.id, s.key)}
-                    style={{ padding: "4px 10px", fontSize: 9, fontWeight: 700, borderRadius: 20,
-                      border: `1px solid ${isActive ? sc2.main + "66" : "rgba(255,255,255,0.06)"}`,
-                      background: isActive ? `${sc2.main}18` : "transparent",
-                      color: isActive ? sc2.main : "#64748b", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{s.label}</button>
-                );
-              })}
+          {/* Schedule Grid — PU/DEL dates + actual arrival/departure */}
+          {(selectedShipment.pickupDate || selectedShipment.deliveryDate || parsedStops.pickup.arrived || parsedStops.delivery.arrived) && (
+            <div style={{ padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 6, textTransform: "uppercase" }}>Schedule</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px" }}>
+                {[
+                  { label: "PU Scheduled", value: selectedShipment.pickupDate, color: "#F0F2F5" },
+                  { label: "DEL Scheduled", value: selectedShipment.deliveryDate, color: "#F0F2F5" },
+                  { label: "PU Arrived", value: parsedStops.pickup.arrived, color: "#34d399" },
+                  { label: "DEL Arrived", value: parsedStops.delivery.arrived, color: "#34d399" },
+                  { label: "PU Departed", value: parsedStops.pickup.departed, color: "#60a5fa" },
+                  { label: "DEL Departed", value: parsedStops.delivery.departed, color: "#60a5fa" },
+                ].filter(item => item.value).map(({ label, value, color }) => (
+                  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 0" }}>
+                    <span style={{ fontSize: 8, color: "#5A6478", fontWeight: 600, letterSpacing: "0.3px", textTransform: "uppercase" }}>{label}</span>
+                    <span style={{ fontSize: 10, color, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>{value}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            {/* Billing statuses — shown for delivered/post-delivery loads */}
-            {(["delivered", "empty_return", "need_pod", "pod_received", "driver_paid", "ready_to_close", "missing_invoice", "billed_closed", "ppwk_needed", "waiting_confirmation", "waiting_cx_approval", "cx_approved"].includes(selectedShipment.status)) && (
-              <>
-                <div style={{ fontSize: 8, fontWeight: 700, color: "#5A6478", letterSpacing: "2px", marginTop: 10, marginBottom: 6, textTransform: "uppercase" }}>Billing</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                  {BILLING_STATUSES.map(s => {
-                    const isActive = selectedShipment.status === s.key;
-                    const sc2 = BILLING_STATUS_COLORS[s.key] || { main: "#94a3b8" };
-                    return (
-                      <button key={s.key} onClick={() => handleStatusUpdate(selectedShipment.id, s.key)}
-                        style={{ padding: "3px 8px", fontSize: 8, fontWeight: 700, borderRadius: 16,
-                          border: `1px solid ${isActive ? sc2.main + "66" : "rgba(255,255,255,0.06)"}`,
-                          background: isActive ? `${sc2.main}18` : "transparent",
-                          color: isActive ? sc2.main : "#64748b", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{s.label}</button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-          </div>
+          )}
 
-          {/* Fields + Driver Contact */}
+          {/* Status Selector — collapsible, move-type aware */}
+          {(() => {
+            const allStatuses = [...getStatusesForShipment(selectedShipment).filter(s => s.key !== "all"), ...BILLING_STATUSES];
+            const activeStatus = allStatuses.find(s => s.key === selectedShipment.status);
+            const activeColor = (getStatusColors(selectedShipment)[selectedShipment.status] || BILLING_STATUS_COLORS[selectedShipment.status] || { main: "#94a3b8" }).main;
+            return (
+              <div style={{ padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                <div onClick={() => setStatusExpanded(!statusExpanded)}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", userSelect: "none" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", textTransform: "uppercase" }}>Status</span>
+                    {!statusExpanded && activeStatus && (
+                      <span style={{ padding: "3px 10px", fontSize: 9, fontWeight: 700, borderRadius: 20,
+                        border: `1px solid ${activeColor}66`, background: `${activeColor}18`, color: activeColor,
+                        fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{activeStatus.label}</span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: 10, color: "#5A6478", transition: "transform 0.15s" }}>{statusExpanded ? "▾" : "▸"}</span>
+                </div>
+                {statusExpanded && (
+                  <>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
+                      {getStatusesForShipment(selectedShipment).filter(s => s.key !== "all").map(s => {
+                        const isActive = selectedShipment.status === s.key;
+                        const sc2 = getStatusColors(selectedShipment)[s.key] || { main: "#94a3b8" };
+                        return (
+                          <button key={s.key} onClick={() => handleStatusUpdate(selectedShipment.id, s.key)}
+                            style={{ padding: "4px 10px", fontSize: 9, fontWeight: 700, borderRadius: 20,
+                              border: `1px solid ${isActive ? sc2.main + "66" : "rgba(255,255,255,0.06)"}`,
+                              background: isActive ? `${sc2.main}18` : "transparent",
+                              color: isActive ? sc2.main : "#64748b", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{s.label}</button>
+                        );
+                      })}
+                    </div>
+                    {(["delivered", "empty_return", "need_pod", "pod_received", "driver_paid", "ready_to_close", "missing_invoice", "billed_closed", "ppwk_needed", "waiting_confirmation", "waiting_cx_approval", "cx_approved"].includes(selectedShipment.status)) && (
+                      <>
+                        <div style={{ fontSize: 8, fontWeight: 700, color: "#5A6478", letterSpacing: "2px", marginTop: 10, marginBottom: 6, textTransform: "uppercase" }}>Billing</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                          {BILLING_STATUSES.map(s => {
+                            const isActive = selectedShipment.status === s.key;
+                            const sc2 = BILLING_STATUS_COLORS[s.key] || { main: "#94a3b8" };
+                            return (
+                              <button key={s.key} onClick={() => handleStatusUpdate(selectedShipment.id, s.key)}
+                                style={{ padding: "3px 8px", fontSize: 8, fontWeight: 700, borderRadius: 16,
+                                  border: `1px solid ${isActive ? sc2.main + "66" : "rgba(255,255,255,0.06)"}`,
+                                  background: isActive ? `${sc2.main}18` : "transparent",
+                                  color: isActive ? sc2.main : "#64748b", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{s.label}</button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Unified Fields Grid — shipment details + driver contact */}
           <div style={{ padding: "14px 20px" }}>
             {[
               { label: "Account", field: "account", val: selectedShipment.account },
@@ -2365,62 +2447,55 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
               ] : []),
               { label: "Pickup", field: "pickupDate", val: selectedShipment.pickupDate },
               { label: "Delivery", field: "deliveryDate", val: selectedShipment.deliveryDate },
-            ].map(({ label, field, val }) => (
-              <div key={field} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                <span style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>{label}</span>
-                {editField === `${selectedShipment.id}-${field}` ? (
-                  <input autoFocus value={editValue}
-                    onChange={e => setEditValue(e.target.value)}
-                    onBlur={() => { if (editValue.trim()) handleFieldEdit(selectedShipment.id, field, editValue); else setEditField(null); }}
-                    onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditField(null); }}
-                    style={{ background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, color: "#F0F2F5", padding: "3px 8px", fontSize: 11, width: 140, textAlign: "right", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
-                ) : (
-                  <span onClick={(e) => { e.stopPropagation(); setEditField(`${selectedShipment.id}-${field}`); setEditValue(String(val)); }}
-                    style={{ fontSize: 11, color: "#F0F2F5", cursor: "pointer", padding: "2px 6px", borderRadius: 4, fontWeight: 500 }}
-                    title="Click to edit">{val || "—"}</span>
-                )}
-              </div>
-            ))}
-
-            {/* Driver / Tracking fields (FTL + Macropoint loads) */}
-            {(selectedShipment.moveType === "FTL" || selectedShipment.macropointUrl) && (<>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "#5A6478", letterSpacing: "2px", textTransform: "uppercase", padding: "10px 0 4px", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>Driver / Tracking</div>
-              {[
-                { label: "Driver", dField: "driverName", val: driverInfo.driverName, placeholder: "Add name" },
-                { label: "Phone", dField: "driverPhone", val: driverInfo.driverPhone, placeholder: "(555) 555-5555", action: driverInfo.driverPhone ? "call" : null },
-                { label: "Email", dField: "driverEmail", val: driverInfo.driverEmail, placeholder: "driver@email.com", action: driverInfo.driverEmail ? "email" : null },
-                { label: "Carrier Email", dField: "carrierEmail", val: driverInfo.carrierEmail, placeholder: "carrier@email.com", action: driverInfo.carrierEmail ? "email" : null },
-                { label: "Trailer", dField: "trailerNumber", val: driverInfo.trailerNumber, placeholder: "Trailer #" },
-                { label: "MP URL", dField: "macropointUrl", val: driverInfo.macropointUrl || selectedShipment.macropointUrl, placeholder: "Set URL" },
-              ].map(({ label, dField, val, placeholder, action }) => (
-                <div key={dField} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                  <span style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>{label}</span>
+              // Driver contact fields (inline with shipment details)
+              ...((selectedShipment.moveType === "FTL" || selectedShipment.macropointUrl) ? [
+                { label: "Driver", dField: "driverName", val: driverInfo.driverName, placeholder: "Add name", isDriver: true },
+                { label: "Phone", dField: "driverPhone", val: driverInfo.driverPhone, placeholder: "(555) 555-5555", action: driverInfo.driverPhone ? "call" : null, isDriver: true },
+                { label: "Email", dField: "driverEmail", val: driverInfo.driverEmail, placeholder: "driver@email.com", action: driverInfo.driverEmail ? "email" : null, isDriver: true },
+                { label: "Carrier Email", dField: "carrierEmail", val: driverInfo.carrierEmail, placeholder: "carrier@email.com", action: driverInfo.carrierEmail ? "email" : null, isDriver: true },
+                { label: "Trailer", dField: "trailerNumber", val: driverInfo.trailerNumber, placeholder: "Trailer #", isDriver: true },
+                { label: "MP URL", dField: "macropointUrl", val: driverInfo.macropointUrl || selectedShipment.macropointUrl, placeholder: "Set URL", isDriver: true },
+              ] : []),
+            ].map((item) => (
+              <div key={item.field || item.dField} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                <span style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>{item.label}</span>
+                {item.isDriver ? (
                   <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                    {driverEditing === dField ? (
+                    {driverEditing === item.dField ? (
                       <input autoFocus value={driverEditVal}
                         onChange={e => setDriverEditVal(e.target.value)}
-                        onBlur={() => saveDriverField(dField, driverEditVal)}
+                        onBlur={() => saveDriverField(item.dField, driverEditVal)}
                         onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setDriverEditing(null); }}
-                        placeholder={placeholder}
+                        placeholder={item.placeholder}
                         style={{ background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, color: "#F0F2F5", padding: "3px 8px", fontSize: 11, width: 140, textAlign: "right", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
                     ) : (
-                      <span onClick={() => { setDriverEditing(dField); setDriverEditVal(val || ""); }}
-                        style={{ fontSize: 11, color: dField === "macropointUrl" && val ? "#00D4AA" : val ? "#F0F2F5" : "#3D4557", cursor: "pointer", fontWeight: 500,
-                          maxWidth: action ? 130 : 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                        title="Click to edit">{val || placeholder}</span>
+                      <span onClick={() => { setDriverEditing(item.dField); setDriverEditVal(item.val || ""); }}
+                        style={{ fontSize: 11, color: item.dField === "macropointUrl" && item.val ? "#00D4AA" : item.val ? "#F0F2F5" : "#3D4557", cursor: "pointer", fontWeight: 500,
+                          maxWidth: item.action ? 130 : 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        title="Click to edit">{item.val || item.placeholder}</span>
                     )}
-                    {action === "call" && (
-                      <a href={`tel:${val.replace(/\D/g, "")}`}
+                    {item.action === "call" && (
+                      <a href={`tel:${item.val.replace(/\D/g, "")}`}
                         style={{ padding: "2px 6px", borderRadius: 4, background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.3)", color: "#10b981", fontSize: 8, fontWeight: 700, textDecoration: "none" }}>Call</a>
                     )}
-                    {action === "email" && (
-                      <a href={`mailto:${val}?subject=${encodeURIComponent(`${selectedShipment.loadNumber} - ${selectedShipment.container} Update`)}`}
+                    {item.action === "email" && (
+                      <a href={`mailto:${item.val}?subject=${encodeURIComponent(`${selectedShipment.loadNumber} - ${selectedShipment.container} Update`)}`}
                         style={{ padding: "2px 6px", borderRadius: 4, background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#3b82f6", fontSize: 8, fontWeight: 700, textDecoration: "none" }}>Email</a>
                     )}
                   </div>
-                </div>
-              ))}
-            </>)}
+                ) : editField === `${selectedShipment.id}-${item.field}` ? (
+                  <input autoFocus value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    onBlur={() => { if (editValue.trim()) handleFieldEdit(selectedShipment.id, item.field, editValue); else setEditField(null); }}
+                    onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditField(null); }}
+                    style={{ background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, color: "#F0F2F5", padding: "3px 8px", fontSize: 11, width: 140, textAlign: "right", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
+                ) : (
+                  <span onClick={(e) => { e.stopPropagation(); setEditField(`${selectedShipment.id}-${item.field}`); setEditValue(String(item.val)); }}
+                    style={{ fontSize: 11, color: "#F0F2F5", cursor: "pointer", padding: "2px 6px", borderRadius: 4, fontWeight: 500 }}
+                    title="Click to edit">{item.val || "—"}</span>
+                )}
+              </div>
+            ))}
           </div>
 
           {/* Notes */}
@@ -3380,100 +3455,17 @@ function DispatchView({
                 </div>
               )}
 
-              {/* Driver Contact Card */}
-              {(selectedShipment.moveType === "FTL" || selectedShipment.macropointUrl) && (
-                <div style={{ padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                  <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 10, textTransform: "uppercase" }}>Driver Contact</div>
-                  <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)", padding: "10px 12px" }}>
-                    {/* Driver Name */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                      <span style={{ fontSize: 9, color: "#5A6478", fontWeight: 600 }}>NAME</span>
-                      {driverEditing === "driverName" ? (
-                        <input autoFocus value={driverEditVal}
-                          onChange={e => setDriverEditVal(e.target.value)}
-                          onBlur={() => saveDriverField("driverName", driverEditVal)}
-                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setDriverEditing(null); }}
-                          placeholder="Driver name"
-                          style={{ background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, color: "#F0F2F5", padding: "3px 8px", fontSize: 11, width: 160, textAlign: "right", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
-                      ) : (
-                        <span onClick={() => { setDriverEditing("driverName"); setDriverEditVal(driverInfo.driverName || ""); }}
-                          style={{ fontSize: 11, color: driverInfo.driverName ? "#F0F2F5" : "#3D4557", cursor: "pointer", padding: "2px 6px", borderRadius: 4, fontWeight: 500 }}
-                          title="Click to edit">{driverInfo.driverName || "Add name"}</span>
-                      )}
-                    </div>
-                    {/* Driver Phone + Call Button */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                      <span style={{ fontSize: 9, color: "#5A6478", fontWeight: 600 }}>PHONE</span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        {driverEditing === "driverPhone" ? (
-                          <input autoFocus value={driverEditVal}
-                            onChange={e => setDriverEditVal(e.target.value)}
-                            onBlur={() => saveDriverField("driverPhone", driverEditVal)}
-                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setDriverEditing(null); }}
-                            placeholder="(555) 555-5555"
-                            style={{ background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, color: "#F0F2F5", padding: "3px 8px", fontSize: 11, width: 130, textAlign: "right", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
-                        ) : (
-                          <span onClick={() => { setDriverEditing("driverPhone"); setDriverEditVal(driverInfo.driverPhone || ""); }}
-                            style={{ fontSize: 11, color: driverInfo.driverPhone ? "#F0F2F5" : "#3D4557", cursor: "pointer", fontWeight: 500 }}
-                            title="Click to edit">{driverInfo.driverPhone || "Add phone"}</span>
-                        )}
-                        {driverInfo.driverPhone && (
-                          <a href={`tel:${driverInfo.driverPhone.replace(/\D/g, "")}`}
-                            style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "3px 8px", borderRadius: 6,
-                              background: "linear-gradient(135deg, #10b98122, #10b98133)", border: "1px solid #10b98144",
-                              color: "#10b981", fontSize: 9, fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap" }}
-                            title="Call driver">
-                            Call
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                    {/* Driver Email */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontSize: 9, color: "#5A6478", fontWeight: 600 }}>EMAIL</span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        {driverEditing === "driverEmail" ? (
-                          <input autoFocus value={driverEditVal}
-                            onChange={e => setDriverEditVal(e.target.value)}
-                            onBlur={() => saveDriverField("driverEmail", driverEditVal)}
-                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setDriverEditing(null); }}
-                            placeholder="driver@email.com"
-                            style={{ background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, color: "#F0F2F5", padding: "3px 8px", fontSize: 11, width: 160, textAlign: "right", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
-                        ) : (
-                          <span onClick={() => { setDriverEditing("driverEmail"); setDriverEditVal(driverInfo.driverEmail || ""); }}
-                            style={{ fontSize: 11, color: driverInfo.driverEmail ? "#F0F2F5" : "#3D4557", cursor: "pointer", fontWeight: 500 }}
-                            title="Click to edit">{driverInfo.driverEmail || "Add email"}</span>
-                        )}
-                        {driverInfo.driverEmail && (
-                          <a href={`mailto:${driverInfo.driverEmail}?subject=${encodeURIComponent(`${selectedShipment.loadNumber} - ${selectedShipment.container} Update`)}`}
-                            style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "3px 8px", borderRadius: 6,
-                              background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)",
-                              color: "#3b82f6", fontSize: 9, fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap" }}
-                            title="Email driver">
-                            Email
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  {/* Behind schedule / Can't make it warning */}
-                  {trackingData?.cantMakeIt && (
-                    <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 12 }}>⚠</span>
-                      <span style={{ fontSize: 10, color: "#f87171", fontWeight: 600 }}>{trackingData.cantMakeIt}</span>
-                    </div>
-                  )}
-                  {trackingData?.behindSchedule && !trackingData?.cantMakeIt && (
-                    <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 12 }}>⏱</span>
-                      <span style={{ fontSize: 10, color: "#fb923c", fontWeight: 600 }}>Behind Schedule</span>
-                    </div>
-                  )}
-                  {trackingData?.lastScraped && (
-                    <div style={{ marginTop: 6, fontSize: 9, color: "#3D4557", textAlign: "right" }}>
-                      Last updated: {trackingData.lastScraped}
-                    </div>
-                  )}
+              {/* Tracking warnings */}
+              {trackingData?.cantMakeIt && (
+                <div style={{ margin: "0 20px 8px", padding: "8px 12px", borderRadius: 8, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 12 }}>⚠</span>
+                  <span style={{ fontSize: 10, color: "#f87171", fontWeight: 600 }}>{trackingData.cantMakeIt}</span>
+                </div>
+              )}
+              {trackingData?.behindSchedule && !trackingData?.cantMakeIt && (
+                <div style={{ margin: "0 20px 8px", padding: "8px 12px", borderRadius: 8, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 12 }}>⏱</span>
+                  <span style={{ fontSize: 10, color: "#fb923c", fontWeight: 600 }}>Behind Schedule</span>
                 </div>
               )}
 
@@ -3495,7 +3487,7 @@ function DispatchView({
                 </div>
               </div>
 
-              {/* Fields */}
+              {/* Unified Fields Grid — shipment details + driver contact */}
               <div style={{ padding: "14px 20px" }}>
                 {[
                   { label: "Account", field: "account", val: selectedShipment.account },
@@ -3503,23 +3495,63 @@ function DispatchView({
                   { label: "Move Type", field: "moveType", val: selectedShipment.moveType },
                   { label: "Origin", field: "origin", val: selectedShipment.origin },
                   { label: "Destination", field: "destination", val: selectedShipment.destination },
-                  { label: "ETA", field: "eta", val: selectedShipment.eta },
-                  { label: "LFD", field: "lfd", val: selectedShipment.lfd },
+                  ...(selectedShipment.moveType !== "FTL" ? [
+                    { label: "ETA", field: "eta", val: selectedShipment.eta },
+                    { label: "LFD", field: "lfd", val: selectedShipment.lfd },
+                  ] : []),
                   { label: "Pickup", field: "pickupDate", val: selectedShipment.pickupDate },
                   { label: "Delivery", field: "deliveryDate", val: selectedShipment.deliveryDate },
-                ].map(({ label, field, val }) => (
-                  <div key={field} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                    <span style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>{label}</span>
-                    {editField === `${selectedShipment.id}-${field}` ? (
-                      <input autoFocus value={editValue}
-                        onChange={e => setEditValue(e.target.value)}
-                        onBlur={() => { if (editValue.trim()) handleFieldEdit(selectedShipment.id, field, editValue); else setEditField(null); }}
-                        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditField(null); }}
-                        style={{ background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, color: "#F0F2F5", padding: "3px 8px", fontSize: 11, width: 140, textAlign: "right", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
+                  // Driver contact fields merged inline
+                  ...((selectedShipment.moveType === "FTL" || selectedShipment.macropointUrl) ? [
+                    { label: "Driver", dField: "driverName", val: driverInfo.driverName, placeholder: "Add name", isDriver: true },
+                    { label: "Phone", dField: "driverPhone", val: driverInfo.driverPhone, placeholder: "(555) 555-5555", action: driverInfo.driverPhone ? "call" : null, isDriver: true },
+                    { label: "Email", dField: "driverEmail", val: driverInfo.driverEmail, placeholder: "driver@email.com", action: driverInfo.driverEmail ? "email" : null, isDriver: true },
+                    { label: "Carrier Email", dField: "carrierEmail", val: driverInfo.carrierEmail, placeholder: "carrier@email.com", action: driverInfo.carrierEmail ? "email" : null, isDriver: true },
+                    { label: "Trailer", dField: "trailerNumber", val: driverInfo.trailerNumber, placeholder: "Trailer #", isDriver: true },
+                    { label: "MP URL", dField: "macropointUrl", val: driverInfo.macropointUrl || selectedShipment.macropointUrl, placeholder: "Set URL", isDriver: true },
+                  ] : []),
+                ].map((item) => (
+                  <div key={item.field || item.dField} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                    <span style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>{item.label}</span>
+                    {item.isDriver ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {driverEditing === item.dField ? (
+                          <input autoFocus value={driverEditVal}
+                            onChange={e => setDriverEditVal(e.target.value)}
+                            onBlur={() => saveDriverField(item.dField, driverEditVal)}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setDriverEditing(null); }}
+                            placeholder={item.placeholder}
+                            style={{ background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, color: "#F0F2F5", padding: "3px 8px", fontSize: 11, width: 140, textAlign: "right", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
+                        ) : (
+                          <span onClick={() => { setDriverEditing(item.dField); setDriverEditVal(item.val || ""); }}
+                            style={{ fontSize: 11, color: item.val ? "#F0F2F5" : "#3D4557", cursor: "pointer", padding: "2px 6px", borderRadius: 4, fontWeight: 500 }}
+                            title="Click to edit">{item.val || item.placeholder}</span>
+                        )}
+                        {item.action === "call" && (
+                          <a href={`tel:${item.val.replace(/\D/g, "")}`}
+                            style={{ display: "inline-flex", alignItems: "center", padding: "3px 8px", borderRadius: 6,
+                              background: "linear-gradient(135deg, #10b98122, #10b98133)", border: "1px solid #10b98144",
+                              color: "#10b981", fontSize: 9, fontWeight: 700, textDecoration: "none" }}>Call</a>
+                        )}
+                        {item.action === "email" && (
+                          <a href={`mailto:${item.val}?subject=${encodeURIComponent(`${selectedShipment.loadNumber} - ${selectedShipment.container} Update`)}`}
+                            style={{ display: "inline-flex", alignItems: "center", padding: "3px 8px", borderRadius: 6,
+                              background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)",
+                              color: "#3b82f6", fontSize: 9, fontWeight: 700, textDecoration: "none" }}>Email</a>
+                        )}
+                      </div>
                     ) : (
-                      <span onClick={(e) => { e.stopPropagation(); setEditField(`${selectedShipment.id}-${field}`); setEditValue(String(val)); }}
-                        style={{ fontSize: 11, color: "#F0F2F5", cursor: "pointer", padding: "2px 6px", borderRadius: 4, fontWeight: 500 }}
-                        title="Click to edit">{val || "—"}</span>
+                      editField === `${selectedShipment.id}-${item.field}` ? (
+                        <input autoFocus value={editValue}
+                          onChange={e => setEditValue(e.target.value)}
+                          onBlur={() => { if (editValue.trim()) handleFieldEdit(selectedShipment.id, item.field, editValue); else setEditField(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditField(null); }}
+                          style={{ background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, color: "#F0F2F5", padding: "3px 8px", fontSize: 11, width: 140, textAlign: "right", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
+                      ) : (
+                        <span onClick={(e) => { e.stopPropagation(); setEditField(`${selectedShipment.id}-${item.field}`); setEditValue(String(item.val)); }}
+                          style={{ fontSize: 11, color: "#F0F2F5", cursor: "pointer", padding: "2px 6px", borderRadius: 4, fontWeight: 500 }}
+                          title="Click to edit">{item.val || "—"}</span>
+                      )
                     )}
                   </div>
                 ))}
@@ -4045,7 +4077,30 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
   const [groupBy, setGroupBy] = useState(false);
   const [collapsed, setCollapsed] = useState({});
   const [ubSearch, setUbSearch] = useState("");
+  const [billingFilter, setBillingFilter] = useState("all");
   const fileRef = useRef(null);
+
+  const handleBillingStatus = async (id, currentStatus) => {
+    const flowKeys = UNBILLED_BILLING_FLOW.map(s => s.key);
+    const idx = flowKeys.indexOf(currentStatus || "ready_to_bill");
+    const nextStatus = flowKeys[Math.min(idx + 1, flowKeys.length - 1)];
+    // Optimistic update
+    setUnbilledOrders(prev => prev.map(o => o.id === id ? { ...o, billing_status: nextStatus } : o));
+    try {
+      await apiFetch(`${API_BASE}/api/unbilled/${id}/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ billing_status: nextStatus }),
+      });
+      // Auto-dismiss when closed
+      if (nextStatus === "closed") {
+        setTimeout(() => setUnbilledOrders(prev => prev.filter(o => o.id !== id)), 2000);
+      }
+    } catch {
+      // Revert on failure
+      setUnbilledOrders(prev => prev.map(o => o.id === id ? { ...o, billing_status: currentStatus } : o));
+    }
+  };
 
   const fetchUnbilled = async () => {
     try {
@@ -4094,17 +4149,20 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
     return maxB - maxA;
   });
 
-  // Search filtering
-  const searchedOrders = ubSearch
-    ? unbilledOrders.filter(o => {
-        const q = ubSearch.toLowerCase();
-        return (o.order_num || "").toLowerCase().includes(q)
-          || (o.container || "").toLowerCase().includes(q)
-          || (o.bill_to || o.customer || "").toLowerCase().includes(q)
-          || (o.tractor || "").toLowerCase().includes(q)
-          || (o.rep || "").toLowerCase().includes(q);
-      })
-    : unbilledOrders;
+  // Search + billing status filtering
+  const filteredOrders = unbilledOrders.filter(o => {
+    if (billingFilter !== "all" && (o.billing_status || "ready_to_bill") !== billingFilter) return false;
+    if (ubSearch) {
+      const q = ubSearch.toLowerCase();
+      return (o.order_num || "").toLowerCase().includes(q)
+        || (o.container || "").toLowerCase().includes(q)
+        || (o.bill_to || o.customer || "").toLowerCase().includes(q)
+        || (o.tractor || "").toLowerCase().includes(q)
+        || (o.rep || "").toLowerCase().includes(q);
+    }
+    return true;
+  });
+  const searchedOrders = filteredOrders;
 
   const searchedCustomerGroups = {};
   searchedOrders.forEach(o => {
@@ -4198,6 +4256,21 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
         )}
       </div>
 
+      {/* Billing Status Filter */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+        {[{ key: "all", label: "All", color: "#8B95A8" }, ...UNBILLED_BILLING_FLOW].map(f => {
+          const count = f.key === "all" ? unbilledOrders.length : unbilledOrders.filter(o => (o.billing_status || "ready_to_bill") === f.key).length;
+          const isActive = billingFilter === f.key;
+          return (
+            <button key={f.key} onClick={() => setBillingFilter(f.key)}
+              style={{ padding: "4px 12px", fontSize: 10, fontWeight: 700, borderRadius: 6, border: `1px solid ${isActive ? f.color + "66" : "rgba(255,255,255,0.06)"}`,
+                background: isActive ? f.color + "18" : "transparent", color: isActive ? f.color : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
+              {f.label} <span style={{ opacity: 0.7 }}>{count}</span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Orders Table */}
       {unbilledOrders.length === 0 ? (
         <div className="dash-panel" style={{ padding: 40, textAlign: "center" }}>
@@ -4211,7 +4284,7 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
-                  {["Order #", "Container", "Customer", "Rep", "Tractor", "Entered", "Appt Date", "Age"].map(h => (
+                  {["Order #", "Container", "Customer", "Rep", "Tractor", "Entered", "Appt Date", "Age", "Status"].map(h => (
                     <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: 5 }}>{h}</th>
                   ))}
                   <th style={{ padding: "10px 14px", width: 40, background: "#0D1119", position: "sticky", top: 0, zIndex: 5, borderBottom: "1px solid rgba(255,255,255,0.04)" }} />
@@ -4229,6 +4302,22 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
                     <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#8B95A8" }}>{o.appt_date}</td>
                     <td style={{ padding: "8px 14px" }}>
                       <span style={{ fontSize: 11, fontWeight: 700, color: ageColor(o.age_days || 0), fontFamily: "'JetBrains Mono', monospace" }}>{o.age_days || 0}d</span>
+                    </td>
+                    <td style={{ padding: "8px 14px" }}>
+                      {(() => {
+                        const st = UNBILLED_BILLING_FLOW.find(s => s.key === (o.billing_status || "ready_to_bill")) || UNBILLED_BILLING_FLOW[0];
+                        const isClosed = st.key === "closed";
+                        return (
+                          <button onClick={() => !isClosed && handleBillingStatus(o.id, o.billing_status || "ready_to_bill")}
+                            title={isClosed ? "Closed" : "Click to advance"}
+                            style={{ padding: "3px 10px", fontSize: 9, fontWeight: 700, borderRadius: 12,
+                              border: `1px solid ${st.color}44`, background: `${st.color}18`, color: st.color,
+                              cursor: isClosed ? "default" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                              opacity: isClosed ? 0.6 : 1 }}>
+                            {st.label}
+                          </button>
+                        );
+                      })()}
                     </td>
                     <td style={{ padding: "8px 14px" }}>
                       <button onClick={() => handleDismiss(o.id)} title="Dismiss"
@@ -4274,6 +4363,21 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
                             <td style={{ padding: "6px 14px" }}>
                               <span style={{ fontSize: 11, fontWeight: 700, color: ageColor(o.age_days || 0), fontFamily: "'JetBrains Mono', monospace" }}>{o.age_days || 0}d</span>
                             </td>
+                            <td style={{ padding: "6px 14px" }}>
+                              {(() => {
+                                const st = UNBILLED_BILLING_FLOW.find(s => s.key === (o.billing_status || "ready_to_bill")) || UNBILLED_BILLING_FLOW[0];
+                                const isClosed = st.key === "closed";
+                                return (
+                                  <button onClick={() => !isClosed && handleBillingStatus(o.id, o.billing_status || "ready_to_bill")}
+                                    style={{ padding: "2px 8px", fontSize: 8, fontWeight: 700, borderRadius: 10,
+                                      border: `1px solid ${st.color}44`, background: `${st.color}18`, color: st.color,
+                                      cursor: isClosed ? "default" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                                      opacity: isClosed ? 0.6 : 1 }}>
+                                    {st.label}
+                                  </button>
+                                );
+                              })()}
+                            </td>
                             <td style={{ padding: "6px 14px", textAlign: "right" }}>
                               <button onClick={() => handleDismiss(o.id)} title="Dismiss"
                                 style={{ background: "none", border: "none", color: "#3D4557", cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}
@@ -4288,6 +4392,227 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RATE IQ VIEW
+// ═══════════════════════════════════════════════════════════════
+function RateIQView() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [expandedLane, setExpandedLane] = useState(null);
+  const [tab, setTab] = useState("builder"); // builder | lanes | scorecard | alerts
+  const [replyAlerts, setReplyAlerts] = useState([]);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [rateRes, alertRes] = await Promise.all([
+        apiFetch(`${API_BASE}/api/rate-iq`).then(r => r.json()),
+        apiFetch(`${API_BASE}/api/customer-reply-alerts`).then(r => r.json()).catch(() => []),
+      ]);
+      setData(rateRes);
+      setReplyAlerts(alertRes);
+    } catch (e) { console.error("Rate IQ fetch:", e); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
+
+  const handleQuoteAction = async (quoteId, status) => {
+    try {
+      await apiFetch(`${API_BASE}/api/rate-iq/${quoteId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      fetchData();
+    } catch (e) { console.error("Quote action failed:", e); }
+  };
+
+  const dismissReplyAlert = async (alertId) => {
+    try {
+      await apiFetch(`${API_BASE}/api/customer-reply-alerts/${alertId}/dismiss`, { method: "POST" });
+      setReplyAlerts(prev => prev.filter(a => a.id !== alertId));
+    } catch {}
+  };
+
+  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#8B95A8" }}>Loading Rate IQ...</div>;
+
+  const lanes = data?.lanes || [];
+  const scorecard = data?.scorecard || [];
+
+  return (
+    <div style={{ padding: "0 24px 24px", maxWidth: tab === "builder" ? "none" : 1200 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+        <div>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", margin: 0 }}>Rate IQ</h2>
+          <div style={{ fontSize: 11, color: "#5A6478", marginTop: 2 }}>
+            {data?.total_rate_quotes || 0} parsed quotes | {data?.total_carrier_quotes || 0} carrier emails | {data?.total_customer_requests || 0} customer requests
+          </div>
+        </div>
+        {replyAlerts.length > 0 && (
+          <div style={{ padding: "6px 14px", borderRadius: 8, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.3)", color: "#FBBF24", fontSize: 11, fontWeight: 700 }}>
+            {replyAlerts.length} unreplied customer request{replyAlerts.length > 1 ? "s" : ""}
+          </div>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+        {[
+          { key: "builder", label: "Quote Builder" },
+          { key: "lanes", label: `Lanes (${lanes.length})` },
+          { key: "scorecard", label: `Scorecard (${scorecard.length})` },
+          { key: "alerts", label: `Alerts (${replyAlerts.length})` },
+        ].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            style={{ padding: "6px 16px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid " + (tab === t.key ? "rgba(0,212,170,0.4)" : "rgba(255,255,255,0.06)"), background: tab === t.key ? "rgba(0,212,170,0.08)" : "transparent", color: tab === t.key ? "#00D4AA" : "#8B95A8", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s ease" }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Builder Tab */}
+      {tab === "builder" && (
+        <div style={{ height: "calc(100vh - 180px)" }}>
+          <QuoteBuilder />
+        </div>
+      )}
+
+      {/* Lanes Tab */}
+      {tab === "lanes" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {lanes.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#5A6478", fontSize: 12 }}>No lane data yet. Carrier and customer emails will appear here once classified.</div>}
+          {lanes.map((lane, i) => {
+            const isExpanded = expandedLane === lane.lane;
+            const quoteCount = lane.carrier_quotes?.length || 0;
+            const custCount = lane.customer_requests?.length || 0;
+            return (
+              <div key={i} className="glass" style={{ borderRadius: 12, overflow: "hidden", border: isExpanded ? "1px solid rgba(0,212,170,0.2)" : "1px solid rgba(255,255,255,0.04)" }}>
+                <div onClick={() => setExpandedLane(isExpanded ? null : lane.lane)}
+                  style={{ padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, transition: "background 0.15s ease" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5" }}>{lane.lane}</div>
+                    <div style={{ fontSize: 10, color: "#5A6478", marginTop: 2 }}>{lane.move_type ? lane.move_type.toUpperCase() : "—"} {lane.miles ? `| ${lane.miles} mi` : ""}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                    {lane.cheapest && (
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: "#22C55E" }}>${lane.cheapest.rate?.toLocaleString()}</div>
+                        <div style={{ fontSize: 9, color: "#5A6478" }}>{lane.cheapest.carrier?.split("<")[0]?.trim()}</div>
+                      </div>
+                    )}
+                    {lane.avg_rate && <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8B95A8" }}>Avg ${lane.avg_rate?.toLocaleString()}</div></div>}
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.25)", color: "#60a5fa", fontSize: 9, fontWeight: 700 }}>{quoteCount} quote{quoteCount !== 1 ? "s" : ""}</span>
+                      {custCount > 0 && <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.25)", color: "#FBBF24", fontSize: 9, fontWeight: 700 }}>{custCount} req</span>}
+                    </div>
+                    <span style={{ color: "#5A6478", fontSize: 14, transition: "transform 0.2s", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>&#9660;</span>
+                  </div>
+                </div>
+                {isExpanded && (
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", padding: "8px 16px 12px" }}>
+                    {lane.carrier_quotes?.length > 0 && (
+                      <>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 6, letterSpacing: "0.5px" }}>CARRIER QUOTES</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {lane.carrier_quotes.map((q, qi) => (
+                            <div key={qi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 6, background: q.status === "accepted" ? "rgba(34,197,94,0.06)" : q.status === "rejected" ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.02)" }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 11, fontWeight: 600, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.carrier?.split("<")[0]?.trim() || "Unknown"}</div>
+                                <div style={{ fontSize: 9, color: "#5A6478" }}>{q.efj || "—"} | {q.date ? new Date(q.date).toLocaleDateString() : "—"}{q.move_type ? ` | ${q.move_type.toUpperCase()}` : ""}</div>
+                              </div>
+                              <div style={{ fontWeight: 800, fontSize: 13, color: q.rate ? "#F0F2F5" : "#5A6478", minWidth: 70, textAlign: "right" }}>{q.rate ? `$${q.rate.toLocaleString()}` : "No rate"}{q.rate_unit === "per_mile" ? "/mi" : ""}</div>
+                              <span style={{ fontSize: 8, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: q.status === "accepted" ? "rgba(34,197,94,0.15)" : q.status === "rejected" ? "rgba(239,68,68,0.15)" : "rgba(107,114,128,0.15)", color: q.status === "accepted" ? "#34d399" : q.status === "rejected" ? "#f87171" : "#8B95A8", border: `1px solid ${q.status === "accepted" ? "rgba(34,197,94,0.3)" : q.status === "rejected" ? "rgba(239,68,68,0.3)" : "rgba(107,114,128,0.3)"}` }}>{q.status || "pending"}</span>
+                              {q.status === "pending" && q.id && (
+                                <div style={{ display: "flex", gap: 3 }}>
+                                  <button onClick={() => handleQuoteAction(q.id, "accepted")} style={{ padding: "2px 8px", fontSize: 8, fontWeight: 700, borderRadius: 4, border: "1px solid rgba(34,197,94,0.3)", background: "rgba(34,197,94,0.1)", color: "#34d399", cursor: "pointer", fontFamily: "inherit" }}>Accept</button>
+                                  <button onClick={() => handleQuoteAction(q.id, "rejected")} style={{ padding: "2px 8px", fontSize: 8, fontWeight: 700, borderRadius: 4, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", cursor: "pointer", fontFamily: "inherit" }}>Reject</button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {lane.customer_requests?.length > 0 && (
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 6, letterSpacing: "0.5px" }}>CUSTOMER REQUESTS</div>
+                        {lane.customer_requests.map((cr, ci) => (
+                          <div key={ci} style={{ padding: "4px 10px", fontSize: 11, color: "#8B95A8" }}>
+                            <span style={{ color: "#FBBF24", fontWeight: 600 }}>{cr.sender?.split("<")[0]?.trim()}</span> — {cr.subject?.slice(0, 60)} <span style={{ fontSize: 9, color: "#5A6478" }}>{cr.sent_at ? new Date(cr.sent_at).toLocaleDateString() : ""}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Scorecard Tab */}
+      {tab === "scorecard" && (
+        <div className="glass" style={{ borderRadius: 12, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <th style={{ padding: "10px 14px", textAlign: "left", color: "#8B95A8", fontWeight: 700, fontSize: 9, letterSpacing: "0.5px" }}>CARRIER</th>
+                <th style={{ padding: "10px 14px", textAlign: "center", color: "#8B95A8", fontWeight: 700, fontSize: 9 }}>QUOTES</th>
+                <th style={{ padding: "10px 14px", textAlign: "center", color: "#8B95A8", fontWeight: 700, fontSize: 9 }}>WINS</th>
+                <th style={{ padding: "10px 14px", textAlign: "center", color: "#8B95A8", fontWeight: 700, fontSize: 9 }}>WIN %</th>
+                <th style={{ padding: "10px 14px", textAlign: "right", color: "#8B95A8", fontWeight: 700, fontSize: 9 }}>AVG RATE</th>
+                <th style={{ padding: "10px 14px", textAlign: "center", color: "#8B95A8", fontWeight: 700, fontSize: 9 }}>LANES</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scorecard.length === 0 && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#5A6478" }}>No carrier data yet</td></tr>}
+              {scorecard.map((c, i) => {
+                const winPct = c.quote_count > 0 ? Math.round((c.win_count / c.quote_count) * 100) : 0;
+                return (
+                  <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <td style={{ padding: "8px 14px", color: "#F0F2F5", fontWeight: 600 }}>{c.carrier?.split("<")[0]?.trim()}</td>
+                    <td style={{ padding: "8px 14px", textAlign: "center", color: "#8B95A8" }}>{c.quote_count}</td>
+                    <td style={{ padding: "8px 14px", textAlign: "center", color: "#34d399", fontWeight: 600 }}>{c.win_count}</td>
+                    <td style={{ padding: "8px 14px", textAlign: "center" }}>
+                      <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, background: winPct >= 50 ? "rgba(34,197,94,0.12)" : "rgba(107,114,128,0.12)", color: winPct >= 50 ? "#34d399" : "#8B95A8" }}>{winPct}%</span>
+                    </td>
+                    <td style={{ padding: "8px 14px", textAlign: "right", color: c.avg_rate ? "#F0F2F5" : "#5A6478", fontWeight: 600 }}>{c.avg_rate ? `$${c.avg_rate.toLocaleString()}` : "—"}</td>
+                    <td style={{ padding: "8px 14px", textAlign: "center", color: "#8B95A8" }}>{c.lanes_covered}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Reply Alerts Tab */}
+      {tab === "alerts" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {replyAlerts.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#5A6478", fontSize: 12 }}>No unreplied customer requests</div>}
+          {replyAlerts.map((a, i) => (
+            <div key={i} className="glass" style={{ padding: "12px 16px", borderRadius: 10, display: "flex", alignItems: "center", gap: 12, borderLeft: "3px solid #F59E0B" }}>
+              <div style={{ fontSize: 20, flexShrink: 0 }}>&#9888;</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.subject || "No subject"}</div>
+                <div style={{ fontSize: 10, color: "#8B95A8", marginTop: 2 }}>From: {a.sender?.split("<")[0]?.trim()} | EFJ: {a.efj || "—"} | {a.alerted_at ? new Date(a.alerted_at).toLocaleString() : ""}</div>
+              </div>
+              <span style={{ padding: "3px 10px", borderRadius: 6, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.3)", color: "#FBBF24", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap" }}>15+ min</span>
+              <button onClick={() => dismissReplyAlert(a.id)}
+                style={{ padding: "4px 10px", fontSize: 9, fontWeight: 700, borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", color: "#8B95A8", cursor: "pointer", fontFamily: "inherit" }}>Dismiss</button>
+            </div>
+          ))}
         </div>
       )}
     </div>
