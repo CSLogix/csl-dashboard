@@ -7,6 +7,8 @@ __pycache__/
 *.bak
 *.bak.*
 *.json
+!dashboard/package.json
+!dashboard/package-lock.json
 .env
 .env.local
 node_modules/

@@ -1,0 +1,74 @@
+import { create } from 'zustand'
+
+// ─── Core App Store ───
+// Shared state accessible from any component via useAppStore()
+// Existing views still receive these as props from DispatchDashboard (gradual migration)
+// New components (QuoteBuilder, etc.) can import useAppStore() directly
+
+export const useAppStore = create((set) => ({
+  // ── Data ──
+  shipments: [],
+  accounts: ["All Accounts"],
+  botStatus: [],
+  botHealth: null,
+  apiStats: { active: 0, on_schedule: 0, eta_changed: 0, at_risk: 0, completed_today: 0 },
+  accountOverview: [],
+  trackingSummary: {},
+  docSummary: {},
+  unbilledOrders: [],
+  unbilledStats: { count: 0, oldest_age: 0 },
+  repProfiles: {},
+  eventAlerts: [],
+  sheetLog: [],
+  lastSyncTime: null,
+  loaded: false,
+  apiError: null,
+
+  // ── Navigation ──
+  activeView: "dashboard",
+  selectedRep: null,
+  selectedShipment: null,
+
+  // ── Filters ──
+  activeStatus: "all",
+  activeAccount: "All Accounts",
+  activeRep: "All Reps",
+  searchQuery: "",
+  moveTypeFilter: "all",
+  dateFilter: null,
+  dateRangeField: null,
+  dateRangeStart: "",
+  dateRangeEnd: "",
+
+  // ── Actions ──
+  setShipments: (v) => set({ shipments: v }),
+  setAccounts: (v) => set({ accounts: v }),
+  setBotStatus: (v) => set({ botStatus: v }),
+  setBotHealth: (v) => set({ botHealth: v }),
+  setApiStats: (v) => set({ apiStats: v }),
+  setAccountOverview: (v) => set({ accountOverview: v }),
+  setTrackingSummary: (v) => set({ trackingSummary: v }),
+  setDocSummary: (v) => set({ docSummary: v }),
+  setUnbilledOrders: (v) => set({ unbilledOrders: v }),
+  setUnbilledStats: (v) => set({ unbilledStats: v }),
+  setRepProfiles: (v) => set({ repProfiles: v }),
+  setEventAlerts: (v) => set(typeof v === 'function' ? (state) => ({ eventAlerts: v(state.eventAlerts) }) : { eventAlerts: v }),
+  setSheetLog: (v) => set({ sheetLog: v }),
+  setLastSyncTime: (v) => set({ lastSyncTime: v }),
+  setLoaded: (v) => set({ loaded: v }),
+  setApiError: (v) => set({ apiError: v }),
+
+  setActiveView: (v) => set({ activeView: v, selectedRep: null }),
+  setSelectedRep: (v) => set({ selectedRep: v }),
+  setSelectedShipment: (v) => set({ selectedShipment: v }),
+
+  setActiveStatus: (v) => set({ activeStatus: v }),
+  setActiveAccount: (v) => set({ activeAccount: v }),
+  setActiveRep: (v) => set({ activeRep: v }),
+  setSearchQuery: (v) => set({ searchQuery: v }),
+  setMoveTypeFilter: (v) => set({ moveTypeFilter: v }),
+  setDateFilter: (v) => set({ dateFilter: v }),
+  setDateRangeField: (v) => set({ dateRangeField: v }),
+  setDateRangeStart: (v) => set({ dateRangeStart: v }),
+  setDateRangeEnd: (v) => set({ dateRangeEnd: v }),
+}))
