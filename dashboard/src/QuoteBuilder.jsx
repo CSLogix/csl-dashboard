@@ -185,11 +185,12 @@ const STATUS_FILTERS = [
   { key: "draft", label: "Drafts" },
   { key: "sent", label: "Sent" },
   { key: "accepted", label: "Won" },
+  { key: "lost", label: "Lost" },
   { key: "expired", label: "Expired" },
 ];
 
-const statusColor = { draft: "#F59E0B", sent: "#3B82F6", accepted: "#00D4AA", expired: "#6B7280" };
-const statusIcon = { draft: "\u270F", sent: "\u2709", accepted: "\u2713", expired: "\u23F3" };
+const statusColor = { draft: "#F59E0B", sent: "#3B82F6", accepted: "#00D4AA", lost: "#EF4444", expired: "#6B7280" };
+const statusIcon = { draft: "\u270F", sent: "\u2709", accepted: "\u2713", lost: "\u2717", expired: "\u23F3" };
 
 const SORT_OPTIONS = [
   { key: "newest", label: "Newest" },
@@ -237,6 +238,7 @@ function HistoryTab({ onLoadQuote }) {
   const [page, setPage] = useState(0);
   const searchTimer = useRef(null);
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [updatingId, setUpdatingId] = useState(null);
 
   // Debounce search input — 400ms
   useEffect(() => {
@@ -259,6 +261,25 @@ function HistoryTab({ onLoadQuote }) {
   }, [debouncedSearch, statusFilter]);
 
   useEffect(() => { fetchQuotes(); }, [fetchQuotes]);
+
+  const handleStatusUpdate = async (e, id, newStatus) => {
+    e.stopPropagation();
+    setUpdatingId(id);
+    try {
+      const res = await apiFetch(`/api/quotes/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        setQuotes(prev => prev.map(q => q.id === id ? { ...q, status: newStatus } : q));
+      }
+    } catch (err) {
+      console.error("Status update failed:", err);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
 
   const sorted = _sortQuotes(quotes, sortBy);
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
@@ -320,16 +341,20 @@ function HistoryTab({ onLoadQuote }) {
           const st = q.status || "draft";
           const lane = [q.pod, q.final_delivery].filter(Boolean).join(" → ");
           const typeLabel = q.shipment_type || "";
+          const isUpdating = updatingId === q.id;
+          const showActions = st === "draft" || st === "sent";
           return (
             <div key={q.id} onClick={() => onLoadQuote(q.id)}
               style={{ background: "#141A28", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "12px 14px", cursor: "pointer", transition: "border-color 0.15s" }}
               onMouseEnter={e => e.currentTarget.style.borderColor = "rgba(255,255,255,0.15)"}
               onMouseLeave={e => e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)"}>
 
-              {/* Row 1: quote # + status badge */}
+              {/* Row 1: lane (primary) + status badge */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5" }}>{q.quote_number}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5" }}>
+                    {lane || q.quote_number}
+                  </span>
                   {typeLabel && (
                     <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
                       background: typeLabel === "Dray" ? "rgba(59,130,246,0.15)" : typeLabel === "FTL" ? "rgba(139,92,246,0.15)" : typeLabel === "Transload" ? "rgba(245,158,11,0.15)" : typeLabel === "Dray+Transload" ? "rgba(236,72,153,0.15)" : typeLabel === "OTR" ? "rgba(139,92,246,0.15)" : typeLabel === "LTL" ? "rgba(20,184,166,0.15)" : "rgba(255,255,255,0.06)",
@@ -345,25 +370,35 @@ function HistoryTab({ onLoadQuote }) {
                 </div>
               </div>
 
-              {/* Row 2: customer + carrier */}
-              {(q.customer_name || q.carrier_name) && (
-                <div style={{ fontSize: 12, color: "#C8CED8", marginBottom: 4, display: "flex", gap: 6, alignItems: "center" }}>
-                  {q.customer_name && <span style={{ fontWeight: 600 }}>{q.customer_name}</span>}
-                  {q.customer_name && q.carrier_name && <span style={{ color: "#3A4050" }}>|</span>}
-                  {q.carrier_name && <span style={{ color: "#8B95A8", fontSize: 11 }}>{q.carrier_name}</span>}
-                </div>
-              )}
+              {/* Row 2: quote # + customer/carrier */}
+              <div style={{ fontSize: 11, color: "#8B95A8", marginBottom: 4, display: "flex", gap: 6, alignItems: "center" }}>
+                <span style={{ color: "#5A6478", fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{q.quote_number}</span>
+                {q.customer_name && <><span style={{ color: "#3A4050" }}>·</span><span style={{ color: "#C8CED8", fontWeight: 600, fontSize: 12 }}>{q.customer_name}</span></>}
+                {q.carrier_name && <><span style={{ color: "#3A4050" }}>·</span><span style={{ fontSize: 11 }}>{q.carrier_name}</span></>}
+              </div>
 
-              {/* Row 3: lane */}
-              {lane && (
-                <div style={{ fontSize: 12, color: "#8B95A8", marginBottom: 6 }}>
-                  {lane}
-                </div>
-              )}
-
-              {/* Row 4: date + total */}
+              {/* Row 3: date + total + action buttons */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#5A6478" }}>
-                <span title={q.created_at ? new Date(q.created_at).toLocaleString() : ""}>{_relativeTime(q.created_at)}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span title={q.created_at ? new Date(q.created_at).toLocaleString() : ""}>{_relativeTime(q.created_at)}</span>
+                  {showActions && !isUpdating && (
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button onClick={e => handleStatusUpdate(e, q.id, "accepted")}
+                        style={{ padding: "2px 8px", borderRadius: 4, border: "1px solid rgba(0,212,170,0.3)", background: "rgba(0,212,170,0.08)", color: "#00D4AA", fontSize: 10, fontWeight: 700, cursor: "pointer", transition: "all 0.15s", textTransform: "uppercase", letterSpacing: "0.03em" }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,212,170,0.2)"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,212,170,0.08)"; }}>
+                        Won
+                      </button>
+                      <button onClick={e => handleStatusUpdate(e, q.id, "lost")}
+                        style={{ padding: "2px 8px", borderRadius: 4, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.08)", color: "#EF4444", fontSize: 10, fontWeight: 700, cursor: "pointer", transition: "all 0.15s", textTransform: "uppercase", letterSpacing: "0.03em" }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.2)"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(239,68,68,0.08)"; }}>
+                        Lost
+                      </button>
+                    </div>
+                  )}
+                  {isUpdating && <span style={{ fontSize: 10, color: "#5A6478" }}>Updating...</span>}
+                </div>
                 <span style={{ fontWeight: 700, fontSize: 13, color: q.estimated_total > 0 ? "#00D4AA" : "#5A6478" }}>
                   {q.estimated_total ? fmt(q.estimated_total) : "—"}
                 </span>
