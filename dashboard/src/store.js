@@ -27,7 +27,7 @@ export const useAppStore = create((set) => ({
 
   // ── Navigation ──
   activeView: "dashboard",
-  selectedRep: null,
+  selectedRep: (() => { try { return localStorage.getItem("csl_preferred_rep") || null; } catch { return null; } })(),
   selectedShipment: null,
 
   // ── Filters ──
@@ -60,8 +60,11 @@ export const useAppStore = create((set) => ({
   setLoaded: (v) => set({ loaded: v }),
   setApiError: (v) => set({ apiError: v }),
 
-  setActiveView: (v) => set({ activeView: v, selectedRep: null }),
-  setSelectedRep: (v) => set({ selectedRep: v }),
+  setActiveView: (v) => set({ activeView: v }),
+  setSelectedRep: (v) => {
+    set({ selectedRep: v });
+    try { if (v) localStorage.setItem("csl_preferred_rep", v); } catch {}
+  },
   setSelectedShipment: (v) => set({ selectedShipment: v }),
 
   setActiveStatus: (v) => set({ activeStatus: v }),

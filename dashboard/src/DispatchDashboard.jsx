@@ -244,6 +244,7 @@ const REP_ACCOUNTS = {
 const REP_COLORS = { Eli: "#f59e0b", Radka: "#ef4444", "John F": "#10b981", Janice: "#ec4899", Boviet: "#8b5cf6", Tolead: "#06b6d4" };
 const ALL_REP_NAMES = Object.keys(REP_ACCOUNTS);
 const MASTER_REPS = ["Eli", "Radka", "John F", "Janice"];
+const TRUCK_TYPES = ["", "53' Solo", "53' Team", "Flat Bed", "26' Box"];
 
 const ALERT_TYPES = {
   STATUS_CHANGE: "status_change",
@@ -936,6 +937,8 @@ export default function DispatchDashboard() {
         .status-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); position: relative; overflow: hidden; }
         .status-card:hover { transform: translateY(-3px) scale(1.02); }
         .metric-card { position: relative; overflow: hidden; }
+        input[type="date"]::-webkit-calendar-picker-indicator, input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cursor: pointer; padding: 4px; }
+        input[type="date"], input[type="time"] { min-height: 32px; }
         @media (max-width: 768px) {
           .dash-grid-2 { grid-template-columns: 1fr !important; }
           .dash-sidebar { display: none !important; }
@@ -960,14 +963,14 @@ export default function DispatchDashboard() {
       {/* ═══ SIDEBAR ═══ */}
       <div className="dash-sidebar" style={{ width: sidebarW, minHeight: "100vh", background: "#0D1119", borderRight: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 16, gap: 4, position: "relative", zIndex: 20, flexShrink: 0 }}>
         <div style={{ width: 52, height: 52, borderRadius: 12, background: "#0F1A14", border: "1px solid rgba(0,222,180,0.25)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20, animation: "glow-pulse 3s ease infinite", cursor: "pointer", overflow: "hidden", padding: 2, boxShadow: "0 0 20px rgba(0,212,170,0.15)" }}
-          onClick={() => { setActiveView("dashboard"); setSelectedRep(null); }}>
+          onClick={() => { setActiveView("dashboard"); const s = localStorage.getItem("csl_preferred_rep"); if (s) setSelectedRep(s); }}>
           <img src="/logo.svg" alt="CSL" style={{ width: 44, height: 44, objectFit: "contain", filter: "hue-rotate(-15deg) saturate(1.3)" }} />
         </div>
         {NAV_ITEMS.map(item => {
           const isActive = activeView === item.key;
           return (
             <button key={item.key} className="nav-item"
-              onClick={() => { setActiveView(item.key); setSelectedRep(null); }}
+              onClick={() => { setActiveView(item.key); if (item.key === "dashboard") { const s = localStorage.getItem("csl_preferred_rep"); if (s) setSelectedRep(s); } else { setSelectedRep(null); } }}
               style={{ width: sidebarW - 12, padding: "10px 0", borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
                 background: isActive ? "rgba(0,212,170,0.10)" : "transparent",
                 borderLeft: isActive ? "3px solid #00D4AA" : "3px solid transparent",
@@ -1009,6 +1012,30 @@ export default function DispatchDashboard() {
               <div style={{ fontSize: 12, color: "#8B95A8", fontWeight: 500 }}>Loading dispatch data...</div>
             </div>
           ) : (<>
+          {activeView === "dashboard" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0 4px" }}>
+              <div style={{ display: "flex", background: "#0D1119", borderRadius: 10, padding: 3, gap: 2, border: "1px solid rgba(255,255,255,0.06)" }}>
+                <button onClick={() => { const saved = localStorage.getItem("csl_preferred_rep"); if (saved) setSelectedRep(saved); }}
+                  style={{ padding: "7px 16px", borderRadius: 8, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                    background: selectedRep ? "#1E2738" : "transparent", color: selectedRep ? "#00D4AA" : "#5A6478",
+                    boxShadow: selectedRep ? "0 1px 4px rgba(0,0,0,0.3)" : "none", transition: "all 0.15s" }}>
+                  My Dashboard
+                </button>
+                <button onClick={() => setSelectedRep(null)}
+                  style={{ padding: "7px 16px", borderRadius: 8, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                    background: !selectedRep ? "#1E2738" : "transparent", color: !selectedRep ? "#00D4AA" : "#5A6478",
+                    boxShadow: !selectedRep ? "0 1px 4px rgba(0,0,0,0.3)" : "none", transition: "all 0.15s" }}>
+                  Command Center
+                </button>
+              </div>
+              {selectedRep && (
+                <select value={selectedRep} onChange={e => setSelectedRep(e.target.value)}
+                  style={{ padding: "7px 12px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8, color: "#F0F2F5", fontSize: 11, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none" }}>
+                  {ALL_REP_NAMES.map(r => <option key={r} value={r} style={{ background: "#0D1119" }}>{r}</option>)}
+                </select>
+              )}
+            </div>
+          )}
           {activeView === "dashboard" && !selectedRep && (
             <OverviewView loaded={loaded} shipments={shipments} apiStats={apiStats}
               accountOverview={accountOverview} apiError={apiError} onSelectRep={goToRepDashboard}
@@ -1023,6 +1050,8 @@ export default function DispatchDashboard() {
           {activeView === "dashboard" && selectedRep && (
             <RepDashboardView repName={selectedRep} shipments={shipments} onBack={goBackFromRep}
               handleStatusUpdate={handleStatusUpdate} handleLoadClick={handleLoadClick}
+              handleFieldUpdate={handleFieldUpdate} handleMetadataUpdate={handleMetadataUpdate}
+              handleDriverFieldUpdate={handleDriverFieldUpdate}
               repProfiles={repProfiles} onProfileUpdate={fetchProfiles}
               trackingSummary={trackingSummary} docSummary={docSummary} />
           )}
@@ -1403,12 +1432,16 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
 // ═══════════════════════════════════════════════════════════════
 // REP DASHBOARD VIEW
 // ═══════════════════════════════════════════════════════════════
-function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, repProfiles, onProfileUpdate, trackingSummary, docSummary }) {
+function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, repProfiles, onProfileUpdate, trackingSummary, docSummary }) {
   const [expandedAccount, setExpandedAccount] = useState(null);
   const [bovietTab, setBovietTab] = useState("Piedra");
   const [toleadHub, setToleadHub] = useState("ORD");
   const [opsTableFilter, setOpsTableFilter] = useState("all");
   const [masterTableFilter, setMasterTableFilter] = useState("all");
+  const [repViewMode, setRepViewMode] = useState("dray"); // "dray" | "ftl"
+  const [inlineEditId, setInlineEditId] = useState(null);
+  const [inlineEditField, setInlineEditField] = useState(null);
+  const [inlineEditValue, setInlineEditValue] = useState("");
 
   const isMaster = MASTER_REPS.includes(repName);
   const isBoviet = repName === "Boviet";
@@ -1455,7 +1488,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
     : isBoviet ? bovietShips : toleadShips;
 
   // Apply master rep table filter
-  const displayShips = isMaster && masterTableFilter !== "all" ? displayShipsBase.filter(s => {
+  const displayShipsFiltered = isMaster && masterTableFilter !== "all" ? displayShipsBase.filter(s => {
     if (masterTableFilter === "incoming") return ["at_port", "on_vessel", "pending"].includes(s.status);
     if (masterTableFilter === "active") return ["in_transit", "out_for_delivery"].includes(s.status);
     if (masterTableFilter === "on_schedule") return !["delivered", "empty_return"].includes(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)));
@@ -1465,25 +1498,31 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
     return true;
   }) : displayShipsBase;
 
-  // Operations data for Boviet/Tolead
+  // Split by view mode: dray vs FTL
+  const drayShips = displayShipsFiltered.filter(s => s.moveType !== "FTL");
+  const ftlShips = displayShipsFiltered.filter(s => s.moveType === "FTL");
+  const displayShips = repViewMode === "ftl" ? ftlShips : drayShips;
+
+  // Operations data for Boviet/Tolead (uses displayShipsFiltered for counts, opsTableShips for table)
   const isOps = isBoviet || isTolead;
-  const opsPickupsToday = isOps ? displayShips.filter(s => isDateToday(s.pickupDate) && s.status !== "delivered") : [];
-  const opsPickupsTomorrow = isOps ? displayShips.filter(s => isDateTomorrow(s.pickupDate) && s.status !== "delivered") : [];
-  const opsDeliveriesToday = isOps ? displayShips.filter(s => isDateToday(s.deliveryDate)) : [];
-  const opsDeliveriesTomorrow = isOps ? displayShips.filter(s => isDateTomorrow(s.deliveryDate) && s.status !== "delivered") : [];
-  const needsDriver = isOps ? displayShips.filter(s => s.rawStatus?.toLowerCase() === "unassigned" && !["delivered", "empty_return"].includes(s.status)) : [];
-  const opsBehind = isOps ? displayShips.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !["delivered", "empty_return"].includes(s.status)) : [];
-  const awaitingPod = isOps ? displayShips.filter(s => {
+  const opsBase = isOps ? (repViewMode === "ftl" ? ftlShips : drayShips) : [];
+  const opsPickupsToday = isOps ? opsBase.filter(s => isDateToday(s.pickupDate) && s.status !== "delivered") : [];
+  const opsPickupsTomorrow = isOps ? opsBase.filter(s => isDateTomorrow(s.pickupDate) && s.status !== "delivered") : [];
+  const opsDeliveriesToday = isOps ? opsBase.filter(s => isDateToday(s.deliveryDate)) : [];
+  const opsDeliveriesTomorrow = isOps ? opsBase.filter(s => isDateTomorrow(s.deliveryDate) && s.status !== "delivered") : [];
+  const needsDriver = isOps ? opsBase.filter(s => s.rawStatus?.toLowerCase() === "unassigned" && !["delivered", "empty_return"].includes(s.status)) : [];
+  const opsBehind = isOps ? opsBase.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !["delivered", "empty_return"].includes(s.status)) : [];
+  const awaitingPod = isOps ? opsBase.filter(s => {
     if (s.status !== "delivered") return false;
     const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
     const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
     return !docs?.pod;
   }) : [];
-  const opsActive = isOps ? displayShips.filter(s => !["delivered", "empty_return"].includes(s.status)) : [];
+  const opsActive = isOps ? opsBase.filter(s => !["delivered", "empty_return"].includes(s.status)) : [];
   const opsTableShips = !isOps ? [] :
     opsTableFilter === "behind" ? opsBehind :
-    opsTableFilter === "on_schedule" ? displayShips.filter(s => !["delivered", "empty_return"].includes(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))) :
-    opsTableFilter === "in_transit" ? displayShips.filter(s => ["in_transit", "out_for_delivery"].includes(s.status)) :
+    opsTableFilter === "on_schedule" ? opsBase.filter(s => !["delivered", "empty_return"].includes(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))) :
+    opsTableFilter === "in_transit" ? opsBase.filter(s => ["in_transit", "out_for_delivery"].includes(s.status)) :
     opsTableFilter === "pu_today" ? opsPickupsToday :
     opsTableFilter === "pu_tomorrow" ? opsPickupsTomorrow :
     opsTableFilter === "del_today" ? opsDeliveriesToday :
@@ -1492,13 +1531,227 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
     opsTableFilter === "awaiting_pod" ? awaitingPod :
     opsActive;
 
+  // Inline edit styles (reuse dispatch pattern)
+  const inlineInputStyle = { background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 4, color: "#F0F2F5", padding: "2px 5px", fontSize: 11, width: 90, outline: "none", fontFamily: "'JetBrains Mono', monospace" };
+  const thStyle = { padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: 5 };
+
+  // Dray/FTL counts for toggle badges
+  const drayCount = displayShipsFiltered.filter(s => s.moveType !== "FTL").length;
+  const ftlCount = displayShipsFiltered.filter(s => s.moveType === "FTL").length;
+
+  // ── FTL Dispatch Table (shared by master + ops in FTL view) ──
+  const renderFTLTable = (ships) => {
+    const ftlCols = ["Account", "Status", "EFJ #", "Container/Load #", "MP Status", "Pickup", "Origin", "Destination", "Delivery", "Truck", "Trailer #", "Driver Phone", "Carrier Email", "Rate", "Notes"];
+    return (
+      <div className="dash-panel" style={{ overflow: "hidden" }}>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span className="dash-panel-title">FTL Dispatch — {ships.length} loads</span>
+        </div>
+        <div style={{ overflow: "auto", maxHeight: "calc(100vh - 340px)", minHeight: 400 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr>{ftlCols.map(h => <th key={h} style={thStyle}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {ships.map((s) => {
+                const sc = (isFTLShipment(s) ? FTL_STATUS_COLORS : STATUS_COLORS)[s.status] || { main: "#94a3b8" };
+                const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
+                const tracking = trackingSummary?.[efjBare] || trackingSummary?.[s.container];
+                const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
+                const pu = splitDateTime(s.pickupDate);
+                const del = splitDateTime(s.deliveryDate);
+                const isEditing = inlineEditId === s.id;
+                const cellBorder = "1px solid rgba(255,255,255,0.04)";
+                const tdBase = { padding: "5px 8px", borderBottom: "1px solid rgba(255,255,255,0.06)", borderRight: cellBorder };
+                return (
+                  <tr key={s.id} className="row-hover" onClick={() => { if (!isEditing) handleLoadClick(s); }}
+                    style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
+                    {/* Account */}
+                    <td style={{ ...tdBase, color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}>{s.account}</td>
+                    {/* Status (inline-editable) */}
+                    <td style={{ ...tdBase, position: "relative" }}
+                      onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
+                      {isEditing && inlineEditField === "status" ? (
+                        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 20, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 220, overflowY: "auto", minWidth: 120 }}>
+                          {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
+                            const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
+                            return (
+                              <button key={st.key} onClick={(e) => { e.stopPropagation(); handleStatusUpdate(s.id, st.key); setInlineEditId(null); }}
+                                style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", padding: "4px 7px", borderRadius: 4, border: "none",
+                                  background: s.status === st.key ? `${stc.main}18` : "transparent",
+                                  color: s.status === st.key ? stc.main : "#8B95A8", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                                <span style={{ width: 4, height: 4, borderRadius: "50%", background: stc.main, flexShrink: 0 }} />
+                                {st.label}
+                              </button>
+                            );
+                          })}
+                          <button onClick={(e) => { e.stopPropagation(); setInlineEditId(null); }}
+                            style={{ display: "block", width: "100%", padding: "3px 7px", marginTop: 2, borderRadius: 4, border: "none", background: "rgba(255,255,255,0.03)", color: "#5A6478", fontSize: 9, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+                        </div>
+                      ) : null}
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 12, fontSize: 9, fontWeight: 700,
+                        color: sc.main, background: `${sc.main}0D`, border: `1px solid ${sc.main}18`, textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap" }}>
+                        <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
+                        {resolveStatusLabel(s)}
+                      </span>
+                    </td>
+                    {/* EFJ # */}
+                    <td style={tdBase}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{s.loadNumber}</span>
+                        <DocIndicators docs={docs} />
+                      </div>
+                    </td>
+                    {/* Container/Load # */}
+                    <td style={{ ...tdBase, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
+                    {/* MP Status */}
+                    <td style={tdBase}>
+                      {(s.moveType === "FTL" || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
+                    </td>
+                    {/* Pickup (inline-editable) */}
+                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(s.pickupDate || ""); }}>
+                      {isEditing && inlineEditField === "pickup" ? (
+                        <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
+                          <input type="date" autoFocus value={pu.date} onChange={e => { const v = e.target.value + (pu.time ? " " + pu.time : ""); setInlineEditValue(v); }}
+                            onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "pickup", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 100 }} />
+                          <input type="time" value={pu.time} onChange={e => { const v = (pu.date || "") + " " + e.target.value; setInlineEditValue(v); }}
+                            onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "pickup", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 70 }} />
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{s.pickupDate || "\u2014"}</span>
+                      )}
+                    </td>
+                    {/* Origin */}
+                    <td style={{ ...tdBase, fontSize: 10, color: "#F0F2F5", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.origin}>{s.origin || "\u2014"}</td>
+                    {/* Destination */}
+                    <td style={{ ...tdBase, fontSize: 10, color: "#F0F2F5", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.destination}>{s.destination || "\u2014"}</td>
+                    {/* Delivery (inline-editable) */}
+                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(s.deliveryDate || ""); }}>
+                      {isEditing && inlineEditField === "delivery" ? (
+                        <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
+                          <input type="date" autoFocus value={del.date} onChange={e => { const v = e.target.value + (del.time ? " " + del.time : ""); setInlineEditValue(v); }}
+                            onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "delivery", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 100 }} />
+                          <input type="time" value={del.time} onChange={e => { const v = (del.date || "") + " " + e.target.value; setInlineEditValue(v); }}
+                            onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "delivery", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 70 }} />
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{s.deliveryDate || "\u2014"}</span>
+                      )}
+                    </td>
+                    {/* Truck Type (inline-editable dropdown) */}
+                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("truckType"); setInlineEditValue(s.truckType || ""); }}>
+                      {isEditing && inlineEditField === "truckType" ? (
+                        <select autoFocus value={inlineEditValue}
+                          onChange={e => { const v = e.target.value; setInlineEditValue(v); handleMetadataUpdate(s, "truckType", v); setInlineEditId(null); }}
+                          onBlur={() => setInlineEditId(null)} onKeyDown={e => { if (e.key === "Escape") setInlineEditId(null); }}
+                          onClick={e => e.stopPropagation()} style={{ ...inlineInputStyle, width: 80, cursor: "pointer" }}>
+                          {TRUCK_TYPES.map(t => <option key={t} value={t}>{t || "\u2014"}</option>)}
+                        </select>
+                      ) : (
+                        <span style={{ fontSize: 10, color: s.truckType ? "#F0F2F5" : "#3D4557", cursor: "pointer" }}>{s.truckType || "\u2014"}</span>
+                      )}
+                    </td>
+                    {/* Trailer # (inline-editable) */}
+                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("trailer"); setInlineEditValue(s.trailerNumber || tracking?.trailer || ""); }}>
+                      {isEditing && inlineEditField === "trailer" ? (
+                        <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                          onBlur={() => { handleDriverFieldUpdate(s, "trailer", inlineEditValue); setInlineEditId(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          style={{ ...inlineInputStyle, width: 70 }} onClick={e => e.stopPropagation()} placeholder="Trailer" />
+                      ) : (
+                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{s.trailerNumber || tracking?.trailer || "\u2014"}</span>
+                      )}
+                    </td>
+                    {/* Driver Phone (inline-editable) */}
+                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("driverPhone"); setInlineEditValue(s.driverPhone || tracking?.driverPhone || ""); }}>
+                      {isEditing && inlineEditField === "driverPhone" ? (
+                        <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                          onBlur={() => { handleDriverFieldUpdate(s, "driverPhone", inlineEditValue); setInlineEditId(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          style={{ ...inlineInputStyle, width: 100 }} onClick={e => e.stopPropagation()} placeholder="Phone" />
+                      ) : (
+                        <span style={{ fontSize: 10, color: (s.driverPhone || tracking?.driverPhone) ? "#F0F2F5" : "#3D4557", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{s.driverPhone || tracking?.driverPhone || "\u2014"}</span>
+                      )}
+                    </td>
+                    {/* Carrier Email (inline-editable) */}
+                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("carrierEmail"); setInlineEditValue(s.carrierEmail || ""); }}>
+                      {isEditing && inlineEditField === "carrierEmail" ? (
+                        <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                          onBlur={() => { handleDriverFieldUpdate(s, "carrierEmail", inlineEditValue); setInlineEditId(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          style={{ ...inlineInputStyle, width: 140 }} onClick={e => e.stopPropagation()} placeholder="email@carrier.com" />
+                      ) : (
+                        <span style={{ fontSize: 10, color: s.carrierEmail ? "#8B95A8" : "#3D4557", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.carrierEmail || ""}>{s.carrierEmail || "\u2014"}</span>
+                      )}
+                    </td>
+                    {/* Rate (inline-editable) */}
+                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("customerRate"); setInlineEditValue(s.customerRate || ""); }}>
+                      {isEditing && inlineEditField === "customerRate" ? (
+                        <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                          onBlur={() => { handleMetadataUpdate(s, "customerRate", inlineEditValue); setInlineEditId(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          style={{ ...inlineInputStyle, width: 65 }} onClick={e => e.stopPropagation()} placeholder="$0.00" />
+                      ) : (
+                        <span style={{ fontSize: 10, color: s.customerRate ? "#22C55E" : "#3D4557", fontFamily: "'JetBrains Mono', monospace", cursor: "text", fontWeight: s.customerRate ? 600 : 400 }}>{s.customerRate || "\u2014"}</span>
+                      )}
+                    </td>
+                    {/* Notes (inline-editable) */}
+                    <td style={{ ...tdBase, borderRight: "none" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("notes"); setInlineEditValue(s.notes || ""); }}>
+                      {isEditing && inlineEditField === "notes" ? (
+                        <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                          onBlur={() => { handleMetadataUpdate(s, "notes", inlineEditValue); setInlineEditId(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          style={{ ...inlineInputStyle, width: 140 }} onClick={e => e.stopPropagation()} placeholder="Add note..." />
+                      ) : (
+                        <span style={{ fontSize: 10, color: s.notes ? "#F0F2F5" : "#3D4557", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.notes || ""}>{s.notes || "\u2014"}</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {ships.length === 0 && (
+            <div style={{ textAlign: "center", padding: 40, color: "#3D4557" }}>
+              <div style={{ fontSize: 11, fontWeight: 600 }}>No FTL loads found</div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div style={{ animation: "fade-in 0.4s ease" }}>
-      {/* Back button + header */}
+      {/* Back button + View toggle + header */}
       <div style={{ padding: "16px 0 8px" }}>
-        <button onClick={onBack} style={{ background: "none", border: "1px solid rgba(255,255,255,0.06)", color: "#8B95A8", padding: "6px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginBottom: 10 }}>← Back to Overview</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <button onClick={onBack} style={{ background: "none", border: "1px solid rgba(255,255,255,0.06)", color: "#8B95A8", padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{"\u2190"}</button>
+          <div style={{ display: "flex", background: "#0D1119", borderRadius: 10, padding: 3, gap: 2, border: "1px solid rgba(255,255,255,0.06)" }}>
+            <button onClick={() => setRepViewMode("dray")}
+              style={{ padding: "7px 16px", borderRadius: 8, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                background: repViewMode === "dray" ? "#1E2738" : "transparent", color: repViewMode === "dray" ? "#00D4AA" : "#5A6478",
+                boxShadow: repViewMode === "dray" ? "0 1px 4px rgba(0,0,0,0.3)" : "none", transition: "all 0.15s" }}>
+              Dray View <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 3 }}>{drayCount}</span>
+            </button>
+            <button onClick={() => setRepViewMode("ftl")}
+              style={{ padding: "7px 16px", borderRadius: 8, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                background: repViewMode === "ftl" ? "#1E2738" : "transparent", color: repViewMode === "ftl" ? "#3B82F6" : "#5A6478",
+                boxShadow: repViewMode === "ftl" ? "0 1px 4px rgba(0,0,0,0.3)" : "none", transition: "all 0.15s" }}>
+              FTL View <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 3 }}>{ftlCount}</span>
+            </button>
+          </div>
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
-          <div style={{ position: "relative", cursor: "pointer" }} onClick={() => { const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*,.pdf"; inp.onchange = async (e) => { const file = e.target.files[0]; if (!file) return; const fd = new FormData(); fd.append("file", file); try { const res = await apiFetch(`${API_BASE}/api/team/${repName}/avatar`, { method: "POST", body: fd }); if (res.ok) { if (onProfileUpdate) onProfileUpdate(); } else { const err = await res.json().catch(() => ({})); alert(err.error || "Upload failed"); } } catch (ex) { console.error("Avatar upload error:", ex); alert("Upload failed — check connection"); } }; inp.click(); }}>
+          <div style={{ position: "relative", cursor: "pointer" }} onClick={() => { const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*,.pdf"; inp.onchange = async (e) => { const file = e.target.files[0]; if (!file) return; const fd = new FormData(); fd.append("file", file); try { const res = await apiFetch(`${API_BASE}/api/team/${repName}/avatar`, { method: "POST", body: fd }); if (res.ok) { if (onProfileUpdate) onProfileUpdate(); } else { const err = await res.json().catch(() => ({})); alert(err.error || "Upload failed"); } } catch (ex) { console.error("Avatar upload error:", ex); alert("Upload failed \u2014 check connection"); } }; inp.click(); }}>
             {repProfiles?.[repName]?.avatar_url ? (
               <img src={`${API_BASE}${repProfiles[repName].avatar_url}?t=${Date.now()}`} alt={repName}
                 style={{ width: 56, height: 56, borderRadius: "50%", objectFit: "cover", border: `2px solid ${color}44` }} />
@@ -1514,7 +1767,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
           <div>
             <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>{repName}</h2>
             <div style={{ fontSize: 11, color: "#8B95A8" }}>
-              {repName === "Eli" ? <em>Nothing is True, Everything is Freight</em> : isMaster ? `Track/Tracing Master — ${(REP_ACCOUNTS[repName] || []).length} accounts` : isBoviet ? "Boviet Solar Projects" : "Tolead Operations"}
+              {repName === "Eli" ? <em>Nothing is True, Everything is Freight</em> : isMaster ? `Track/Tracing Master \u2014 ${(REP_ACCOUNTS[repName] || []).length} accounts` : isBoviet ? "Boviet Solar Projects" : "Tolead Operations"}
             </div>
           </div>
         </div>
@@ -1597,8 +1850,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
         </div>
       )}
 
-      {/* Master reps: Account cards */}
-      {isMaster && (
+      {/* Master reps: Account cards (only in dray view) */}
+      {isMaster && repViewMode === "dray" && (
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8 }}>Accounts</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
@@ -1619,19 +1872,21 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
           </div>
           {expandedAccount && (
             <div style={{ fontSize: 11, color: "#00D4AA", fontWeight: 600, marginTop: 8, padding: "4px 0" }}>
-              Showing: {expandedAccount} <span style={{ cursor: "pointer", color: "#8B95A8", marginLeft: 8 }} onClick={() => setExpandedAccount(null)}>× clear</span>
+              Showing: {expandedAccount} <span style={{ cursor: "pointer", color: "#8B95A8", marginLeft: 8 }} onClick={() => setExpandedAccount(null)}>{"\u00d7"} clear</span>
             </div>
           )}
         </div>
       )}
 
-      {/* Operations Dashboard — Boviet/Tolead */}
-      {isOps && (<>
-        {/* Active Loads Table with Filters */}
+      {/* ── FTL View: full dispatch table ── */}
+      {repViewMode === "ftl" && renderFTLTable(isOps ? opsTableShips : displayShips)}
+
+      {/* ── Dray View: Operations Dashboard — Boviet/Tolead ── */}
+      {repViewMode === "dray" && isOps && (<>
         <div className="dash-panel" style={{ overflow: "hidden" }}>
           <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span className="dash-panel-title">
-              {isBoviet ? bovietTab : `${toleadHub} Hub`} — {opsTableFilter === "all" ? "Active Loads" : opsTableShips.length + " Loads"}
+              {isBoviet ? bovietTab : `${toleadHub} Hub`} {"\u2014"} {opsTableFilter === "all" ? "Active Loads" : opsTableShips.length + " Loads"}
             </span>
             {opsTableFilter !== "all" && (
               <button onClick={() => setOpsTableFilter("all")}
@@ -1644,8 +1899,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
-                  {["EFJ #", "Container/Load #", "Carrier", "Origin → Dest", "PU Date", "DEL Date", "Driver", "Status"].map(h => (
-                    <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: 5 }}>{h}</th>
+                  {["EFJ #", "Container/Load #", "Carrier", "Origin \u2192 Dest", "PU Date", "DEL Date", "Driver", "Status"].map(h => (
+                    <th key={h} style={thStyle}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1654,8 +1909,11 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                   const sc = STATUS_COLORS[s.status] || { main: "#94a3b8" };
                   const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
                   const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
+                  const pu = splitDateTime(s.pickupDate);
+                  const del = splitDateTime(s.deliveryDate);
+                  const isEditing = inlineEditId === s.id;
                   return (
-                    <tr key={s.id} className="row-hover" onClick={() => handleLoadClick(s)}
+                    <tr key={s.id} className="row-hover" onClick={() => { if (!isEditing) handleLoadClick(s); }}
                       style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
                       <td style={{ padding: "8px 14px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -1670,9 +1928,33 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                         <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
                         <span style={{ color: "#F0F2F5" }}>{s.destination}</span>
                       </td>
-                      <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{splitDateTime(s.pickupDate).date}</td>
-                      <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{splitDateTime(s.deliveryDate).date}</td>
-                      <td style={{ padding: "8px 14px", fontSize: 10, color: "#8B95A8", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.driver || <span style={{ color: "#3D4557" }}>—</span>}</td>
+                      {/* PU Date (inline-editable) */}
+                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(s.pickupDate || ""); }}>
+                        {isEditing && inlineEditField === "pickup" ? (
+                          <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
+                            <input type="date" autoFocus value={pu.date} onChange={e => { const v = e.target.value + (pu.time ? " " + pu.time : ""); setInlineEditValue(v); }}
+                              onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "pickup", inlineEditValue); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 100 }} />
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{pu.date || "\u2014"}</span>
+                        )}
+                      </td>
+                      {/* DEL Date (inline-editable) */}
+                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(s.deliveryDate || ""); }}>
+                        {isEditing && inlineEditField === "delivery" ? (
+                          <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
+                            <input type="date" autoFocus value={del.date} onChange={e => { const v = e.target.value + (del.time ? " " + del.time : ""); setInlineEditValue(v); }}
+                              onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "delivery", inlineEditValue); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 100 }} />
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{del.date || "\u2014"}</span>
+                        )}
+                      </td>
+                      <td style={{ padding: "8px 14px", fontSize: 10, color: "#8B95A8", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.driver || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</td>
                       <td style={{ padding: "8px 14px" }}>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 20, fontSize: 9, fontWeight: 700,
                           color: sc.main, background: `${sc.main}12`, border: `1px solid ${sc.main}22`, textTransform: "uppercase" }}>
@@ -1694,12 +1976,12 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
         </div>
       </>)}
 
-      {/* Shipment table — master reps */}
-      {isMaster && (
+      {/* ── Dray View: Shipment table — master reps ── */}
+      {repViewMode === "dray" && isMaster && (
       <div className="dash-panel" style={{ overflow: "hidden" }}>
         <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span className="dash-panel-title">
-            {expandedAccount || "All Accounts"} — {displayShips.length} loads
+            {expandedAccount || "All Accounts"} {"\u2014"} {displayShips.length} loads
           </span>
           {masterTableFilter !== "all" && (
             <button onClick={() => setMasterTableFilter("all")}
@@ -1717,7 +1999,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
               <thead>
                 <tr>
                   {repCols.map(h => (
-                    <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: 5 }}>{h}</th>
+                    <th key={h} style={thStyle}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1730,8 +2012,9 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                   const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
                   const pu = splitDateTime(s.pickupDate);
                   const del = splitDateTime(s.deliveryDate);
+                  const isEditing = inlineEditId === s.id;
                   return (
-                    <tr key={s.id} className="row-hover" onClick={() => handleLoadClick(s)}
+                    <tr key={s.id} className="row-hover" onClick={() => { if (!isEditing) handleLoadClick(s); }}
                       style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
                       <td style={{ padding: "8px 14px", color: "#F0F2F5", fontSize: 11 }}>{s.account}</td>
                       <td style={{ padding: "8px 14px" }}>
@@ -1749,10 +2032,58 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                         <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
                         <span style={{ color: "#F0F2F5" }}>{s.destination}</span>
                       </td>
-                      <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{pu.date}</td>
-                      <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{pu.time}</td>
-                      <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{del.date}</td>
-                      <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{del.time}</td>
+                      {/* PU Date (inline-editable) */}
+                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(s.pickupDate || ""); }}>
+                        {isEditing && inlineEditField === "pickup" ? (
+                          <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
+                            <input type="date" autoFocus value={pu.date} onChange={e => { const v = e.target.value + (pu.time ? " " + pu.time : ""); setInlineEditValue(v); }}
+                              onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "pickup", inlineEditValue); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 100 }} />
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{pu.date || "\u2014"}</span>
+                        )}
+                      </td>
+                      {/* PU Time (inline-editable) */}
+                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickupTime"); setInlineEditValue(pu.time || ""); }}>
+                        {isEditing && inlineEditField === "pickupTime" ? (
+                          <div onClick={e => e.stopPropagation()}>
+                            <input type="time" autoFocus value={inlineEditValue} onChange={e => { setInlineEditValue(e.target.value); }}
+                              onBlur={() => { const v = (pu.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "pickup", v); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 70 }} />
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{pu.time || "\u2014"}</span>
+                        )}
+                      </td>
+                      {/* DEL Date (inline-editable) */}
+                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(s.deliveryDate || ""); }}>
+                        {isEditing && inlineEditField === "delivery" ? (
+                          <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
+                            <input type="date" autoFocus value={del.date} onChange={e => { const v = e.target.value + (del.time ? " " + del.time : ""); setInlineEditValue(v); }}
+                              onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "delivery", inlineEditValue); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 100 }} />
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{del.date || "\u2014"}</span>
+                        )}
+                      </td>
+                      {/* DEL Time (inline-editable) */}
+                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("deliveryTime"); setInlineEditValue(del.time || ""); }}>
+                        {isEditing && inlineEditField === "deliveryTime" ? (
+                          <div onClick={e => e.stopPropagation()}>
+                            <input type="time" autoFocus value={inlineEditValue} onChange={e => { setInlineEditValue(e.target.value); }}
+                              onBlur={() => { const v = (del.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "delivery", v); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 70 }} />
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{del.time || "\u2014"}</span>
+                        )}
+                      </td>
                       <td style={{ padding: "8px 14px" }}>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 20, fontSize: 9, fontWeight: 700,
                           color: sc.main, background: `${sc.main}12`, border: `1px solid ${sc.main}22`, textTransform: "uppercase" }}>
@@ -2810,8 +3141,6 @@ function DispatchView({
   const [showDatePopover, setShowDatePopover] = useState(false);
   const [zebraStripe, setZebraStripe] = useState(true);
 
-  const TRUCK_TYPES = ["", "53' Solo", "53' Team", "Flat Bed", "26' Box"];
-
   // FTL tracking preview state
   const [trackingData, setTrackingData] = useState(null);
   const [trackingScreenshot, setTrackingScreenshot] = useState(null);
@@ -2954,11 +3283,6 @@ function DispatchView({
   const DISPATCH_COLS = [
     { key: "account", label: "Account", w: 80, sortFn: (a, b) => a.account.localeCompare(b.account) },
     { key: "status", label: "Status", w: 100, sortFn: (a, b) => a.status.localeCompare(b.status) },
-    { key: "billing", label: "Billing", w: 85, sortFn: (a, b) => {
-      const bKeys = ["ready_to_close", "missing_invoice", "billed_closed", "ppwk_needed", "waiting_confirmation", "waiting_cx_approval", "cx_approved"];
-      const aIdx = bKeys.indexOf(a.status); const bIdx = bKeys.indexOf(b.status);
-      return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
-    }},
     { key: "efj", label: "EFJ #", w: 90, sortFn: (a, b) => a.loadNumber.localeCompare(b.loadNumber) },
     { key: "container", label: "Container/Load #", w: 120, sortFn: (a, b) => a.container.localeCompare(b.container) },
     ...(hasFTL ? [{ key: "mpStatus", label: "MP Status", w: 90, sortFn: (a, b) => {
@@ -3160,7 +3484,7 @@ function DispatchView({
                     setDateRangeStart("2020-01-01"); setDateRangeEnd(new Date(Date.now() - 86400000).toISOString().slice(0,10));
                   }},
                 ].map(p => (
-                  <button key={p.label} onClick={() => { p.fn(); if (!dateRangeField) setDateRangeField("pickup"); }}
+                  <button key={p.label} onClick={() => { p.fn(); if (!dateRangeField) setDateRangeField("pickup"); setDateFilter(null); setShowDatePopover(false); }}
                     style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.03)", color: "#8B95A8", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
                     {p.label}
                   </button>
@@ -3275,20 +3599,6 @@ function DispatchView({
                       <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
                       {resolveStatusLabel(s)}
                     </span>
-                  </td>
-                  {/* Billing Status */}
-                  <td style={cellStyle(colIdx++)}>
-                    {(() => {
-                      const bs = BILLING_STATUSES.find(b => b.key === s.status);
-                      const bsc = BILLING_STATUS_COLORS[s.status];
-                      if (!bs) return <span style={{ color: "#3D4557", fontSize: 9 }}>—</span>;
-                      return (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 6px", borderRadius: 10, fontSize: 8, fontWeight: 700,
-                          color: bsc?.main || "#94a3b8", background: `${bsc?.main || "#94a3b8"}12`, border: `1px solid ${bsc?.main || "#94a3b8"}20`, textTransform: "uppercase", whiteSpace: "nowrap" }}>
-                          {bs.icon} {bs.key === "billed_closed" ? "Billed" : bs.key === "missing_invoice" ? "Missing Inv" : bs.key === "ready_to_close" ? "Ready" : bs.key === "ppwk_needed" ? "PPWK" : bs.key === "waiting_confirmation" ? "Waiting" : bs.key === "waiting_cx_approval" ? "CX Apprvl" : bs.key === "cx_approved" ? "CX OK" : bs.label}
-                        </span>
-                      );
-                    })()}
                   </td>
                   {/* EFJ # */}
                   <td style={cellStyle(colIdx++)}>
@@ -5244,12 +5554,12 @@ function AddForm({ onSubmit, onCancel, accounts }) {
         <div><label style={labelStyle}>Destination</label><input value={form.destination} onChange={e => set("destination", e.target.value)} placeholder="Columbus, OH" style={inputStyle} /></div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <div><label style={labelStyle}>ETA</label><input value={form.eta} onChange={e => set("eta", e.target.value)} placeholder="Mar 5" style={inputStyle} /></div>
-        <div><label style={labelStyle}>LFD</label><input value={form.lfd} onChange={e => set("lfd", e.target.value)} placeholder="Mar 2" style={inputStyle} /></div>
+        <div><label style={labelStyle}>ETA</label><input type="date" value={form.eta} onChange={e => set("eta", e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>LFD</label><input type="date" value={form.lfd} onChange={e => set("lfd", e.target.value)} style={inputStyle} /></div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <div><label style={labelStyle}>Pickup Date</label><input value={form.pickupDate} onChange={e => set("pickupDate", e.target.value)} placeholder="Feb 27" style={inputStyle} /></div>
-        <div><label style={labelStyle}>Delivery Date</label><input value={form.deliveryDate} onChange={e => set("deliveryDate", e.target.value)} placeholder="Mar 1" style={inputStyle} /></div>
+        <div><label style={labelStyle}>Pickup Date</label><input type="date" value={form.pickupDate} onChange={e => set("pickupDate", e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Delivery Date</label><input type="date" value={form.deliveryDate} onChange={e => set("deliveryDate", e.target.value)} style={inputStyle} /></div>
       </div>
       <div><label style={labelStyle}>Notes</label><textarea value={form.notes} onChange={e => set("notes", e.target.value)} placeholder="Load notes..." style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} /></div>
       {form.moveType === "FTL" && (
