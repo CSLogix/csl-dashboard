@@ -265,7 +265,7 @@ const ALERT_TYPE_CONFIG = {
 
 function getRepShipments(shipments, repName) {
   const accts = REP_ACCOUNTS[repName] || [];
-  return shipments.filter(s =>
+  return (Array.isArray(shipments) ? shipments : []).filter(s =>
     accts.some(a => a.toLowerCase() === s.account.toLowerCase()) ||
     s.rep?.toLowerCase() === repName.toLowerCase()
   );
@@ -338,6 +338,7 @@ function saveDismissedAlerts(ids) {
 }
 function generateSnapshotAlerts(shipments, trackingSummary, docSummary) {
   const alerts = [];
+  if (!Array.isArray(shipments)) return alerts;
   for (const s of shipments) {
     const efjBare = s.efj?.replace(/^EFJ\s*/i, "");
     const rep = resolveRepForShipment(s);
@@ -389,6 +390,34 @@ function splitDateTime(str) {
     }
   }
   return { date: s, time: "" };
+}
+
+// ─── DD-MM Short Date Display ───
+// Formats any date string to "DD-MM" for compact display
+function formatDDMM(dateStr) {
+  if (!dateStr) return "";
+  const s = dateStr.trim();
+  // "YYYY-MM-DD" or "YYYY-MM-DD HH:MM"
+  const ymd = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (ymd) return `${ymd[3]}-${ymd[2]}`;
+  // "MM/DD/YYYY"
+  const mdy = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (mdy) return `${mdy[2].padStart(2, "0")}-${mdy[1].padStart(2, "0")}`;
+  // "DD-MM" already
+  if (/^\d{2}-\d{2}$/.test(s)) return s;
+  return s.slice(0, 5);
+}
+
+// ─── Parse 4-digit DDMM input → "YYYY-MM-DD" ───
+function parseDDMM(input) {
+  const digits = input.replace(/\D/g, "");
+  if (digits.length !== 4) return null;
+  const dd = digits.slice(0, 2);
+  const mm = digits.slice(2, 4);
+  const d = parseInt(dd, 10), m = parseInt(mm, 10);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const year = new Date().getFullYear();
+  return `${year}-${mm}-${dd}`;
 }
 
 // ─── Document Indicator Icons ───
@@ -514,6 +543,7 @@ export default function DispatchDashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [podUploading, setPodUploading] = useState(false);
   const [podUploadMsg, setPodUploadMsg] = useState(null);
+  const [carrierDirectory, setCarrierDirectory] = useState([]);
 
   // Fetch team profiles (avatars)
   const fetchProfiles = useCallback(async () => {
@@ -614,6 +644,11 @@ export default function DispatchDashboard() {
         if (bhRes.status === "fulfilled" && bhRes.value) setBotHealth(bhRes.value);
         if (csRes.status === "fulfilled" && csRes.value) setCronStatus(csRes.value);
       } catch {}
+      // Fetch carrier directory for dray slide-over carrier info
+      try {
+        const crRes = await apiFetch(`${API_BASE}/api/carriers`);
+        if (crRes.ok) { const crData = await crRes.json(); setCarrierDirectory(crData.carriers || []); }
+      } catch {}
       setLastSyncTime(new Date());
       setApiError(null);
     } catch (err) { console.error("API fetch error:", err); setApiError(err.message); }
@@ -656,7 +691,7 @@ export default function DispatchDashboard() {
     setSheetLog(prev => [{ time: new Date().toLocaleTimeString(), msg }, ...prev].slice(0, 25));
   }, []);
 
-  const filtered = useMemo(() => shipments.filter(s => {
+  const filtered = useMemo(() => (Array.isArray(shipments) ? shipments : []).filter(s => {
     // Move type filter
     if (moveTypeFilter === "ftl" && !isFTLShipment(s)) return false;
     if (moveTypeFilter === "dray" && isFTLShipment(s)) return false;
@@ -702,7 +737,7 @@ export default function DispatchDashboard() {
 
   const statusCounts = useMemo(() => {
     // Apply all filters EXCEPT status so counts show per-status within current filter context
-    const base = shipments.filter(s => {
+    const base = (Array.isArray(shipments) ? shipments : []).filter(s => {
       if (moveTypeFilter === "ftl" && !isFTLShipment(s)) return false;
       if (moveTypeFilter === "dray" && isFTLShipment(s)) return false;
       if (activeAccount !== "All Accounts" && s.account !== activeAccount) return false;
@@ -1014,20 +1049,6 @@ export default function DispatchDashboard() {
           ) : (<>
           {activeView === "dashboard" && (
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0 4px" }}>
-              <div style={{ display: "flex", background: "#0D1119", borderRadius: 10, padding: 3, gap: 2, border: "1px solid rgba(255,255,255,0.06)" }}>
-                <button onClick={() => { const saved = localStorage.getItem("csl_preferred_rep"); if (saved) setSelectedRep(saved); }}
-                  style={{ padding: "7px 16px", borderRadius: 8, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-                    background: selectedRep ? "#1E2738" : "transparent", color: selectedRep ? "#00D4AA" : "#5A6478",
-                    boxShadow: selectedRep ? "0 1px 4px rgba(0,0,0,0.3)" : "none", transition: "all 0.15s" }}>
-                  My Dashboard
-                </button>
-                <button onClick={() => setSelectedRep(null)}
-                  style={{ padding: "7px 16px", borderRadius: 8, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-                    background: !selectedRep ? "#1E2738" : "transparent", color: !selectedRep ? "#00D4AA" : "#5A6478",
-                    boxShadow: !selectedRep ? "0 1px 4px rgba(0,0,0,0.3)" : "none", transition: "all 0.15s" }}>
-                  Command Center
-                </button>
-              </div>
               {selectedRep && (
                 <select value={selectedRep} onChange={e => setSelectedRep(e.target.value)}
                   style={{ padding: "7px 12px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8, color: "#F0F2F5", fontSize: 11, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none" }}>
@@ -1112,6 +1133,7 @@ export default function DispatchDashboard() {
         shipments={shipments} setShipments={setShipments} handleStatusUpdate={handleStatusUpdate}
         editField={editField} setEditField={setEditField} editValue={editValue} setEditValue={setEditValue}
         handleFieldEdit={handleFieldEdit} addSheetLog={addSheetLog}
+        carrierDirectory={carrierDirectory}
         onDocChange={refreshDocSummary} />
     </div>
   );
@@ -1498,14 +1520,12 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
     return true;
   }) : displayShipsBase;
 
-  // Split by view mode: dray vs FTL
-  const drayShips = displayShipsFiltered.filter(s => s.moveType !== "FTL");
-  const ftlShips = displayShipsFiltered.filter(s => s.moveType === "FTL");
-  const displayShips = repViewMode === "ftl" ? ftlShips : drayShips;
+  // Both views show the same data — only the grid layout changes
+  const displayShips = displayShipsFiltered;
 
   // Operations data for Boviet/Tolead (uses displayShipsFiltered for counts, opsTableShips for table)
   const isOps = isBoviet || isTolead;
-  const opsBase = isOps ? (repViewMode === "ftl" ? ftlShips : drayShips) : [];
+  const opsBase = isOps ? displayShipsFiltered : [];
   const opsPickupsToday = isOps ? opsBase.filter(s => isDateToday(s.pickupDate) && s.status !== "delivered") : [];
   const opsPickupsTomorrow = isOps ? opsBase.filter(s => isDateTomorrow(s.pickupDate) && s.status !== "delivered") : [];
   const opsDeliveriesToday = isOps ? opsBase.filter(s => isDateToday(s.deliveryDate)) : [];
@@ -1535,9 +1555,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
   const inlineInputStyle = { background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 4, color: "#F0F2F5", padding: "2px 5px", fontSize: 11, width: 90, outline: "none", fontFamily: "'JetBrains Mono', monospace" };
   const thStyle = { padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: 5 };
 
-  // Dray/FTL counts for toggle badges
-  const drayCount = displayShipsFiltered.filter(s => s.moveType !== "FTL").length;
-  const ftlCount = displayShipsFiltered.filter(s => s.moveType === "FTL").length;
+  // Total count for toggle badges (both views show same data, different layout)
+  const totalCount = displayShipsFiltered.length;
 
   // ── FTL Dispatch Table (shared by master + ops in FTL view) ──
   const renderFTLTable = (ships) => {
@@ -1608,42 +1627,56 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                     <td style={tdBase}>
                       {(s.moveType === "FTL" || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
                     </td>
-                    {/* Pickup (inline-editable) */}
-                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(s.pickupDate || ""); }}>
+                    {/* Pickup (inline-editable, DD-MM + time) */}
+                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
                       {isEditing && inlineEditField === "pickup" ? (
                         <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                          <input type="date" autoFocus value={pu.date} onChange={e => { const v = e.target.value + (pu.time ? " " + pu.time : ""); setInlineEditValue(v); }}
-                            onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "pickup", inlineEditValue); setInlineEditId(null); }}
+                          <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
+                            onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                            onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (pu.time ? " " + pu.time : ""); handleFieldUpdate(s, "pickup", v); } setInlineEditId(null); }}
                             onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                            style={{ ...inlineInputStyle, width: 100 }} />
-                          <input type="time" value={pu.time} onChange={e => { const v = (pu.date || "") + " " + e.target.value; setInlineEditValue(v); }}
-                            onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "pickup", inlineEditValue); setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
+                        </div>
+                      ) : isEditing && inlineEditField === "pickupTime" ? (
+                        <div onClick={e => e.stopPropagation()}>
+                          <input type="time" autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", pu.date || ""); setInlineEditId(null); return; } const v = (pu.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "pickup", v); setInlineEditId(null); }}
                             onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                             style={{ ...inlineInputStyle, width: 70 }} />
                         </div>
                       ) : (
-                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{s.pickupDate || "\u2014"}</span>
+                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                          <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>{formatDDMM(s.pickupDate) || "\u2014"}</span>
+                          {pu.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickupTime"); setInlineEditValue(pu.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{pu.time}</span> : null}
+                        </span>
                       )}
                     </td>
                     {/* Origin */}
                     <td style={{ ...tdBase, fontSize: 10, color: "#F0F2F5", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.origin}>{s.origin || "\u2014"}</td>
                     {/* Destination */}
                     <td style={{ ...tdBase, fontSize: 10, color: "#F0F2F5", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.destination}>{s.destination || "\u2014"}</td>
-                    {/* Delivery (inline-editable) */}
-                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(s.deliveryDate || ""); }}>
+                    {/* Delivery (inline-editable, DD-MM + time) */}
+                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                       {isEditing && inlineEditField === "delivery" ? (
                         <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                          <input type="date" autoFocus value={del.date} onChange={e => { const v = e.target.value + (del.time ? " " + del.time : ""); setInlineEditValue(v); }}
-                            onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "delivery", inlineEditValue); setInlineEditId(null); }}
+                          <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
+                            onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                            onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (del.time ? " " + del.time : ""); handleFieldUpdate(s, "delivery", v); } setInlineEditId(null); }}
                             onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                            style={{ ...inlineInputStyle, width: 100 }} />
-                          <input type="time" value={del.time} onChange={e => { const v = (del.date || "") + " " + e.target.value; setInlineEditValue(v); }}
-                            onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "delivery", inlineEditValue); setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
+                        </div>
+                      ) : isEditing && inlineEditField === "deliveryTime" ? (
+                        <div onClick={e => e.stopPropagation()}>
+                          <input type="time" autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", del.date || ""); setInlineEditId(null); return; } const v = (del.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "delivery", v); setInlineEditId(null); }}
                             onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                             style={{ ...inlineInputStyle, width: 70 }} />
                         </div>
                       ) : (
-                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{s.deliveryDate || "\u2014"}</span>
+                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                          <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>{formatDDMM(s.deliveryDate) || "\u2014"}</span>
+                          {del.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("deliveryTime"); setInlineEditValue(del.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{del.time}</span> : null}
+                        </span>
                       )}
                     </td>
                     {/* Truck Type (inline-editable dropdown) */}
@@ -1740,13 +1773,13 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
               style={{ padding: "7px 16px", borderRadius: 8, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
                 background: repViewMode === "dray" ? "#1E2738" : "transparent", color: repViewMode === "dray" ? "#00D4AA" : "#5A6478",
                 boxShadow: repViewMode === "dray" ? "0 1px 4px rgba(0,0,0,0.3)" : "none", transition: "all 0.15s" }}>
-              Dray View <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 3 }}>{drayCount}</span>
+              Dray View <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 3 }}>{totalCount}</span>
             </button>
             <button onClick={() => setRepViewMode("ftl")}
               style={{ padding: "7px 16px", borderRadius: 8, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
                 background: repViewMode === "ftl" ? "#1E2738" : "transparent", color: repViewMode === "ftl" ? "#3B82F6" : "#5A6478",
                 boxShadow: repViewMode === "ftl" ? "0 1px 4px rgba(0,0,0,0.3)" : "none", transition: "all 0.15s" }}>
-              FTL View <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 3 }}>{ftlCount}</span>
+              FTL View <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 3 }}>{totalCount}</span>
             </button>
           </div>
         </div>
@@ -1899,7 +1932,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
-                  {["EFJ #", "Container/Load #", "Carrier", "Origin \u2192 Dest", "PU Date", "DEL Date", "Driver", "Status"].map(h => (
+                  {["EFJ #", "Container/Load #", "Carrier", "Origin \u2192 Dest", "PU", "DEL", "Driver", "Status"].map(h => (
                     <th key={h} style={thStyle}>{h}</th>
                   ))}
                 </tr>
@@ -1928,30 +1961,32 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                         <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
                         <span style={{ color: "#F0F2F5" }}>{s.destination}</span>
                       </td>
-                      {/* PU Date (inline-editable) */}
-                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(s.pickupDate || ""); }}>
+                      {/* PU Date (inline-editable, DD-MM) */}
+                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
                         {isEditing && inlineEditField === "pickup" ? (
-                          <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                            <input type="date" autoFocus value={pu.date} onChange={e => { const v = e.target.value + (pu.time ? " " + pu.time : ""); setInlineEditValue(v); }}
-                              onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "pickup", inlineEditValue); setInlineEditId(null); }}
+                          <div onClick={e => e.stopPropagation()}>
+                            <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
+                              onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                              onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (pu.time ? " " + pu.time : ""); handleFieldUpdate(s, "pickup", v); } setInlineEditId(null); }}
                               onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                              style={{ ...inlineInputStyle, width: 100 }} />
+                              style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                           </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{pu.date || "\u2014"}</span>
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{formatDDMM(s.pickupDate) || "\u2014"}</span>
                         )}
                       </td>
-                      {/* DEL Date (inline-editable) */}
-                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(s.deliveryDate || ""); }}>
+                      {/* DEL Date (inline-editable, DD-MM) */}
+                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                         {isEditing && inlineEditField === "delivery" ? (
-                          <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                            <input type="date" autoFocus value={del.date} onChange={e => { const v = e.target.value + (del.time ? " " + del.time : ""); setInlineEditValue(v); }}
-                              onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "delivery", inlineEditValue); setInlineEditId(null); }}
+                          <div onClick={e => e.stopPropagation()}>
+                            <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
+                              onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                              onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (del.time ? " " + del.time : ""); handleFieldUpdate(s, "delivery", v); } setInlineEditId(null); }}
                               onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                              style={{ ...inlineInputStyle, width: 100 }} />
+                              style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                           </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{del.date || "\u2014"}</span>
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{formatDDMM(s.deliveryDate) || "\u2014"}</span>
                         )}
                       </td>
                       <td style={{ padding: "8px 14px", fontSize: 10, color: "#8B95A8", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.driver || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</td>
@@ -1993,7 +2028,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
         <div style={{ overflow: "auto", maxHeight: "calc(100vh - 340px)", minHeight: 400 }}>
           {(() => {
             const repHasFTL = displayShips.some(s => s.moveType === "FTL");
-            const repCols = ["Account", "EFJ #", "Container/Load #", ...(repHasFTL ? ["Tracking"] : []), "Origin \u2192 Dest", "PU Date", "PU Time", "DEL Date", "DEL Time", "Status"];
+            const repCols = ["Account", "EFJ #", "Container/Load #", ...(repHasFTL ? ["Tracking"] : []), "Origin \u2192 Dest", "PU", "DEL", "Status"];
             return (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
@@ -2032,56 +2067,32 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                         <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
                         <span style={{ color: "#F0F2F5" }}>{s.destination}</span>
                       </td>
-                      {/* PU Date (inline-editable) */}
-                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(s.pickupDate || ""); }}>
+                      {/* PU Date (inline-editable, DD-MM) */}
+                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
                         {isEditing && inlineEditField === "pickup" ? (
-                          <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                            <input type="date" autoFocus value={pu.date} onChange={e => { const v = e.target.value + (pu.time ? " " + pu.time : ""); setInlineEditValue(v); }}
-                              onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "pickup", inlineEditValue); setInlineEditId(null); }}
-                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                              style={{ ...inlineInputStyle, width: 100 }} />
-                          </div>
-                        ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{pu.date || "\u2014"}</span>
-                        )}
-                      </td>
-                      {/* PU Time (inline-editable) */}
-                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickupTime"); setInlineEditValue(pu.time || ""); }}>
-                        {isEditing && inlineEditField === "pickupTime" ? (
                           <div onClick={e => e.stopPropagation()}>
-                            <input type="time" autoFocus value={inlineEditValue} onChange={e => { setInlineEditValue(e.target.value); }}
-                              onBlur={() => { const v = (pu.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "pickup", v); setInlineEditId(null); }}
+                            <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
+                              onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                              onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (pu.time ? " " + pu.time : ""); handleFieldUpdate(s, "pickup", v); } setInlineEditId(null); }}
                               onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                              style={{ ...inlineInputStyle, width: 70 }} />
+                              style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                           </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{pu.time || "\u2014"}</span>
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{formatDDMM(s.pickupDate) || "\u2014"}</span>
                         )}
                       </td>
-                      {/* DEL Date (inline-editable) */}
-                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(s.deliveryDate || ""); }}>
+                      {/* DEL Date (inline-editable, DD-MM) */}
+                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                         {isEditing && inlineEditField === "delivery" ? (
-                          <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                            <input type="date" autoFocus value={del.date} onChange={e => { const v = e.target.value + (del.time ? " " + del.time : ""); setInlineEditValue(v); }}
-                              onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "delivery", inlineEditValue); setInlineEditId(null); }}
-                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                              style={{ ...inlineInputStyle, width: 100 }} />
-                          </div>
-                        ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{del.date || "\u2014"}</span>
-                        )}
-                      </td>
-                      {/* DEL Time (inline-editable) */}
-                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("deliveryTime"); setInlineEditValue(del.time || ""); }}>
-                        {isEditing && inlineEditField === "deliveryTime" ? (
                           <div onClick={e => e.stopPropagation()}>
-                            <input type="time" autoFocus value={inlineEditValue} onChange={e => { setInlineEditValue(e.target.value); }}
-                              onBlur={() => { const v = (del.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "delivery", v); setInlineEditId(null); }}
+                            <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
+                              onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                              onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (del.time ? " " + del.time : ""); handleFieldUpdate(s, "delivery", v); } setInlineEditId(null); }}
                               onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                              style={{ ...inlineInputStyle, width: 70 }} />
+                              style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                           </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{del.time || "\u2014"}</span>
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{formatDDMM(s.deliveryDate) || "\u2014"}</span>
                         )}
                       </td>
                       <td style={{ padding: "8px 14px" }}>
@@ -2451,7 +2462,7 @@ function AnalyticsView({ loaded, botStatus, botHealth, cronStatus, sheetLog }) {
 // ═══════════════════════════════════════════════════════════════
 // LOAD SLIDE-OVER PANEL (shared across all views)
 // ═══════════════════════════════════════════════════════════════
-function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setShipments, handleStatusUpdate, editField, setEditField, editValue, setEditValue, handleFieldEdit, addSheetLog, onDocChange }) {
+function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setShipments, handleStatusUpdate, editField, setEditField, editValue, setEditValue, handleFieldEdit, addSheetLog, carrierDirectory, onDocChange }) {
   const docInputRef = useRef(null);
 
   // FTL tracking preview state
@@ -2795,6 +2806,20 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
             {[
               { label: "Account", field: "account", val: selectedShipment.account },
               { label: "Carrier", field: "carrier", val: selectedShipment.carrier },
+              // Carrier directory info for dray loads
+              ...(() => {
+                if (selectedShipment.moveType === "FTL" || !selectedShipment.carrier || !carrierDirectory?.length) return [];
+                const cLower = selectedShipment.carrier.toLowerCase();
+                const match = carrierDirectory.find(c => {
+                  const n = (c.carrier_name || "").toLowerCase();
+                  return n === cLower || n.startsWith(cLower) || cLower.startsWith(n);
+                });
+                if (!match) return [];
+                return [
+                  ...(match.mc_number ? [{ label: "MC #", field: "_mc", val: match.mc_number, readOnly: true }] : []),
+                  ...(match.v_code ? [{ label: "V-Code", field: "_vcode", val: match.v_code, readOnly: true }] : []),
+                ];
+              })(),
               { label: "Move Type", field: "moveType", val: selectedShipment.moveType },
               { label: "Origin", field: "origin", val: selectedShipment.origin },
               { label: "Destination", field: "destination", val: selectedShipment.destination },
@@ -2840,10 +2865,12 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                         style={{ padding: "2px 6px", borderRadius: 4, background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#3b82f6", fontSize: 8, fontWeight: 700, textDecoration: "none" }}>Email</a>
                     )}
                   </div>
+                ) : item.readOnly ? (
+                  <span style={{ fontSize: 11, color: "#8B95A8", fontWeight: 500, fontFamily: "'JetBrains Mono', monospace" }}>{item.val}</span>
                 ) : editField === `${selectedShipment.id}-${item.field}` ? (
                   <input autoFocus value={editValue}
                     onChange={e => setEditValue(e.target.value)}
-                    onBlur={() => { if (editValue.trim()) handleFieldEdit(selectedShipment.id, item.field, editValue); else setEditField(null); }}
+                    onBlur={() => { if (editValue.trim() || item.field === 'pickupDate' || item.field === 'deliveryDate') { handleFieldEdit(selectedShipment.id, item.field, editValue.trim()); } else { setEditField(null); } }}
                     onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditField(null); }}
                     style={{ background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, color: "#F0F2F5", padding: "3px 8px", fontSize: 11, width: 140, textAlign: "right", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
                 ) : (
@@ -3614,42 +3641,36 @@ function DispatchView({
                   {hasFTL && <td style={cellStyle(colIdx++)}>
                     {(isFTL || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
                   </td>}
-                  {/* Pickup Date/Time (merged, inline-editable) */}
-                  <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(s.pickupDate || ""); }}>
+                  {/* Pickup (inline-editable, DD-MM) */}
+                  <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
                     {isInlineEditing && inlineEditField === "pickup" ? (
-                      <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                        <input type="date" autoFocus value={pu.date} onChange={e => { const v = e.target.value + (pu.time ? " " + pu.time : ""); setInlineEditValue(v); }}
-                          onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "pickup", inlineEditValue); setInlineEditId(null); }}
+                      <div onClick={e => e.stopPropagation()}>
+                        <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
+                          onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                          onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (pu.time ? " " + pu.time : ""); handleFieldUpdate(s, "pickup", v); } setInlineEditId(null); }}
                           onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                          style={{ ...inlineInputStyle, width: 100 }} />
-                        <input type="time" value={pu.time} onChange={e => { const v = (pu.date || "") + " " + e.target.value; setInlineEditValue(v); }}
-                          onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "pickup", inlineEditValue); setInlineEditId(null); }}
-                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                          style={{ ...inlineInputStyle, width: 70 }} />
+                          style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                       </div>
                     ) : (
-                      <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{s.pickupDate || "—"}</span>
+                      <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{formatDDMM(s.pickupDate) || "—"}</span>
                     )}
                   </td>
                   {/* Origin */}
                   <td style={{ ...cellStyle(colIdx++), fontSize: 10, color: "#F0F2F5", fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.origin}>{s.origin || "—"}</td>
                   {/* Destination */}
                   <td style={{ ...cellStyle(colIdx++), fontSize: 10, color: "#F0F2F5", fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.destination}>{s.destination || "—"}</td>
-                  {/* Delivery Date/Time (merged, inline-editable) */}
-                  <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(s.deliveryDate || ""); }}>
+                  {/* Delivery (inline-editable, DD-MM) */}
+                  <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                     {isInlineEditing && inlineEditField === "delivery" ? (
-                      <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                        <input type="date" autoFocus value={del.date} onChange={e => { const v = e.target.value + (del.time ? " " + del.time : ""); setInlineEditValue(v); }}
-                          onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "delivery", inlineEditValue); setInlineEditId(null); }}
+                      <div onClick={e => e.stopPropagation()}>
+                        <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
+                          onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                          onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (del.time ? " " + del.time : ""); handleFieldUpdate(s, "delivery", v); } setInlineEditId(null); }}
                           onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                          style={{ ...inlineInputStyle, width: 100 }} />
-                        <input type="time" value={del.time} onChange={e => { const v = (del.date || "") + " " + e.target.value; setInlineEditValue(v); }}
-                          onBlur={() => { if (inlineEditValue) handleFieldUpdate(s, "delivery", inlineEditValue); setInlineEditId(null); }}
-                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                          style={{ ...inlineInputStyle, width: 70 }} />
+                          style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                       </div>
                     ) : (
-                      <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{s.deliveryDate || "—"}</span>
+                      <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{formatDDMM(s.deliveryDate) || "—"}</span>
                     )}
                   </td>
                   {/* Truck Type (inline-editable dropdown) */}
@@ -3905,7 +3926,7 @@ function DispatchView({
                       editField === `${selectedShipment.id}-${item.field}` ? (
                         <input autoFocus value={editValue}
                           onChange={e => setEditValue(e.target.value)}
-                          onBlur={() => { if (editValue.trim()) handleFieldEdit(selectedShipment.id, item.field, editValue); else setEditField(null); }}
+                          onBlur={() => { if (editValue.trim() || item.field === 'pickupDate' || item.field === 'deliveryDate') { handleFieldEdit(selectedShipment.id, item.field, editValue.trim()); } else { setEditField(null); } }}
                           onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditField(null); }}
                           style={{ background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, color: "#F0F2F5", padding: "3px 8px", fontSize: 11, width: 140, textAlign: "right", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
                       ) : (

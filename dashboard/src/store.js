@@ -42,7 +42,7 @@ export const useAppStore = create((set) => ({
   dateRangeEnd: "",
 
   // ── Actions ──
-  setShipments: (v) => set({ shipments: v }),
+  setShipments: (v) => set(typeof v === 'function' ? (state) => ({ shipments: v(state.shipments) }) : { shipments: Array.isArray(v) ? v : [] }),
   setAccounts: (v) => set({ accounts: v }),
   setBotStatus: (v) => set({ botStatus: v }),
   setBotHealth: (v) => set({ botHealth: v }),
