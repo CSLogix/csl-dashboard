@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useAppStore } from "./store";
 import QuoteBuilder from "./QuoteBuilder";
+import OOGQuoteBuilder from "./OOGQuoteBuilder";
 
 // ─── API Configuration ───
 const API_BASE = "";
@@ -486,7 +487,7 @@ export default function DispatchDashboard() {
   // ── Core state from Zustand store (shared across components) ──
   const {
     shipments, setShipments, accounts, setAccounts,
-    botStatus, setBotStatus, botHealth, setBotHealth,
+    botStatus, setBotStatus, botHealth, setBotHealth, cronStatus, setCronStatus,
     apiStats, setApiStats, accountOverview, setAccountOverview,
     trackingSummary, setTrackingSummary, docSummary, setDocSummary,
     unbilledOrders, setUnbilledOrders, unbilledStats, setUnbilledStats,
@@ -604,10 +605,14 @@ export default function DispatchDashboard() {
         const ubRes = await apiFetch(`${API_BASE}/api/unbilled/stats`);
         if (ubRes.ok) setUnbilledStats(await ubRes.json());
       } catch {}
-      // Fetch bot health metrics
+      // Fetch bot health metrics + cron status
       try {
-        const bhRes = await apiFetch(`${API_BASE}/api/bot-health`);
-        if (bhRes.ok) setBotHealth(await bhRes.json());
+        const [bhRes, csRes] = await Promise.allSettled([
+          apiFetch(`${API_BASE}/api/bot-health`).then(r => r.ok ? r.json() : null),
+          apiFetch(`${API_BASE}/api/cron-status`).then(r => r.ok ? r.json() : null),
+        ]);
+        if (bhRes.status === "fulfilled" && bhRes.value) setBotHealth(bhRes.value);
+        if (csRes.status === "fulfilled" && csRes.value) setCronStatus(csRes.value);
       } catch {}
       setLastSyncTime(new Date());
       setApiError(null);
@@ -945,9 +950,9 @@ export default function DispatchDashboard() {
 
       {/* ═══ SIDEBAR ═══ */}
       <div className="dash-sidebar" style={{ width: sidebarW, minHeight: "100vh", background: "#0D1119", borderRight: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 16, gap: 4, position: "relative", zIndex: 20, flexShrink: 0 }}>
-        <div style={{ width: 40, height: 40, borderRadius: 10, background: "#0F1A14", border: "1px solid rgba(0,222,180,0.20)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20, animation: "glow-pulse 3s ease infinite", cursor: "pointer", overflow: "hidden", padding: 2 }}
+        <div style={{ width: 52, height: 52, borderRadius: 12, background: "#0F1A14", border: "1px solid rgba(0,222,180,0.25)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20, animation: "glow-pulse 3s ease infinite", cursor: "pointer", overflow: "hidden", padding: 2, boxShadow: "0 0 20px rgba(0,212,170,0.15)" }}
           onClick={() => { setActiveView("dashboard"); setSelectedRep(null); }}>
-          <img src="/logo.svg" alt="CSL" style={{ width: 34, height: 34, objectFit: "contain", filter: "hue-rotate(-15deg) saturate(1.3)" }} />
+          <img src="/logo.svg" alt="CSL" style={{ width: 44, height: 44, objectFit: "contain", filter: "hue-rotate(-15deg) saturate(1.3)" }} />
         </div>
         {NAV_ITEMS.map(item => {
           const isActive = activeView === item.key;
@@ -1043,7 +1048,7 @@ export default function DispatchDashboard() {
             <RateIQView />
           )}
           {activeView === "analytics" && (
-            <AnalyticsView loaded={loaded} botStatus={botStatus} botHealth={botHealth} sheetLog={sheetLog} />
+            <AnalyticsView loaded={loaded} botStatus={botStatus} botHealth={botHealth} cronStatus={cronStatus} sheetLog={sheetLog} />
           )}
           {activeView === "unbilled" && (
             <UnbilledView loaded={loaded} unbilledOrders={unbilledOrders} setUnbilledOrders={setUnbilledOrders} unbilledStats={unbilledStats} setUnbilledStats={setUnbilledStats} />
@@ -1152,15 +1157,12 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
   return (
     <div style={{ animation: loaded ? "fade-in 0.5s ease" : "none" }}>
       {/* Title */}
-      <div style={{ padding: "16px 0 10px", display: "flex", alignItems: "center", gap: 12 }}>
-        <img src="/assets/astrobot.png" alt="Astrobot" style={{ width: 40, height: 40, borderRadius: 10, objectFit: "cover", boxShadow: "0 0 16px rgba(0,136,232,0.3)" }} />
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.03em", margin: 0, lineHeight: 1.2 }}>
-            <span style={{ background: "linear-gradient(135deg, #F0F2F5, #8B95A8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>DISPATCH </span>
-            <span style={{ background: "linear-gradient(135deg, #00D4AA, #00A8CC, #0088E8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>OVERVIEW</span>
-          </h1>
-          <div style={{ fontSize: 11, color: "#5A6478", marginTop: 2, letterSpacing: "0.01em" }}>Real-time logistics across all sheets</div>
-        </div>
+      <div style={{ padding: "16px 0 10px" }}>
+        <h1 style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.03em", margin: 0, lineHeight: 1.2 }}>
+          <span style={{ background: "linear-gradient(135deg, #F0F2F5, #8B95A8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>DISPATCH </span>
+          <span style={{ background: "linear-gradient(135deg, #00D4AA, #00A8CC, #0088E8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>OVERVIEW</span>
+        </h1>
+        <div style={{ fontSize: 11, color: "#5A6478", marginTop: 2, letterSpacing: "0.01em" }}>Real-time logistics across all sheets</div>
       </div>
 
       {/* Status Pipeline Bar */}
@@ -1903,7 +1905,7 @@ function HistoryView({ loaded, handleLoadClick }) {
 // ═══════════════════════════════════════════════════════════════
 // ANALYTICS VIEW
 // ═══════════════════════════════════════════════════════════════
-function AnalyticsView({ loaded, botStatus, botHealth, sheetLog }) {
+function AnalyticsView({ loaded, botStatus, botHealth, cronStatus, sheetLog }) {
   const HEALTH_CONFIG = {
     healthy:    { color: "#10b981", bg: "rgba(16,185,129,0.08)", border: "rgba(16,185,129,0.20)", label: "HEALTHY", icon: "\u25CF" },
     degraded:   { color: "#f59e0b", bg: "rgba(245,158,11,0.08)", border: "rgba(245,158,11,0.20)", label: "DEGRADED", icon: "\u25B2" },
@@ -1914,17 +1916,34 @@ function AnalyticsView({ loaded, botStatus, botHealth, sheetLog }) {
 
   const services = botHealth?.services ? Object.entries(botHealth.services) : [];
   const summary = botHealth?.summary || {};
+  const cronJobs = cronStatus?.cron_jobs ? Object.entries(cronStatus.cron_jobs) : [];
+
+  // Cron status config
+  const CRON_STATUS = {
+    success:  { color: "#10b981", bg: "rgba(16,185,129,0.08)", border: "rgba(16,185,129,0.20)", label: "SUCCESS", icon: "\u2713" },
+    partial:  { color: "#3b82f6", bg: "rgba(59,130,246,0.08)", border: "rgba(59,130,246,0.20)", label: "PARTIAL", icon: "\u25D4" },
+    failed:   { color: "#ef4444", bg: "rgba(239,68,68,0.10)", border: "rgba(239,68,68,0.25)", label: "FAILED", icon: "\u2717" },
+    overdue:  { color: "#f59e0b", bg: "rgba(245,158,11,0.08)", border: "rgba(245,158,11,0.20)", label: "OVERDUE", icon: "\u25B2" },
+    idle:     { color: "#8b95a8", bg: "rgba(139,149,168,0.06)", border: "rgba(139,149,168,0.15)", label: "IDLE", icon: "\u25C7" },
+    pending:  { color: "#6b7280", bg: "rgba(107,114,128,0.08)", border: "rgba(107,114,128,0.20)", label: "PENDING", icon: "\u25CB" },
+    no_data:  { color: "#6b7280", bg: "rgba(107,114,128,0.08)", border: "rgba(107,114,128,0.20)", label: "NO DATA", icon: "\u2014" },
+  };
 
   // Collect all recent errors across services
   const allErrors = services.flatMap(([unit, svc]) =>
     (svc.recent_errors || []).map(e => ({ ...e, unit, name: svc.name }))
   ).sort((a, b) => (b.time || "").localeCompare(a.time || "")).slice(0, 20);
 
+  // Include cron jobs in "Services OK" count
+  const cronOk = cronJobs.filter(([, j]) => ["success", "partial", "idle", "pending"].includes(j.status)).length;
+  const svcHealthy = (summary.services_healthy || 0) + cronOk;
+  const svcTotal = (summary.services_total || 0) + cronJobs.length;
+
   const summaryCards = [
     { label: "Emails Sent", sub: "24h", value: summary.total_emails_24h || 0, color: "#00D4AA", gradient: "#00D4AA" },
     { label: "Crashes", sub: "24h", value: summary.total_crashes_24h || 0, color: (summary.total_crashes_24h || 0) > 0 ? "#ef4444" : "#3D4557", gradient: (summary.total_crashes_24h || 0) > 0 ? "#ef4444" : "#3D4557" },
     { label: "Cycles Run", sub: "24h", value: summary.total_cycles_24h || 0, color: "#3b82f6", gradient: "#3b82f6" },
-    { label: "Services OK", sub: "", value: `${summary.services_healthy || 0}/${summary.services_total || 0}`, color: (summary.services_healthy || 0) === (summary.services_total || 0) ? "#10b981" : "#f59e0b", gradient: (summary.services_healthy || 0) === (summary.services_total || 0) ? "#10b981" : "#f59e0b" },
+    { label: "Services OK", sub: "", value: `${svcHealthy}/${svcTotal}`, color: svcHealthy === svcTotal ? "#10b981" : "#f59e0b", gradient: svcHealthy === svcTotal ? "#10b981" : "#f59e0b" },
   ];
 
   const MetricCell = ({ label, value, color }) => (
@@ -1999,6 +2018,46 @@ function AnalyticsView({ loaded, botStatus, botHealth, sheetLog }) {
           );
         })}
       </div>
+
+      {/* Scheduled Jobs (cron-based monitors) */}
+      {cronJobs.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+            Scheduled Jobs
+            <span style={{ fontWeight: 400, color: "#3D4557", marginLeft: 8 }}>7:30 AM & 1:30 PM Mon-Fri</span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+            {cronJobs.map(([key, job]) => {
+              const cs = CRON_STATUS[job.status] || CRON_STATUS.no_data;
+              return (
+                <div key={key} style={{ background: "#141A28", border: `1px solid ${cs.border}`, borderRadius: 12, padding: "14px 16px", position: "relative", overflow: "hidden", transition: "border-color 0.2s" }}>
+                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: cs.color }} />
+                  {/* Header */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 14 }}>{key === "dray_import" ? "\u{1F4E5}" : "\u{1F4E4}"}</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#F0F2F5" }}>{job.name}</span>
+                    </div>
+                    <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.08em", padding: "2px 8px", borderRadius: 6, background: cs.bg, color: cs.color, border: `1px solid ${cs.border}` }}>
+                      {cs.icon} {cs.label}
+                    </span>
+                  </div>
+                  {/* Metrics */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px 16px", marginBottom: 8 }}>
+                    <MetricCell label="Runs Today" value={job.runs_today || 0} color={(job.runs_today || 0) > 0 ? "#10b981" : "#3D4557"} />
+                    <MetricCell label="Items" value={job.items_tracked || 0} color={(job.items_tracked || 0) > 0 ? "#8b5cf6" : "#3D4557"} />
+                    <MetricCell label="Errors" value={(job.errors || []).length} color={(job.errors || []).length > 0 ? "#ef4444" : "#3D4557"} />
+                  </div>
+                  {/* Footer */}
+                  <div style={{ fontSize: 10, color: "#5A6478", borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 6 }}>
+                    {job.last_run ? `Last run: ${(() => { const m = Math.round((Date.now() - new Date(job.last_run.replace(" ", "T")).getTime()) / 60000); return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ${m % 60}m ago`; })()}` : "No runs recorded"}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {/* Bottom row: Recent Errors + Google Sheets */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -2240,114 +2299,77 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
             <button onClick={() => setSelectedShipment(null)} style={{ background: "rgba(255,255,255,0.05)", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 14, width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
           </div>
 
-          {/* Trip Progress — compact Macropoint timeline */}
+          {/* Route Progress — compact clickable route marker */}
           {(selectedShipment.macropointUrl || selectedShipment.moveType === "FTL") && (
             <div style={{ padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
               {trackingLoading ? (
-                <div style={{ padding: "8px 0", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                  <div style={{ width: 14, height: 14, border: "2px solid #1e293b", borderTop: "2px solid #14b8a6", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
-                  <span style={{ fontSize: 10, color: "#8B95A8" }}>Loading tracking...</span>
+                <div style={{ padding: "4px 0", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  <div style={{ width: 12, height: 12, border: "2px solid #1e293b", borderTop: "2px solid #14b8a6", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+                  <span style={{ fontSize: 10, color: "#8B95A8" }}>Loading...</span>
                 </div>
               ) : (
                 <>
-                  {/* Status + ETA single line */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px",
-                      color: trackingData?.trackingStatus?.toLowerCase().includes("deliver") ? "#34d399"
-                        : trackingData?.trackingStatus?.toLowerCase().includes("transit") ? "#60a5fa"
-                        : trackingData?.trackingStatus?.toLowerCase().includes("late") ? "#f87171" : "#fbbf24" }}>
-                      {trackingData?.trackingStatus || "Pending"}
-                    </span>
-                    <span style={{ fontSize: 10, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>
-                      {(trackingData?.eta || selectedShipment.eta) ? `ETA: ${trackingData?.eta || selectedShipment.eta}` : ""}
-                    </span>
-                  </div>
-
                   {/* Behind schedule / Can't make it warnings */}
                   {trackingData?.cantMakeIt && (
-                    <div style={{ marginBottom: 6, padding: "5px 10px", borderRadius: 6, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#f87171", fontWeight: 600 }}>
+                    <div style={{ marginBottom: 6, padding: "4px 10px", borderRadius: 6, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#f87171", fontWeight: 600 }}>
                       ⚠ {trackingData.cantMakeIt}
                     </div>
                   )}
                   {trackingData?.behindSchedule && !trackingData?.cantMakeIt && (
-                    <div style={{ marginBottom: 6, padding: "5px 10px", borderRadius: 6, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#fb923c", fontWeight: 600 }}>
+                    <div style={{ marginBottom: 6, padding: "4px 10px", borderRadius: 6, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#fb923c", fontWeight: 600 }}>
                       ⏱ Behind Schedule
                     </div>
                   )}
 
-                  {/* Stop timeline */}
-                  {trackingData?.timeline?.length > 0 ? (
-                    <div>
-                      {(() => {
-                        const pickup = { arrived: null, departed: null };
-                        const delivery = { arrived: null, departed: null };
-                        trackingData.timeline.forEach(ev => {
-                          const e = ev.event?.toLowerCase() || "";
-                          if (e.includes("pickup") || e.includes("origin")) {
-                            if (ev.type === "arrived" || e.includes("arrived")) pickup.arrived = ev.time;
-                            if (ev.type === "departed" || e.includes("departed")) pickup.departed = ev.time;
-                          }
-                          if (e.includes("delivery") || e.includes("destination")) {
-                            if (ev.type === "arrived" || e.includes("arrived")) delivery.arrived = ev.time;
-                            if (ev.type === "departed" || e.includes("departed")) delivery.departed = ev.time;
-                          }
-                          if (ev.type === "eta") {
-                            if (e.includes("pickup")) pickup.eta = ev.time;
-                            if (e.includes("delivery")) delivery.eta = ev.time;
-                          }
-                        });
-                        const stops = [
-                          { label: "Pickup", loc: selectedShipment.origin, ...pickup },
-                          { label: "Delivery", loc: selectedShipment.destination, ...delivery },
-                        ];
-                        return stops.map((stop, i) => {
-                          const isComplete = stop.departed;
-                          const isActive = stop.arrived && !stop.departed;
-                          return (
-                            <div key={i} style={{ display: "flex", gap: 8, padding: "5px 0", borderBottom: i < stops.length - 1 ? "1px solid rgba(255,255,255,0.03)" : "none" }}>
-                              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 14, flexShrink: 0, paddingTop: 2 }}>
-                                <div style={{ width: 8, height: 8, borderRadius: "50%",
-                                  background: isComplete ? "#34d399" : isActive ? "#60a5fa" : "rgba(255,255,255,0.08)",
-                                  border: `2px solid ${isComplete ? "#34d399" : isActive ? "#60a5fa" : "#3D4557"}`,
-                                  boxShadow: isActive ? "0 0 6px rgba(96,165,250,0.4)" : "none" }} />
-                                {i < stops.length - 1 && <div style={{ width: 1, flex: 1, background: isComplete ? "#34d39966" : "rgba(255,255,255,0.06)", marginTop: 2 }} />}
-                              </div>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                  <span style={{ fontSize: 9, fontWeight: 700, color: "#F0F2F5" }}>Stop {i + 1} · {stop.label}</span>
-                                  {isComplete && <span style={{ fontSize: 7, padding: "1px 5px", borderRadius: 3, background: "rgba(52,211,153,0.12)", color: "#34d399", fontWeight: 700 }}>COMPLETE</span>}
-                                  {isActive && <span style={{ fontSize: 7, padding: "1px 5px", borderRadius: 3, background: "rgba(96,165,250,0.15)", color: "#60a5fa", fontWeight: 700 }}>ON SITE</span>}
-                                </div>
-                                <div style={{ fontSize: 9, color: "#5A6478", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 1 }}>{stop.loc || "—"}</div>
-                                <div style={{ display: "flex", gap: 12, marginTop: 2 }}>
-                                  {stop.arrived && <span style={{ fontSize: 8, color: "#8B95A8" }}><span style={{ color: "#34d399", fontWeight: 700 }}>ARR</span> {stop.arrived}</span>}
-                                  {stop.departed && <span style={{ fontSize: 8, color: "#8B95A8" }}><span style={{ color: "#60a5fa", fontWeight: 700 }}>DEP</span> {stop.departed}</span>}
-                                  {stop.eta && !stop.arrived && <span style={{ fontSize: 8, color: "#8B95A8" }}><span style={{ color: "#fbbf24", fontWeight: 700 }}>ETA</span> {stop.eta}</span>}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
-                  ) : trackingData?.progress ? (
-                    <div style={{ display: "flex", height: 4, borderRadius: 2, overflow: "hidden", background: "rgba(255,255,255,0.04)" }}>
-                      {trackingData.progress.map((step, i) => (
-                        <div key={i} style={{ flex: 1, background: step.done ? "#14b8a6" : "transparent", borderRight: i < trackingData.progress.length - 1 ? "1px solid rgba(0,0,0,0.3)" : "none" }} />
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {/* Open Macropoint link */}
-                  <div style={{ marginTop: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span onClick={() => { const mpUrl = driverInfo.macropointUrl || selectedShipment.macropointUrl; mpUrl ? window.open(mpUrl, '_blank') : setShowMacropoint(selectedShipment); }}
-                      style={{ fontSize: 9, color: "#14b8a6", fontWeight: 600, cursor: "pointer" }}>
-                      Open Macropoint →
-                    </span>
-                    {trackingData?.lastScraped && (
-                      <span style={{ fontSize: 8, color: "#3D4557" }}>Updated: {trackingData.lastScraped}</span>
-                    )}
-                  </div>
+                  {/* Clickable route bar: Origin ——●—— Destination */}
+                  {(() => {
+                    // Calculate progress from Macropoint steps
+                    const steps = trackingData?.progress || [];
+                    const done = steps.filter(s => s.done).length;
+                    const pct = steps.length > 0 ? Math.round((done / steps.length) * 100) : 0;
+                    const statusColor = pct >= 100 ? "#34d399" : pct > 50 ? "#60a5fa" : pct > 0 ? "#fbbf24" : "#3D4557";
+                    const mpUrl = driverInfo.macropointUrl || selectedShipment.macropointUrl;
+                    return (
+                      <div onClick={() => mpUrl ? window.open(mpUrl, '_blank') : setShowMacropoint(selectedShipment)}
+                        style={{ cursor: "pointer", padding: "6px 0" }} title="Open Macropoint">
+                        {/* Status label + ETA */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                          <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: statusColor }}>
+                            {trackingData?.trackingStatus || selectedShipment.status || "Pending"}
+                          </span>
+                          {(trackingData?.eta || selectedShipment.eta) && (
+                            <span style={{ fontSize: 9, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>
+                              ETA {trackingData?.eta || selectedShipment.eta}
+                            </span>
+                          )}
+                        </div>
+                        {/* Route bar */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 8, color: pct > 0 ? "#8B95A8" : "#5A6478", fontWeight: 600, flexShrink: 0, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {selectedShipment.origin || "Origin"}
+                          </span>
+                          <div style={{ flex: 1, position: "relative", height: 6 }}>
+                            {/* Track */}
+                            <div style={{ position: "absolute", inset: 0, borderRadius: 3, background: "rgba(255,255,255,0.06)" }} />
+                            {/* Filled */}
+                            <div style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: `${Math.max(pct, 2)}%`, borderRadius: 3, background: `linear-gradient(90deg, ${statusColor}88, ${statusColor})`, transition: "width 0.5s ease" }} />
+                            {/* Marker dot */}
+                            {pct > 0 && pct < 100 && (
+                              <div style={{ position: "absolute", top: "50%", left: `${pct}%`, transform: "translate(-50%, -50%)", width: 10, height: 10, borderRadius: "50%", background: statusColor, border: "2px solid #141A28", boxShadow: `0 0 8px ${statusColor}66` }} />
+                            )}
+                          </div>
+                          <span style={{ fontSize: 8, color: pct >= 100 ? "#34d399" : "#5A6478", fontWeight: 600, flexShrink: 0, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {selectedShipment.destination || "Dest"}
+                          </span>
+                        </div>
+                        {/* Footer: Open Macropoint + last updated */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 5 }}>
+                          <span style={{ fontSize: 8, color: "#14b8a6", fontWeight: 600 }}>Open Macropoint →</span>
+                          {trackingData?.lastScraped && <span style={{ fontSize: 7, color: "#3D4557" }}>{trackingData.lastScraped}</span>}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </div>
@@ -4405,7 +4427,7 @@ function RateIQView() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedLane, setExpandedLane] = useState(null);
-  const [tab, setTab] = useState("builder"); // builder | lanes | scorecard | alerts
+  const [tab, setTab] = useState("dray"); // dray | ftl | oog | lanes | scorecard
   const [replyAlerts, setReplyAlerts] = useState([]);
 
   const fetchData = useCallback(async () => {
@@ -4445,7 +4467,7 @@ function RateIQView() {
   const scorecard = data?.scorecard || [];
 
   return (
-    <div style={{ padding: "0 24px 24px", maxWidth: tab === "builder" ? "none" : 1200 }}>
+    <div style={{ padding: "0 24px 24px", maxWidth: (tab === "dray" || tab === "oog") ? "none" : 1200 }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <div>
@@ -4454,20 +4476,16 @@ function RateIQView() {
             {data?.total_rate_quotes || 0} parsed quotes | {data?.total_carrier_quotes || 0} carrier emails | {data?.total_customer_requests || 0} customer requests
           </div>
         </div>
-        {replyAlerts.length > 0 && (
-          <div style={{ padding: "6px 14px", borderRadius: 8, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.3)", color: "#FBBF24", fontSize: 11, fontWeight: 700 }}>
-            {replyAlerts.length} unreplied customer request{replyAlerts.length > 1 ? "s" : ""}
-          </div>
-        )}
       </div>
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
         {[
-          { key: "builder", label: "Quote Builder" },
+          { key: "dray", label: "Dray IQ" },
+          { key: "ftl", label: "FTL IQ" },
+          { key: "oog", label: "OOG IQ" },
           { key: "lanes", label: `Lanes (${lanes.length})` },
           { key: "scorecard", label: `Scorecard (${scorecard.length})` },
-          { key: "alerts", label: `Alerts (${replyAlerts.length})` },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             style={{ padding: "6px 16px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid " + (tab === t.key ? "rgba(0,212,170,0.4)" : "rgba(255,255,255,0.06)"), background: tab === t.key ? "rgba(0,212,170,0.08)" : "transparent", color: tab === t.key ? "#00D4AA" : "#8B95A8", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s ease" }}>
@@ -4476,11 +4494,25 @@ function RateIQView() {
         ))}
       </div>
 
-      {/* Builder Tab */}
-      {tab === "builder" && (
+      {/* Dray IQ Tab (was Quote Builder) */}
+      {tab === "dray" && (
         <div style={{ height: "calc(100vh - 180px)" }}>
           <QuoteBuilder />
         </div>
+      )}
+
+      {/* FTL IQ Tab */}
+      {tab === "ftl" && (
+        <div style={{ textAlign: "center", padding: 60, color: "#5A6478" }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>🚛</div>
+          <h2 style={{ color: "#F0F2F5", fontWeight: 800, fontSize: 20, margin: "0 0 8px" }}>FTL IQ</h2>
+          <div style={{ fontSize: 13 }}>Full Truckload quote builder — coming soon</div>
+        </div>
+      )}
+
+      {/* OOG IQ Tab */}
+      {tab === "oog" && (
+        <OOGQuoteBuilder />
       )}
 
       {/* Lanes Tab */}
@@ -4597,24 +4629,6 @@ function RateIQView() {
         </div>
       )}
 
-      {/* Reply Alerts Tab */}
-      {tab === "alerts" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {replyAlerts.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#5A6478", fontSize: 12 }}>No unreplied customer requests</div>}
-          {replyAlerts.map((a, i) => (
-            <div key={i} className="glass" style={{ padding: "12px 16px", borderRadius: 10, display: "flex", alignItems: "center", gap: 12, borderLeft: "3px solid #F59E0B" }}>
-              <div style={{ fontSize: 20, flexShrink: 0 }}>&#9888;</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.subject || "No subject"}</div>
-                <div style={{ fontSize: 10, color: "#8B95A8", marginTop: 2 }}>From: {a.sender?.split("<")[0]?.trim()} | EFJ: {a.efj || "—"} | {a.alerted_at ? new Date(a.alerted_at).toLocaleString() : ""}</div>
-              </div>
-              <span style={{ padding: "3px 10px", borderRadius: 6, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.3)", color: "#FBBF24", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap" }}>15+ min</span>
-              <button onClick={() => dismissReplyAlert(a.id)}
-                style={{ padding: "4px 10px", fontSize: 9, fontWeight: 700, borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", color: "#8B95A8", cursor: "pointer", fontFamily: "inherit" }}>Dismiss</button>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
