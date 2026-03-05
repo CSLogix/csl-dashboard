@@ -510,7 +510,6 @@ export default function DispatchDashboard() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editField, setEditField] = useState(null);
   const [editValue, setEditValue] = useState("");
-  const [showMacropoint, setShowMacropoint] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [podUploading, setPodUploading] = useState(false);
   const [podUploadMsg, setPodUploadMsg] = useState(null);
@@ -640,18 +639,17 @@ export default function DispatchDashboard() {
     return () => mq.removeEventListener("change", handler);
   }, []);
 
-  // ESC key to close modals/slide-over (priority: macropoint > slide-over > add form)
+  // ESC key to close modals/slide-over (priority: slide-over > add form)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === "Escape") {
-        if (showMacropoint) { setShowMacropoint(null); return; }
         if (selectedShipment) { setSelectedShipment(null); return; }
         if (showAddForm) { setShowAddForm(false); return; }
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [showMacropoint, selectedShipment, showAddForm]);
+  }, [selectedShipment, showAddForm]);
 
   const addSheetLog = useCallback((msg) => {
     setSheetLog(prev => [{ time: new Date().toLocaleTimeString(), msg }, ...prev].slice(0, 25));
@@ -855,14 +853,25 @@ export default function DispatchDashboard() {
     }
   };
 
-  const handleAddShipment = (data) => {
-    const newId = Math.max(...shipments.map(s => s.id), 0) + 1;
-    const efjNum = 104300 + newId;
-    const newShipment = { ...data, id: newId, loadNumber: `EFJ ${efjNum}`, synced: false };
-    setShipments(prev => [newShipment, ...prev]);
-    addSheetLog(`New row -> Sheet | ${newShipment.loadNumber}`);
-    setTimeout(() => { setShipments(prev => prev.map(s => s.id === newId ? { ...s, synced: true } : s)); addSheetLog(`Synced | ${newShipment.loadNumber}`); }, 1500);
-    setShowAddForm(false);
+  const handleAddShipment = async (data) => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/load/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        addSheetLog(`Add failed (${res.status}) | ${data.efj}`);
+        throw new Error(txt);
+      }
+      const result = await res.json();
+      addSheetLog(`New row → Sheet | ${result.efj} (${result.tab})`);
+      setShowAddForm(false);
+      fetchData();
+    } catch (err) {
+      addSheetLog(`Add error: ${err.message}`);
+    }
   };
 
   const handleLoadClick = (s) => { setSelectedShipment(s); };
@@ -1013,7 +1022,7 @@ export default function DispatchDashboard() {
           )}
           {activeView === "dashboard" && selectedRep && (
             <RepDashboardView repName={selectedRep} shipments={shipments} onBack={goBackFromRep}
-              onShowMacropoint={setShowMacropoint} handleStatusUpdate={handleStatusUpdate} handleLoadClick={handleLoadClick}
+              handleStatusUpdate={handleStatusUpdate} handleLoadClick={handleLoadClick}
               repProfiles={repProfiles} onProfileUpdate={fetchProfiles}
               trackingSummary={trackingSummary} docSummary={docSummary} />
           )}
@@ -1029,7 +1038,6 @@ export default function DispatchDashboard() {
               handleLoadClick={handleLoadClick} activeLoads={activeLoads} inTransit={inTransit}
               deliveredCount={deliveredCount} issueCount={issueCount}
               onAddLoad={() => setShowAddForm(true)} addSheetLog={addSheetLog} setShipments={setShipments}
-              setShowMacropoint={setShowMacropoint}
               podUploading={podUploading} setPodUploading={setPodUploading} podUploadMsg={podUploadMsg} setPodUploadMsg={setPodUploadMsg}
               trackingSummary={trackingSummary} docSummary={docSummary}
               dateFilter={dateFilter} setDateFilter={setDateFilter}
@@ -1074,10 +1082,8 @@ export default function DispatchDashboard() {
       <LoadSlideOver selectedShipment={selectedShipment} setSelectedShipment={setSelectedShipment}
         shipments={shipments} setShipments={setShipments} handleStatusUpdate={handleStatusUpdate}
         editField={editField} setEditField={setEditField} editValue={editValue} setEditValue={setEditValue}
-        handleFieldEdit={handleFieldEdit} addSheetLog={addSheetLog} setShowMacropoint={setShowMacropoint}
+        handleFieldEdit={handleFieldEdit} addSheetLog={addSheetLog}
         onDocChange={refreshDocSummary} />
-
-      {showMacropoint && <MacropointModal shipment={showMacropoint} onClose={() => setShowMacropoint(null)} />}
     </div>
   );
 }
@@ -1397,7 +1403,7 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
 // ═══════════════════════════════════════════════════════════════
 // REP DASHBOARD VIEW
 // ═══════════════════════════════════════════════════════════════
-function RepDashboardView({ repName, shipments, onBack, onShowMacropoint, handleStatusUpdate, handleLoadClick, repProfiles, onProfileUpdate, trackingSummary, docSummary }) {
+function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, repProfiles, onProfileUpdate, trackingSummary, docSummary }) {
   const [expandedAccount, setExpandedAccount] = useState(null);
   const [bovietTab, setBovietTab] = useState("Piedra");
   const [toleadHub, setToleadHub] = useState("ORD");
@@ -2114,12 +2120,11 @@ function AnalyticsView({ loaded, botStatus, botHealth, cronStatus, sheetLog }) {
 // ═══════════════════════════════════════════════════════════════
 // LOAD SLIDE-OVER PANEL (shared across all views)
 // ═══════════════════════════════════════════════════════════════
-function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setShipments, handleStatusUpdate, editField, setEditField, editValue, setEditValue, handleFieldEdit, addSheetLog, setShowMacropoint, onDocChange }) {
+function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setShipments, handleStatusUpdate, editField, setEditField, editValue, setEditValue, handleFieldEdit, addSheetLog, onDocChange }) {
   const docInputRef = useRef(null);
 
   // FTL tracking preview state
   const [trackingData, setTrackingData] = useState(null);
-  const [trackingScreenshot, setTrackingScreenshot] = useState(null);
   const [trackingLoading, setTrackingLoading] = useState(false);
 
   // Document hub state
@@ -2138,12 +2143,12 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
   const [driverEditVal, setDriverEditVal] = useState("");
   const [driverSaving, setDriverSaving] = useState(false);
   const [statusExpanded, setStatusExpanded] = useState(false);
+  const [emailsCollapsed, setEmailsCollapsed] = useState(true);
 
   // Fetch tracking + documents + driver info when slide-over opens
   useEffect(() => {
     if (!selectedShipment) {
       setTrackingData(null);
-      setTrackingScreenshot(null);
       setLoadDocs([]);
       setDocUploadMsg(null);
       setDriverInfo({ driverName: "", driverPhone: "", driverEmail: "", carrierEmail: "", trailerNumber: "", macropointUrl: "" });
@@ -2170,14 +2175,13 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
     // Fetch tracking for FTL loads
     if (selectedShipment.moveType === "FTL" || selectedShipment.macropointUrl) {
       setTrackingLoading(true);
-      Promise.allSettled([
-        apiFetch(`${API_BASE}/api/macropoint/${selectedShipment.efj}`).then(r => r.ok ? r.json() : null),
-        apiFetch(`${API_BASE}/api/macropoint/${selectedShipment.efj}/screenshot`).then(r => r.ok ? r.blob() : null),
-      ]).then(([mpRes, ssRes]) => {
-        if (mpRes.status === "fulfilled" && mpRes.value) setTrackingData(mpRes.value);
-        if (ssRes.status === "fulfilled" && ssRes.value) setTrackingScreenshot(URL.createObjectURL(ssRes.value));
-        setTrackingLoading(false);
-      });
+      apiFetch(`${API_BASE}/api/macropoint/${selectedShipment.efj}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data) setTrackingData(data);
+          setTrackingLoading(false);
+        })
+        .catch(() => setTrackingLoading(false));
     }
   }, [selectedShipment?.efj]);
 
@@ -2330,8 +2334,8 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                     const statusColor = pct >= 100 ? "#34d399" : pct > 50 ? "#60a5fa" : pct > 0 ? "#fbbf24" : "#3D4557";
                     const mpUrl = driverInfo.macropointUrl || selectedShipment.macropointUrl;
                     return (
-                      <div onClick={() => mpUrl ? window.open(mpUrl, '_blank') : setShowMacropoint(selectedShipment)}
-                        style={{ cursor: "pointer", padding: "6px 0" }} title="Open Macropoint">
+                      <div onClick={() => mpUrl && window.open(mpUrl, '_blank')}
+                        style={{ cursor: mpUrl ? "pointer" : "default", padding: "6px 0" }} title={mpUrl ? "Open Macropoint" : "No tracking URL"}>
                         {/* Status label + ETA */}
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                           <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: statusColor }}>
@@ -2531,34 +2535,40 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
               style={{ width: "100%", minHeight: 50, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "#F0F2F5", padding: 10, fontSize: 11, resize: "vertical", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
           </div>
 
-          {/* Email History */}
+          {/* Email History (collapsible) */}
           {loadEmails.length > 0 && (
             <div style={{ padding: "8px 20px 12px" }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", textTransform: "uppercase", marginBottom: 8 }}>
-                Emails <span style={{ color: "#8B95A8" }}>({loadEmails.length})</span>
+              <div onClick={() => setEmailsCollapsed(prev => !prev)}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", userSelect: "none" }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", textTransform: "uppercase" }}>
+                  Emails <span style={{ color: "#8B95A8" }}>({loadEmails.length})</span>
+                </div>
+                <span style={{ fontSize: 10, color: "#5A6478", transition: "transform 0.2s", transform: emailsCollapsed ? "rotate(0deg)" : "rotate(180deg)" }}>&#9660;</span>
               </div>
-              <div style={{ maxHeight: 200, overflow: "auto" }}>
-                {loadEmails.map(em => (
-                  <div key={em.id} style={{ display: "flex", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                    <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{em.has_attachments ? "\u{1F4CE}" : "\u2709"}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 10, color: "#F0F2F5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {em.subject || "(no subject)"}
-                      </div>
-                      <div style={{ fontSize: 8, color: "#8B95A8" }}>
-                        {(em.sender || "").replace(/<[^>]+>/g, "").trim()}
-                        {" \u00B7 "}
-                        {em.sent_at ? new Date(em.sent_at).toLocaleDateString("en-US", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""}
-                      </div>
-                      {em.attachment_names && (
-                        <div style={{ fontSize: 8, color: "#4D5669", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {em.attachment_names}
+              {!emailsCollapsed && (
+                <div style={{ maxHeight: 200, overflow: "auto", marginTop: 8 }}>
+                  {loadEmails.map(em => (
+                    <div key={em.id} style={{ display: "flex", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                      <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{em.has_attachments ? "\u{1F4CE}" : "\u2709"}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 10, color: "#F0F2F5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {em.subject || "(no subject)"}
                         </div>
-                      )}
+                        <div style={{ fontSize: 8, color: "#8B95A8" }}>
+                          {(em.sender || "").replace(/<[^>]+>/g, "").trim()}
+                          {" \u00B7 "}
+                          {em.sent_at ? new Date(em.sent_at).toLocaleDateString("en-US", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""}
+                        </div>
+                        {em.attachment_names && (
+                          <div style={{ fontSize: 8, color: "#4D5669", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {em.attachment_names}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -2575,11 +2585,13 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
               <div style={{ display: "flex", gap: 2, marginBottom: 10, background: "#0D1119", borderRadius: 10, padding: 3 }}>
                 {[
                   { id: "all", label: "All" },
-                  { id: "rates", label: "Rates", match: t => t.includes("rate") },
+                  { id: "cx_rate", label: "CX Rate", match: t => t === "customer_rate" },
+                  { id: "rc", label: "RC", match: t => t === "carrier_rate" },
                   { id: "pod", label: "POD", match: t => t === "pod" },
                   { id: "bol", label: "BOL", match: t => t === "bol" },
                   { id: "email", label: "Email", match: t => t === "email" },
-                  { id: "other", label: "Other", match: t => !t.includes("rate") && t !== "pod" && t !== "bol" && t !== "email" },
+                  { id: "carrier_invoice", label: "Carrier Invoice", match: t => t === "carrier_invoice" },
+                  { id: "other", label: "Other", match: t => t !== "customer_rate" && t !== "carrier_rate" && t !== "pod" && t !== "bol" && t !== "email" && t !== "carrier_invoice" },
                 ].map(tab => {
                   const count = tab.id === "all" ? loadDocs.length : loadDocs.filter(d => tab.match(d.doc_type)).length;
                   return (
@@ -2599,11 +2611,13 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
               <div style={{ maxHeight: 180, overflow: "auto", marginBottom: 10 }}>
                 {loadDocs.filter(d => {
                   if (docFilter === "all") return true;
-                  if (docFilter === "rates") return d.doc_type.includes("rate");
+                  if (docFilter === "cx_rate") return d.doc_type === "customer_rate";
+                  if (docFilter === "rc") return d.doc_type === "carrier_rate";
                   if (docFilter === "pod") return d.doc_type === "pod";
                   if (docFilter === "bol") return d.doc_type === "bol";
                   if (docFilter === "email") return d.doc_type === "email";
-                  return !d.doc_type.includes("rate") && d.doc_type !== "pod" && d.doc_type !== "bol" && d.doc_type !== "email";
+                  if (docFilter === "carrier_invoice") return d.doc_type === "carrier_invoice";
+                  return d.doc_type !== "customer_rate" && d.doc_type !== "carrier_rate" && d.doc_type !== "pod" && d.doc_type !== "bol" && d.doc_type !== "email" && d.doc_type !== "carrier_invoice";
                 }).map(doc => {
                   const icon = doc.doc_type === "carrier_invoice" ? "🧾" : doc.doc_type.includes("rate") ? "💰" : doc.doc_type === "pod" ? "📸" : doc.doc_type === "bol" ? "📋" : doc.doc_type === "screenshot" ? "🖼" : doc.doc_type === "email" ? "✉" : "📄";
                   const size = doc.size_bytes < 1024 ? `${doc.size_bytes}B` : doc.size_bytes < 1048576 ? `${Math.round(doc.size_bytes / 1024)}KB` : `${(doc.size_bytes / 1048576).toFixed(1)}MB`;
@@ -2774,7 +2788,7 @@ function DispatchView({
   selectedShipment, setSelectedShipment,
   editField, setEditField, editValue, setEditValue,
   sheetLog, handleStatusUpdate, handleFieldEdit, handleLoadClick,
-  activeLoads, inTransit, deliveredCount, issueCount, onAddLoad, addSheetLog, setShipments, setShowMacropoint,
+  activeLoads, inTransit, deliveredCount, issueCount, onAddLoad, addSheetLog, setShipments,
   podUploading, setPodUploading, podUploadMsg, setPodUploadMsg,
   trackingSummary, docSummary,
   dateFilter, setDateFilter,
@@ -3480,14 +3494,10 @@ function DispatchView({
                         <span style={{ fontSize: 10, color: "#5A6478" }}>{selectedShipment.origin} → {selectedShipment.destination}</span>
                       </div>
                       <div style={{ padding: "0 14px 12px", display: "flex", gap: 6 }}>
-                        <button onClick={() => setShowMacropoint(selectedShipment)}
-                          style={{ flex: 1, padding: "7px 10px", borderRadius: 8, background: "linear-gradient(135deg, #0f766e22, #14b8a622)", border: "1px solid #14b8a633", color: "#14b8a6", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                          Full Tracking
-                        </button>
-                        {selectedShipment.macropointUrl && (
-                          <button onClick={() => window.open(selectedShipment.macropointUrl, '_blank')}
-                            style={{ flex: 1, padding: "7px 10px", borderRadius: 8, background: "rgba(0,212,170,0.08)", border: "1px solid rgba(0,212,170,0.2)", color: "#00D4AA", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                            Report ↗
+                        {(driverInfo?.macropointUrl || selectedShipment.macropointUrl) && (
+                          <button onClick={() => window.open(driverInfo?.macropointUrl || selectedShipment.macropointUrl, '_blank')}
+                            style={{ flex: 1, padding: "7px 10px", borderRadius: 8, background: "linear-gradient(135deg, #0f766e22, #14b8a622)", border: "1px solid #14b8a633", color: "#14b8a6", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                            Open Macropoint ↗
                           </button>
                         )}
                       </div>
@@ -5189,16 +5199,23 @@ function BOLGeneratorView({ loaded }) {
 function AddForm({ onSubmit, onCancel, accounts }) {
   const accts = (accounts || ["All Accounts"]).filter(a => a !== "All Accounts");
   const [form, setForm] = useState({
-    status: "at_port", account: accts[0] || "", carrier: "", origin: "", destination: "",
+    efj: "", status: "at_port", account: accts[0] || "", carrier: "", origin: "", destination: "",
     container: "", moveType: "Dray Import", eta: "", lfd: "", pickupDate: "", deliveryDate: "", notes: "",
     macropointUrl: "", carrierEmail: "", trailerNumber: "", driverPhone: "",
   });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const inputStyle = { width: "100%", padding: "10px 14px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "#F0F2F5", fontSize: 12, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" };
   const labelStyle = { fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "1.5px", marginBottom: 6, display: "block", textTransform: "uppercase" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {error && <div style={{ padding: "8px 12px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, color: "#f87171", fontSize: 11, fontWeight: 600 }}>{error}</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div><label style={labelStyle}>EFJ Pro #</label><input value={form.efj} onChange={e => set("efj", e.target.value.toUpperCase())} placeholder="EFJ107050" style={{ ...inputStyle, fontWeight: 700, fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }} /></div>
+        <div><label style={labelStyle}>Container #</label><input value={form.container} onChange={e => set("container", e.target.value.toUpperCase())} placeholder="MAEU1234567" style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} /></div>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div>
           <label style={labelStyle}>Account</label>
@@ -5222,7 +5239,6 @@ function AddForm({ onSubmit, onCancel, accounts }) {
           </select>
         </div>
       </div>
-      <div><label style={labelStyle}>Container #</label><input value={form.container} onChange={e => set("container", e.target.value)} placeholder="MAEU1234567" style={inputStyle} /></div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div><label style={labelStyle}>Origin</label><input value={form.origin} onChange={e => set("origin", e.target.value)} placeholder="Port Newark, NJ" style={inputStyle} /></div>
         <div><label style={labelStyle}>Destination</label><input value={form.destination} onChange={e => set("destination", e.target.value)} placeholder="Columbus, OH" style={inputStyle} /></div>
@@ -5251,12 +5267,15 @@ function AddForm({ onSubmit, onCancel, accounts }) {
       )}
       <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
         <button onClick={onCancel} style={{ flex: 1, padding: "11px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "#8B95A8", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
-        <button onClick={() => {
-          if (!form.carrier || !form.origin || !form.destination) return;
-          onSubmit({ ...form, pickupDate: form.pickupDate || "TBD", deliveryDate: form.deliveryDate || "TBD", eta: form.eta || "TBD", lfd: form.lfd || "TBD", synced: false,
-            macropointUrl: form.moveType === "FTL" ? (form.macropointUrl || null) : null, driver: null, driverPhone: form.driverPhone || null });
-        }} className="btn-primary" style={{ flex: 1.5, padding: "11px", border: "none", borderRadius: 10, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-          Add Load → Sync to Sheet
+        <button disabled={submitting} onClick={() => {
+          setError("");
+          if (!form.efj.trim()) { setError("EFJ Pro # is required"); return; }
+          if (!form.carrier || !form.origin || !form.destination) { setError("Carrier, Origin, and Destination are required"); return; }
+          setSubmitting(true);
+          onSubmit({ ...form, efj: form.efj.trim(), pickupDate: form.pickupDate || "", deliveryDate: form.deliveryDate || "", eta: form.eta || "", lfd: form.lfd || "",
+            macropointUrl: form.moveType === "FTL" ? (form.macropointUrl || null) : null, driverPhone: form.driverPhone || null, trailerNumber: form.trailerNumber || null, carrierEmail: form.carrierEmail || null });
+        }} className="btn-primary" style={{ flex: 1.5, padding: "11px", border: "none", borderRadius: 10, color: "#fff", fontSize: 12, fontWeight: 700, cursor: submitting ? "wait" : "pointer", opacity: submitting ? 0.6 : 1, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          {submitting ? "Syncing..." : "Add Load → Sync to Sheet"}
         </button>
       </div>
     </div>

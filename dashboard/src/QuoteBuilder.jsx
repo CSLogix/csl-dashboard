@@ -504,6 +504,32 @@ export default function QuoteBuilder() {
     return () => clearTimeout(mileageTimer.current);
   }, [route.pod, route.finalDelivery]);
 
+  // ── Rate Intelligence — auto-search when lane is entered ──
+  const [rateIntel, setRateIntel] = useState(null); // { matches, carriers, stats }
+  const [rateIntelLoading, setRateIntelLoading] = useState(false);
+  const [rateIntelOpen, setRateIntelOpen] = useState(false);
+  const rateIntelTimer = useRef(null);
+  useEffect(() => {
+    if (!route.pod && !route.finalDelivery) { setRateIntel(null); return; }
+    if (rateIntelTimer.current) clearTimeout(rateIntelTimer.current);
+    rateIntelTimer.current = setTimeout(async () => {
+      setRateIntelLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (route.pod) params.set("origin", route.pod);
+        if (route.finalDelivery) params.set("destination", route.finalDelivery);
+        const res = await apiFetch(`/api/rate-iq/search-lane?${params}`);
+        if (res.ok) {
+          const data = await res.json();
+          setRateIntel(data);
+          if (data.matches?.length > 0 || data.carriers?.length > 0) setRateIntelOpen(true);
+        }
+      } catch { /* lane search not available */ }
+      finally { setRateIntelLoading(false); }
+    }, 1500);
+    return () => clearTimeout(rateIntelTimer.current);
+  }, [route.pod, route.finalDelivery]);
+
   // ── Calculations ──
   const margin = parseNum(marginPct) / 100;
   const flatMarkup = marginType === "flat" ? parseNum(marginPct) : 0;
@@ -1022,6 +1048,71 @@ export default function QuoteBuilder() {
                 Carrier: {fmt(carrierSubtotal)} → Sell: <span style={{ color: "#00D4AA", fontWeight: 700 }}>{fmt(sellSubtotal)}</span>
               </div>
             </div>
+
+            {/* ── Rate Intelligence Panel ── */}
+            {(rateIntel || rateIntelLoading) && (
+              <div style={{ marginTop: 6, marginBottom: 2, border: "1px solid rgba(0,212,170,0.15)", borderRadius: 10, overflow: "hidden" }}>
+                <button onClick={() => setRateIntelOpen(o => !o)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(0,212,170,0.05)", border: "none", cursor: "pointer", color: "#00D4AA", fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                  <span>{rateIntelLoading ? "Searching rates..." : `Rate Intel${rateIntel?.stats?.count ? ` — ${rateIntel.stats.count} quotes` : ""}`}</span>
+                  <span style={{ fontSize: 14, transition: "transform 0.15s", transform: rateIntelOpen ? "rotate(180deg)" : "rotate(0)" }}>&#9662;</span>
+                </button>
+                {rateIntelOpen && rateIntel && (
+                  <div style={{ padding: "8px 12px 10px" }}>
+                    {/* Stats bar */}
+                    {rateIntel.stats?.count > 0 && (
+                      <div style={{ display: "flex", gap: 16, marginBottom: 8, fontSize: 11 }}>
+                        <div><span style={{ color: "#5A6478" }}>Floor </span><span style={{ color: "#22c55e", fontWeight: 700 }}>{fmt(rateIntel.stats.floor)}</span></div>
+                        <div><span style={{ color: "#5A6478" }}>Avg </span><span style={{ color: "#F0F2F5", fontWeight: 700 }}>{fmt(rateIntel.stats.avg)}</span></div>
+                        <div><span style={{ color: "#5A6478" }}>Ceiling </span><span style={{ color: "#f59e0b", fontWeight: 700 }}>{fmt(rateIntel.stats.ceiling)}</span></div>
+                        <div><span style={{ color: "#5A6478" }}>Carriers </span><span style={{ color: "#8B95A8", fontWeight: 600 }}>{rateIntel.stats.total_carriers}</span></div>
+                      </div>
+                    )}
+                    {/* Carrier rate rows — click to autofill */}
+                    {rateIntel.matches?.length > 0 ? (
+                      <div style={{ maxHeight: 160, overflowY: "auto" }}>
+                        {rateIntel.matches.slice(0, 10).map((m, i) => (
+                          <div key={m.id || i} onClick={() => { setCarrierName(m.carrier); if (m.rate) setLinehaul([{ description: `${m.lane || "Linehaul"}`, rate: String(m.rate), section: defaultSection(route.shipmentType) }]); }}
+                            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 8px", borderRadius: 6, cursor: "pointer", fontSize: 11, transition: "background 0.1s" }}
+                            onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}
+                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}>
+                              <span style={{ color: "#F0F2F5", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 140 }}>{m.carrier}</span>
+                              {m.carrier_email && <span style={{ color: "#3D4557", fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 120 }}>{m.carrier_email}</span>}
+                            </div>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                              {m.rate ? <span style={{ color: "#00D4AA", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{fmt(m.rate)}</span> : <span style={{ color: "#3D4557" }}>—</span>}
+                              {m.date && <span style={{ color: "#3D4557", fontSize: 9 }}>{m.date.slice(0, 10)}</span>}
+                              {m.status === "accepted" && <span style={{ color: "#22c55e", fontSize: 9, fontWeight: 700 }}>WON</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 11, color: "#5A6478", padding: "4px 0" }}>No rate history for this lane</div>
+                    )}
+                    {/* Directory carriers */}
+                    {rateIntel.carriers?.length > 0 && (
+                      <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 6, paddingTop: 6 }}>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.1em", marginBottom: 4, textTransform: "uppercase" }}>Directory Carriers</div>
+                        {rateIntel.carriers.slice(0, 5).map((c, i) => (
+                          <div key={c.id || i} onClick={() => setCarrierName(c.name)}
+                            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 8px", borderRadius: 6, cursor: "pointer", fontSize: 10.5, transition: "background 0.1s" }}
+                            onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}
+                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                            <span style={{ color: "#C8CED8", fontWeight: 600 }}>{c.name}</span>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", color: "#5A6478", fontSize: 9 }}>
+                              {c.mc && <span>MC#{c.mc}</span>}
+                              {c.can_dray && <span style={{ color: "#3b82f6" }}>DRAY</span>}
+                              {c.hazmat && <span style={{ color: "#f59e0b" }}>HAZ</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* ── Accessorials ── */}
             <div style={{ ...sectionTitle, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
