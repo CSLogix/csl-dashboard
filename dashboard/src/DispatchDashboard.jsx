@@ -228,7 +228,7 @@ const NAV_ITEMS = [
   { key: "history", label: "History", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
   { key: "quotes", label: "Rate IQ", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
   { key: "analytics", label: "Analytics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
-  { key: "unbilled", label: "Unbilled", icon: "M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2zM10 8.5a.5.5 0 11-1 0 .5.5 0 011 0zm5 5a.5.5 0 11-1 0 .5.5 0 011 0z" },
+  { key: "billing", label: "Billing", icon: "M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2zM10 8.5a.5.5 0 11-1 0 .5.5 0 011 0zm5 5a.5.5 0 11-1 0 .5.5 0 011 0z" },
   { key: "bol", label: "BOL Gen", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
 ];
 
@@ -483,6 +483,96 @@ function TrackingBadge({ tracking, mpStatus }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// COMMAND PALETTE — Ctrl+K global search overlay
+// ═══════════════════════════════════════════════════════════════
+const CMD_STATUS_COLORS = {
+  delivered: "#22c55e", empty_return: "#22c55e", billed_closed: "#22c55e",
+  in_transit: "#60a5fa", picked_up: "#60a5fa",
+  at_port: "#f97316", on_vessel: "#f97316",
+  pending: "#8B95A8", unassigned: "#8B95A8", need_pod: "#fbbf24",
+};
+
+function CommandPalette({ open, query, setQuery, index, setIndex, shipments, onSelect, onClose }) {
+  const inputRef = useRef(null);
+  useEffect(() => { if (open && inputRef.current) setTimeout(() => inputRef.current.focus(), 50); }, [open]);
+
+  const results = useMemo(() => {
+    if (!query || query.length < 2) return [];
+    const q = query.toLowerCase();
+    return (Array.isArray(shipments) ? shipments : []).filter(s =>
+      (s.efj || "").toLowerCase().includes(q) ||
+      (s.container || "").toLowerCase().includes(q) ||
+      (s.account || "").toLowerCase().includes(q) ||
+      (s.carrier || "").toLowerCase().includes(q) ||
+      (s.origin || "").toLowerCase().includes(q) ||
+      (s.destination || "").toLowerCase().includes(q)
+    ).slice(0, 8);
+  }, [query, shipments]);
+
+  useEffect(() => { setIndex(0); }, [results.length]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setIndex(i => Math.min(i + 1, results.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setIndex(i => Math.max(i - 1, 0)); }
+    else if (e.key === "Enter" && results[index]) { onSelect(results[index]); onClose(); }
+    else if (e.key === "Escape") { onClose(); }
+  };
+
+  if (!open) return null;
+
+  const statusLabel = (s) => (s.rawStatus || s.status || "").toUpperCase().replace(/_/g, " ");
+  const statusColor = (s) => CMD_STATUS_COLORS[s.status] || "#8B95A8";
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", zIndex: 9999, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "15vh" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 560, background: "#0f1215", border: "1px solid #00b8d4", borderRadius: 12, overflow: "hidden", boxShadow: "0 0 40px rgba(0,184,212,0.15), 0 20px 60px rgba(0,0,0,0.5)", fontFamily: "'Plus Jakarta Sans', sans-serif", animation: "fade-in 0.15s ease" }}>
+        {/* Search input */}
+        <div style={{ display: "flex", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid #1e2a30", gap: 10 }}>
+          <span style={{ color: "#00b8d4", fontSize: 13, fontWeight: 700, flexShrink: 0 }}>⌘F</span>
+          <input ref={inputRef} type="text" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={handleKeyDown}
+            placeholder="Search EFJ, container, customer..."
+            style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "rgba(255,255,255,0.9)", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.3px" }} />
+          <span style={{ color: "rgba(255,255,255,0.2)", fontSize: 9, background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 4, flexShrink: 0 }}>ESC</span>
+        </div>
+        {/* Results */}
+        <div style={{ maxHeight: 340, overflowY: "auto" }}>
+          {query.length >= 2 && results.length === 0 && (
+            <div style={{ padding: "20px 18px", textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 12 }}>No results for "{query}"</div>
+          )}
+          {query.length < 2 && (
+            <div style={{ padding: "20px 18px", textAlign: "center", color: "rgba(255,255,255,0.15)", fontSize: 11 }}>Type 2+ characters to search...</div>
+          )}
+          {results.map((s, i) => (
+            <div key={s.id} onClick={() => { onSelect(s); onClose(); }}
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 18px", cursor: "pointer",
+                background: i === index ? "rgba(0,184,212,0.08)" : "transparent",
+                borderLeft: i === index ? "3px solid #00b8d4" : "3px solid transparent",
+                transition: "background 0.1s" }}
+              onMouseEnter={() => setIndex(i)}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                <span style={{ color: i === index ? "#00b8d4" : "rgba(255,255,255,0.6)", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, flexShrink: 0 }}>{s.loadNumber}</span>
+                <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.container}</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, marginLeft: 12 }}>
+                <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, whiteSpace: "nowrap" }}>{s.account}{s.destination ? ` · ${s.destination}` : ""}</span>
+                <span style={{ background: `${statusColor(s)}20`, color: statusColor(s), padding: "2px 8px", borderRadius: 10, fontSize: 9, fontWeight: 600, whiteSpace: "nowrap" }}>{statusLabel(s)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* Footer */}
+        <div style={{ padding: "8px 18px", borderTop: "1px solid #1e2a30", display: "flex", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", gap: 14, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>
+            <span>↑↓ Navigate</span><span>↵ Open</span><span>ESC Close</span>
+          </div>
+          <span style={{ fontSize: 9, color: "rgba(255,255,255,0.12)" }}>{results.length > 0 ? `${results.length} result${results.length !== 1 ? "s" : ""}` : ""}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // CLOCK DISPLAY — isolated to prevent full-tree re-render every 1s
 // ═══════════════════════════════════════════════════════════════
 function ClockDisplay({ lastSyncTime, apiError }) {
@@ -544,6 +634,9 @@ export default function DispatchDashboard() {
   const [podUploading, setPodUploading] = useState(false);
   const [podUploadMsg, setPodUploadMsg] = useState(null);
   const [carrierDirectory, setCarrierDirectory] = useState([]);
+  const [cmdkOpen, setCmdkOpen] = useState(false);
+  const [cmdkQuery, setCmdkQuery] = useState("");
+  const [cmdkIndex, setCmdkIndex] = useState(0);
 
   // Fetch team profiles (avatars)
   const fetchProfiles = useCallback(async () => {
@@ -668,6 +761,23 @@ export default function DispatchDashboard() {
     return () => clearTimeout(fallback);
   }, [fetchData, fetchProfiles]);
   useEffect(() => { const i = setInterval(fetchData, 60000); return () => clearInterval(i); }, [fetchData]);
+
+  // Deep link support: ?view=billing&load=EFJ-XXXX
+  useEffect(() => {
+    if (!loaded || !shipments.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const view = params.get("view");
+    const loadEfj = params.get("load");
+    if (view) {
+      setActiveView(view);
+      if (loadEfj) {
+        const match = shipments.find(s => s.efj === loadEfj);
+        if (match) setSelectedShipment(match);
+      }
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [loaded, shipments.length]);
+
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
     const handler = (e) => setSidebarCollapsed(e.matches);
@@ -675,17 +785,26 @@ export default function DispatchDashboard() {
     return () => mq.removeEventListener("change", handler);
   }, []);
 
-  // ESC key to close modals/slide-over (priority: slide-over > add form)
+  // Global keyboard shortcuts: Ctrl+K command palette, ESC close modals
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Ctrl+F / Cmd+F → toggle command palette
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        e.preventDefault();
+        setCmdkOpen(prev => !prev);
+        setCmdkQuery("");
+        setCmdkIndex(0);
+        return;
+      }
       if (e.key === "Escape") {
+        if (cmdkOpen) { setCmdkOpen(false); return; }
         if (selectedShipment) { setSelectedShipment(null); return; }
         if (showAddForm) { setShowAddForm(false); return; }
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [selectedShipment, showAddForm]);
+  }, [selectedShipment, showAddForm, cmdkOpen]);
 
   const addSheetLog = useCallback((msg) => {
     setSheetLog(prev => [{ time: new Date().toLocaleTimeString(), msg }, ...prev].slice(0, 25));
@@ -1018,6 +1137,11 @@ export default function DispatchDashboard() {
         })}
       </div>
 
+      {/* ═══ COMMAND PALETTE ═══ */}
+      <CommandPalette open={cmdkOpen} query={cmdkQuery} setQuery={setCmdkQuery}
+        index={cmdkIndex} setIndex={setCmdkIndex} shipments={shipments}
+        onSelect={(s) => handleLoadClick(s)} onClose={() => setCmdkOpen(false)} />
+
       {/* ═══ MAIN CONTENT ═══ */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative", zIndex: 10 }}>
         {/* Top Bar */}
@@ -1067,7 +1191,7 @@ export default function DispatchDashboard() {
               onNavigateDispatch={() => setActiveView("dispatch")} onFilterStatus={(s) => { setDateFilter(null); setActiveStatus(s); setActiveView("dispatch"); }}
               onFilterAccount={(acct) => { if (acct === "Boviet" || acct === "Tolead") { goToRepDashboard(acct); } else { setDateFilter(null); setActiveAccount(acct); setActiveView("dispatch"); } }}
               onFilterDate={(df) => { setDateFilter(df); setActiveStatus("all"); setActiveAccount("All Accounts"); setActiveView("dispatch"); }}
-              onNavigateUnbilled={() => setActiveView("unbilled")} />
+              onNavigateUnbilled={() => setActiveView("billing")} />
           )}
           {activeView === "dashboard" && selectedRep && (
             <RepDashboardView repName={selectedRep} shipments={shipments} onBack={goBackFromRep}
@@ -1109,8 +1233,11 @@ export default function DispatchDashboard() {
           {activeView === "analytics" && (
             <AnalyticsView loaded={loaded} botStatus={botStatus} botHealth={botHealth} cronStatus={cronStatus} sheetLog={sheetLog} />
           )}
-          {activeView === "unbilled" && (
-            <UnbilledView loaded={loaded} unbilledOrders={unbilledOrders} setUnbilledOrders={setUnbilledOrders} unbilledStats={unbilledStats} setUnbilledStats={setUnbilledStats} />
+          {activeView === "billing" && (
+            <BillingView loaded={loaded} shipments={shipments} handleStatusUpdate={handleStatusUpdate}
+              handleLoadClick={handleLoadClick} setSelectedShipment={setSelectedShipment}
+              unbilledOrders={unbilledOrders} setUnbilledOrders={setUnbilledOrders}
+              unbilledStats={unbilledStats} setUnbilledStats={setUnbilledStats} />
           )}
           {activeView === "bol" && (
             <BOLGeneratorView loaded={loaded} />
@@ -2482,6 +2609,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
   const [previewDoc, setPreviewDoc] = useState(null);
   const [reclassDocId, setReclassDocId] = useState(null);
   const [loadEmails, setLoadEmails] = useState([]);
+  const [copiedEfj, setCopiedEfj] = useState(false);
 
   // Driver contact state
   const [driverInfo, setDriverInfo] = useState({ driverName: "", driverPhone: "", driverEmail: "", carrierEmail: "", trailerNumber: "", macropointUrl: "" });
@@ -2490,6 +2618,8 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
   const [driverSaving, setDriverSaving] = useState(false);
   const [statusExpanded, setStatusExpanded] = useState(false);
   const [emailsCollapsed, setEmailsCollapsed] = useState(true);
+  const [aiSummary, setAiSummary] = useState(null);
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
 
   // Fetch tracking + documents + driver info when slide-over opens
   useEffect(() => {
@@ -2501,8 +2631,11 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
       setDriverEditing(null);
       setLoadEmails([]);
       setStatusExpanded(false);
+      setAiSummary(null);
+      setAiSummaryLoading(false);
       return;
     }
+    setAiSummary(null);
     // Fetch documents
     apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/documents`)
       .then(r => r.ok ? r.json() : { documents: [] })
@@ -2554,6 +2687,43 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
     } catch {}
     setDriverSaving(false);
     setDriverEditing(null);
+  };
+
+  // AI Summary — send pre-loaded context to Claude Haiku for operational summary
+  const requestAiSummary = async () => {
+    if (!selectedShipment?.efj || aiSummaryLoading) return;
+    setAiSummaryLoading(true);
+    setAiSummary(null);
+    try {
+      const payload = {
+        shipment: {
+          efj: selectedShipment.efj, loadNumber: selectedShipment.loadNumber,
+          container: selectedShipment.container, moveType: selectedShipment.moveType,
+          account: selectedShipment.account, carrier: selectedShipment.carrier,
+          status: selectedShipment.status, rawStatus: selectedShipment.rawStatus,
+          origin: selectedShipment.origin, destination: selectedShipment.destination,
+          eta: selectedShipment.eta, lfd: selectedShipment.lfd,
+          pickupDate: selectedShipment.pickupDate, deliveryDate: selectedShipment.deliveryDate,
+          bol: selectedShipment.bol, ssl: selectedShipment.ssl,
+          returnPort: selectedShipment.returnPort, notes: selectedShipment.notes,
+          botAlert: selectedShipment.botAlert, rep: selectedShipment.rep,
+          hub: selectedShipment.hub, project: selectedShipment.project, mpStatus: selectedShipment.mpStatus,
+        },
+        emails: loadEmails.slice(0, 10).map(e => ({
+          subject: e.subject, sender: e.sender, body_preview: e.body_preview,
+          has_attachments: e.has_attachments, attachment_names: e.attachment_names, sent_at: e.sent_at,
+        })),
+        documents: loadDocs.map(d => ({ doc_type: d.doc_type, original_name: d.original_name, size_bytes: d.size_bytes, uploaded_at: d.uploaded_at })),
+        driver: { driverName: driverInfo.driverName, driverPhone: driverInfo.driverPhone, driverEmail: driverInfo.driverEmail, carrierEmail: driverInfo.carrierEmail, trailerNumber: driverInfo.trailerNumber },
+        tracking: trackingData ? { trackingStatus: trackingData.trackingStatus, eta: trackingData.eta, behindSchedule: trackingData.behindSchedule, cantMakeIt: trackingData.cantMakeIt, progress: trackingData.progress } : null,
+      };
+      const res = await apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/summary`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      if (res.ok) { const data = await res.json(); setAiSummary(data.summary); }
+      else { setAiSummary("Failed to generate summary. Please try again."); }
+    } catch { setAiSummary("Failed to generate summary. Please try again."); }
+    setAiSummaryLoading(false);
   };
 
   const handleDocUpload = async (file) => {
@@ -2648,6 +2818,57 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
             </div>
             <button onClick={() => setSelectedShipment(null)} style={{ background: "rgba(255,255,255,0.05)", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 14, width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
           </div>
+
+          {/* Quick Action Strip */}
+          <div style={{ padding: "8px 20px 10px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[
+              { icon: "📋", label: copiedEfj ? "Copied!" : "Copy EFJ", color: copiedEfj ? "#34d399" : "rgba(255,255,255,0.5)",
+                onClick: () => { navigator.clipboard.writeText(selectedShipment.efj); setCopiedEfj(true); setTimeout(() => setCopiedEfj(false), 1500); }, enabled: true },
+              { icon: "📧", label: "Email", color: "#00D4AA",
+                onClick: () => { const email = driverInfo.carrierEmail || driverInfo.driverEmail; if (email) window.open(`mailto:${email}?subject=${encodeURIComponent(`${selectedShipment.loadNumber} - ${selectedShipment.container} Update`)}`); },
+                enabled: !!(driverInfo.carrierEmail || driverInfo.driverEmail) },
+              { icon: "📞", label: "Call", color: "#10b981",
+                onClick: () => { if (driverInfo.driverPhone) window.open(`tel:${driverInfo.driverPhone.replace(/\D/g, "")}`); },
+                enabled: !!driverInfo.driverPhone },
+              { icon: "📍", label: "Tracking", color: "#3B82F6",
+                onClick: () => { const url = driverInfo.macropointUrl || selectedShipment.macropointUrl; if (url) window.open(url, '_blank'); },
+                enabled: !!(driverInfo.macropointUrl || selectedShipment.macropointUrl) },
+              { icon: "📄", label: "BOL", color: "rgba(255,255,255,0.5)",
+                onClick: () => { const bol = loadDocs.find(d => d.doc_type === 'bol'); if (bol) setPreviewDoc(bol); },
+                enabled: loadDocs.some(d => d.doc_type === 'bol') },
+              { icon: "✦", label: aiSummaryLoading ? "Thinking..." : "AI Summary",
+                color: aiSummaryLoading ? "#fbbf24" : "#00D4AA",
+                onClick: requestAiSummary, enabled: !aiSummaryLoading },
+            ].map((btn, i) => (
+              <button key={i} onClick={btn.enabled ? btn.onClick : undefined}
+                style={{ background: btn.enabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.02)", border: `1px solid ${btn.enabled ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.04)"}`,
+                  borderRadius: 6, padding: "5px 10px", cursor: btn.enabled ? "pointer" : "default",
+                  color: btn.enabled ? btn.color : "rgba(255,255,255,0.2)", fontSize: 10, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600,
+                  transition: "all 0.15s ease", opacity: btn.enabled ? 1 : 0.5 }}
+                title={!btn.enabled ? "Not available" : btn.label}
+              >{btn.icon} {btn.label}</button>
+            ))}
+          </div>
+
+          {/* AI Summary — inline section */}
+          {(aiSummary || aiSummaryLoading) && (
+            <div style={{ padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              {aiSummaryLoading ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.15)" }}>
+                  <div style={{ width: 12, height: 12, border: "2px solid rgba(0,212,170,0.2)", borderTop: "2px solid #00D4AA", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+                  <span style={{ fontSize: 10, color: "#00D4AA", fontWeight: 600 }}>Generating AI summary...</span>
+                </div>
+              ) : (
+                <div style={{ padding: "10px 12px", borderRadius: 8, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.15)", position: "relative" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: "#00D4AA", textTransform: "uppercase", letterSpacing: "0.05em" }}>AI Summary</span>
+                    <button onClick={() => setAiSummary(null)} style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 12, padding: "0 2px", lineHeight: 1 }} title="Dismiss">✕</button>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#C8CED8", lineHeight: 1.6, whiteSpace: "pre-line" }}>{aiSummary}</div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Route Progress — compact clickable route marker */}
           {(selectedShipment.macropointUrl || selectedShipment.moveType === "FTL") && (
@@ -4450,6 +4671,209 @@ function MacropointModal({ shipment, onClose }) {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BILLING VIEW — Billing Queue + Unbilled Orders
+// ═══════════════════════════════════════════════════════════════
+function BillingView({ loaded, shipments, handleStatusUpdate, handleLoadClick, setSelectedShipment,
+  unbilledOrders, setUnbilledOrders, unbilledStats, setUnbilledStats }) {
+  const [billingTab, setBillingTab] = useState("queue");
+  const [billingFilter, setBillingFilter] = useState("all");
+  const [billSearch, setBillSearch] = useState("");
+  const [billRepFilter, setBillRepFilter] = useState("All Reps");
+  const [billAcctFilter, setBillAcctFilter] = useState("All Accounts");
+
+  const BILLING_KEYS = ["ready_to_close", "missing_invoice", "ppwk_needed", "waiting_confirmation", "waiting_cx_approval", "cx_approved"];
+
+  const billingQueue = useMemo(() => {
+    return (Array.isArray(shipments) ? shipments : []).filter(s => BILLING_KEYS.includes(s.status));
+  }, [shipments]);
+
+  const filteredQueue = useMemo(() => {
+    let q = billingQueue;
+    if (billingFilter !== "all") q = q.filter(s => {
+      if (billingFilter === "waiting") return ["waiting_confirmation", "waiting_cx_approval", "cx_approved"].includes(s.status);
+      return s.status === billingFilter;
+    });
+    if (billRepFilter !== "All Reps") q = q.filter(s => {
+      const rep = resolveRepForShipment(s);
+      return rep === billRepFilter;
+    });
+    if (billAcctFilter !== "All Accounts") q = q.filter(s => s.account === billAcctFilter);
+    if (billSearch) {
+      const qs = billSearch.toLowerCase();
+      q = q.filter(s => (s.efj || "").toLowerCase().includes(qs) || (s.container || "").toLowerCase().includes(qs) ||
+        (s.account || "").toLowerCase().includes(qs) || (s.carrier || "").toLowerCase().includes(qs) ||
+        (s.loadNumber || "").toLowerCase().includes(qs));
+    }
+    q.sort((a, b) => {
+      const da = a.deliveryDate ? new Date(a.deliveryDate) : new Date(0);
+      const db = b.deliveryDate ? new Date(b.deliveryDate) : new Date(0);
+      return da - db;
+    });
+    return q;
+  }, [billingQueue, billingFilter, billRepFilter, billAcctFilter, billSearch]);
+
+  const counts = useMemo(() => ({
+    ready_to_close: billingQueue.filter(s => s.status === "ready_to_close").length,
+    missing_invoice: billingQueue.filter(s => s.status === "missing_invoice").length,
+    ppwk_needed: billingQueue.filter(s => s.status === "ppwk_needed").length,
+    waiting: billingQueue.filter(s => ["waiting_confirmation", "waiting_cx_approval", "cx_approved"].includes(s.status)).length,
+  }), [billingQueue]);
+
+  const queueAccounts = useMemo(() => {
+    const accts = [...new Set(billingQueue.map(s => s.account).filter(Boolean))].sort();
+    return ["All Accounts", ...accts];
+  }, [billingQueue]);
+
+  const handleInvoicedToggle = async (s) => {
+    const newVal = !s._invoiced;
+    try {
+      await apiFetch(`${API_BASE}/api/load/${s.efj}/invoiced`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invoiced: newVal }),
+      });
+    } catch {}
+  };
+
+  const advanceBillingStatus = (s) => {
+    const flow = ["ready_to_close", "missing_invoice", "ppwk_needed", "billed_closed"];
+    const idx = flow.indexOf(s.status);
+    if (idx >= 0 && idx < flow.length - 1) {
+      handleStatusUpdate(s.id, flow[idx + 1]);
+    } else if (!flow.includes(s.status)) {
+      handleStatusUpdate(s.id, "billed_closed");
+    }
+  };
+
+  const statCards = [
+    { label: "Ready to Close", count: counts.ready_to_close, color: "#F59E0B", filter: "ready_to_close" },
+    { label: "Missing Invoice", count: counts.missing_invoice, color: "#EF4444", filter: "missing_invoice" },
+    { label: "PPWK Needed", count: counts.ppwk_needed, color: "#EAB308", filter: "ppwk_needed" },
+    { label: "Waiting", count: counts.waiting, color: "#6B7280", filter: "waiting" },
+  ];
+
+  return (
+    <div style={{ paddingTop: 16 }}>
+      {/* Sub-tabs */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
+        {[{ key: "queue", label: "Billing Queue", count: billingQueue.length }, { key: "unbilled", label: "Unbilled Orders", count: unbilledStats?.count || 0 }].map(t => (
+          <button key={t.key} onClick={() => setBillingTab(t.key)}
+            style={{ padding: "8px 18px", borderRadius: 10, border: billingTab === t.key ? "1px solid rgba(0,212,170,0.3)" : "1px solid rgba(255,255,255,0.06)",
+              background: billingTab === t.key ? "rgba(0,212,170,0.08)" : "rgba(255,255,255,0.02)",
+              color: billingTab === t.key ? "#00D4AA" : "#8B95A8", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+            {t.label}
+            <span style={{ background: billingTab === t.key ? "#00D4AA22" : "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 8, fontSize: 10, fontWeight: 700,
+              color: billingTab === t.key ? "#00D4AA" : "#8B95A8" }}>{t.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {billingTab === "queue" && (
+        <>
+          {/* Stat cards */}
+          <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+            {statCards.map(c => (
+              <div key={c.filter} onClick={() => setBillingFilter(billingFilter === c.filter ? "all" : c.filter)}
+                className="glass" style={{ flex: "1 1 140px", padding: "14px 18px", borderRadius: 12, cursor: "pointer",
+                  border: billingFilter === c.filter ? `1px solid ${c.color}44` : "1px solid rgba(255,255,255,0.06)",
+                  background: billingFilter === c.filter ? `${c.color}0A` : "rgba(255,255,255,0.02)" }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: c.color, fontFamily: "'JetBrains Mono', monospace" }}>{c.count}</div>
+                <div style={{ fontSize: 10, color: "#8B95A8", fontWeight: 600, marginTop: 2 }}>{c.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Filters */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+            <input value={billSearch} onChange={e => setBillSearch(e.target.value)} placeholder="Search EFJ, container, carrier..."
+              style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)",
+                color: "#F0F2F5", fontSize: 12, width: 220, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
+            <select value={billRepFilter} onChange={e => setBillRepFilter(e.target.value)}
+              style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "#0D1119",
+                color: "#F0F2F5", fontSize: 11, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              {["All Reps", ...MASTER_REPS].map(r => <option key={r} value={r} style={{ background: "#0D1119" }}>{r}</option>)}
+            </select>
+            <select value={billAcctFilter} onChange={e => setBillAcctFilter(e.target.value)}
+              style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "#0D1119",
+                color: "#F0F2F5", fontSize: 11, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              {queueAccounts.map(a => <option key={a} value={a} style={{ background: "#0D1119" }}>{a}</option>)}
+            </select>
+            {(billingFilter !== "all" || billRepFilter !== "All Reps" || billAcctFilter !== "All Accounts" || billSearch) && (
+              <button onClick={() => { setBillingFilter("all"); setBillRepFilter("All Reps"); setBillAcctFilter("All Accounts"); setBillSearch(""); }}
+                style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)",
+                  color: "#8B95A8", fontSize: 10, cursor: "pointer" }}>Clear</button>
+            )}
+          </div>
+
+          {/* Table */}
+          <div className="glass" style={{ borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                  {["EFJ #", "Account", "Rep", "Container/Load", "Carrier", "Route", "Delivered", "Status", "Invoiced", ""].map(h => (
+                    <th key={h} style={{ padding: "10px 12px", textAlign: "left", color: "#8B95A8", fontSize: 10, fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredQueue.length === 0 && (
+                  <tr><td colSpan={10} style={{ padding: "40px 0", textAlign: "center", color: "#3D4557", fontSize: 12 }}>No loads in billing queue</td></tr>
+                )}
+                {filteredQueue.map(s => {
+                  const bStatus = BILLING_STATUSES.find(b => b.key === s.status);
+                  const bColor = BILLING_STATUS_COLORS[s.status]?.main || "#6B7280";
+                  const rep = resolveRepForShipment(s);
+                  return (
+                    <tr key={s.id} onClick={() => handleLoadClick(s)}
+                      style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", cursor: "pointer", transition: "background 0.15s" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(0,212,170,0.04)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <td style={{ padding: "10px 12px", fontWeight: 700, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{s.loadNumber || s.efj}</td>
+                      <td style={{ padding: "10px 12px", color: "#8B95A8" }}>{s.account}</td>
+                      <td style={{ padding: "10px 12px", color: REP_COLORS[rep] || "#8B95A8", fontWeight: 600 }}>{rep}</td>
+                      <td style={{ padding: "10px 12px", color: "#8B95A8", fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>{s.container}</td>
+                      <td style={{ padding: "10px 12px", color: "#8B95A8" }}>{s.carrier}</td>
+                      <td style={{ padding: "10px 12px", color: "#8B95A8", fontSize: 11 }}>{s.origin && s.destination ? `${s.origin} → ${s.destination}` : s.destination || "—"}</td>
+                      <td style={{ padding: "10px 12px", color: "#8B95A8", fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                        {s.deliveryDate ? new Date(s.deliveryDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <button onClick={e => { e.stopPropagation(); advanceBillingStatus(s); }}
+                          style={{ padding: "4px 12px", borderRadius: 8, border: `1px solid ${bColor}44`, background: `${bColor}15`,
+                            color: bColor, fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                          {bStatus?.label || s.status}
+                        </button>
+                      </td>
+                      <td style={{ padding: "10px 12px", textAlign: "center" }}>
+                        <button onClick={e => { e.stopPropagation(); handleInvoicedToggle(s); }}
+                          style={{ width: 18, height: 18, borderRadius: 4, border: s._invoiced ? "2px solid #A855F7" : "2px solid #3D4557",
+                            background: s._invoiced ? "#A855F7" : "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
+                          {s._invoiced && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
+                        </button>
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <button onClick={e => { e.stopPropagation(); handleStatusUpdate(s.id, "billed_closed"); }}
+                          title="Close out"
+                          style={{ padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(34,197,94,0.3)", background: "rgba(34,197,94,0.08)",
+                            color: "#22C55E", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Close</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {billingTab === "unbilled" && (
+        <UnbilledView loaded={loaded} unbilledOrders={unbilledOrders} setUnbilledOrders={setUnbilledOrders}
+          unbilledStats={unbilledStats} setUnbilledStats={setUnbilledStats} />
+      )}
     </div>
   );
 }
