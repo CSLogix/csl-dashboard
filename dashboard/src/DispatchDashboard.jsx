@@ -1634,7 +1634,7 @@ function RepDashboardView({ repName, shipments, onBack, onShowMacropoint, handle
               </button>
             )}
           </div>
-          <div style={{ overflow: "auto", maxHeight: 400 }}>
+          <div style={{ overflow: "auto", maxHeight: "calc(100vh - 340px)", minHeight: 400 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
@@ -1702,7 +1702,7 @@ function RepDashboardView({ repName, shipments, onBack, onShowMacropoint, handle
             </button>
           )}
         </div>
-        <div style={{ overflow: "auto", maxHeight: 400 }}>
+        <div style={{ overflow: "auto", maxHeight: "calc(100vh - 340px)", minHeight: 400 }}>
           {(() => {
             const repHasFTL = displayShips.some(s => s.moveType === "FTL");
             const repCols = ["Account", "EFJ #", "Container/Load #", ...(repHasFTL ? ["Tracking"] : []), "Origin \u2192 Dest", "PU Date", "PU Time", "DEL Date", "DEL Time", "Status"];
@@ -2940,6 +2940,11 @@ function DispatchView({
   const DISPATCH_COLS = [
     { key: "account", label: "Account", w: 80, sortFn: (a, b) => a.account.localeCompare(b.account) },
     { key: "status", label: "Status", w: 100, sortFn: (a, b) => a.status.localeCompare(b.status) },
+    { key: "billing", label: "Billing", w: 85, sortFn: (a, b) => {
+      const bKeys = ["ready_to_close", "missing_invoice", "billed_closed", "ppwk_needed", "waiting_confirmation", "waiting_cx_approval", "cx_approved"];
+      const aIdx = bKeys.indexOf(a.status); const bIdx = bKeys.indexOf(b.status);
+      return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
+    }},
     { key: "efj", label: "EFJ #", w: 90, sortFn: (a, b) => a.loadNumber.localeCompare(b.loadNumber) },
     { key: "container", label: "Container/Load #", w: 120, sortFn: (a, b) => a.container.localeCompare(b.container) },
     ...(hasFTL ? [{ key: "mpStatus", label: "MP Status", w: 90, sortFn: (a, b) => {
@@ -3256,6 +3261,20 @@ function DispatchView({
                       <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
                       {resolveStatusLabel(s)}
                     </span>
+                  </td>
+                  {/* Billing Status */}
+                  <td style={cellStyle(colIdx++)}>
+                    {(() => {
+                      const bs = BILLING_STATUSES.find(b => b.key === s.status);
+                      const bsc = BILLING_STATUS_COLORS[s.status];
+                      if (!bs) return <span style={{ color: "#3D4557", fontSize: 9 }}>—</span>;
+                      return (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 6px", borderRadius: 10, fontSize: 8, fontWeight: 700,
+                          color: bsc?.main || "#94a3b8", background: `${bsc?.main || "#94a3b8"}12`, border: `1px solid ${bsc?.main || "#94a3b8"}20`, textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                          {bs.icon} {bs.key === "billed_closed" ? "Billed" : bs.key === "missing_invoice" ? "Missing Inv" : bs.key === "ready_to_close" ? "Ready" : bs.key === "ppwk_needed" ? "PPWK" : bs.key === "waiting_confirmation" ? "Waiting" : bs.key === "waiting_cx_approval" ? "CX Apprvl" : bs.key === "cx_approved" ? "CX OK" : bs.label}
+                        </span>
+                      );
+                    })()}
                   </td>
                   {/* EFJ # */}
                   <td style={cellStyle(colIdx++)}>
@@ -4426,8 +4445,8 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
 function RateIQView() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [expandedLane, setExpandedLane] = useState(null);
-  const [tab, setTab] = useState("dray"); // dray | ftl | oog | lanes | scorecard
+  const [expandedCarrier, setExpandedCarrier] = useState(null);
+  const [tab, setTab] = useState("dray"); // dray | ftl | oog | scorecard
   const [replyAlerts, setReplyAlerts] = useState([]);
 
   const fetchData = useCallback(async () => {
@@ -4484,7 +4503,6 @@ function RateIQView() {
           { key: "dray", label: "Dray IQ" },
           { key: "ftl", label: "FTL IQ" },
           { key: "oog", label: "OOG IQ" },
-          { key: "lanes", label: `Lanes (${lanes.length})` },
           { key: "scorecard", label: `Scorecard (${scorecard.length})` },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
@@ -4515,117 +4533,124 @@ function RateIQView() {
         <OOGQuoteBuilder />
       )}
 
-      {/* Lanes Tab */}
-      {tab === "lanes" && (
+      {/* Scorecard Tab — Carrier cards with lane drill-down */}
+      {tab === "scorecard" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {lanes.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#5A6478", fontSize: 12 }}>No lane data yet. Carrier and customer emails will appear here once classified.</div>}
-          {lanes.map((lane, i) => {
-            const isExpanded = expandedLane === lane.lane;
-            const quoteCount = lane.carrier_quotes?.length || 0;
-            const custCount = lane.customer_requests?.length || 0;
+          {scorecard.length === 0 && (
+            <div style={{ padding: 40, textAlign: "center", color: "#5A6478", fontSize: 12 }}>
+              No carrier data yet — rates will appear as the inbox scanner classifies emails.
+            </div>
+          )}
+          {scorecard.map((c, i) => {
+            const carrierKey = c.carrier;
+            const isExpanded = expandedCarrier === carrierKey;
+            const winPct = c.quote_count > 0 ? Math.round((c.win_count / c.quote_count) * 100) : 0;
+            const winColor = winPct >= 50 ? "#34d399" : winPct >= 25 ? "#FBBF24" : winPct > 0 ? "#f87171" : "#8B95A8";
+            const winBg = winPct >= 50 ? "rgba(34,197,94,0.12)" : winPct >= 25 ? "rgba(245,158,11,0.12)" : winPct > 0 ? "rgba(239,68,68,0.12)" : "rgba(107,114,128,0.12)";
+
+            // Cross-reference: find lanes where this carrier has quotes
+            const carrierLanes = lanes.filter(l =>
+              l.carrier_quotes?.some(q => q.carrier === c.carrier || q.carrier_email === c.carrier)
+            ).map(l => ({
+              ...l,
+              thisCarrierQuotes: l.carrier_quotes?.filter(q => q.carrier === c.carrier || q.carrier_email === c.carrier) || [],
+              isCheapest: l.cheapest?.carrier === c.carrier,
+            }));
+
             return (
               <div key={i} className="glass" style={{ borderRadius: 12, overflow: "hidden", border: isExpanded ? "1px solid rgba(0,212,170,0.2)" : "1px solid rgba(255,255,255,0.04)" }}>
-                <div onClick={() => setExpandedLane(isExpanded ? null : lane.lane)}
-                  style={{ padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, transition: "background 0.15s ease" }}
+                {/* Carrier summary row */}
+                <div onClick={() => setExpandedCarrier(isExpanded ? null : carrierKey)}
+                  style={{ padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 16, transition: "background 0.15s ease" }}
                   onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
                   onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5" }}>{lane.lane}</div>
-                    <div style={{ fontSize: 10, color: "#5A6478", marginTop: 2 }}>{lane.move_type ? lane.move_type.toUpperCase() : "—"} {lane.miles ? `| ${lane.miles} mi` : ""}</div>
-                  </div>
-                  <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                    {lane.cheapest && (
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: "#22C55E" }}>${lane.cheapest.rate?.toLocaleString()}</div>
-                        <div style={{ fontSize: 9, color: "#5A6478" }}>{lane.cheapest.carrier?.split("<")[0]?.trim()}</div>
+                  {/* Carrier name + email */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {c.carrier?.split("<")[0]?.trim() || "Unknown"}
+                    </div>
+                    {c.carrier?.includes("<") && (
+                      <div style={{ fontSize: 9, color: "#5A6478", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {c.carrier.match(/<(.+?)>/)?.[1] || ""}
                       </div>
                     )}
-                    {lane.avg_rate && <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#8B95A8" }}>Avg ${lane.avg_rate?.toLocaleString()}</div></div>}
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.25)", color: "#60a5fa", fontSize: 9, fontWeight: 700 }}>{quoteCount} quote{quoteCount !== 1 ? "s" : ""}</span>
-                      {custCount > 0 && <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.25)", color: "#FBBF24", fontSize: 9, fontWeight: 700 }}>{custCount} req</span>}
+                  </div>
+                  {/* Stats */}
+                  <div style={{ display: "flex", gap: 16, alignItems: "center", flexShrink: 0 }}>
+                    <div style={{ textAlign: "center", minWidth: 44 }}>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{c.quote_count}</div>
+                      <div style={{ fontSize: 8, color: "#5A6478", fontWeight: 600, letterSpacing: "0.5px" }}>QUOTES</div>
                     </div>
+                    <div style={{ textAlign: "center", minWidth: 36 }}>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: "#34d399", fontFamily: "'JetBrains Mono', monospace" }}>{c.win_count}</div>
+                      <div style={{ fontSize: 8, color: "#5A6478", fontWeight: 600, letterSpacing: "0.5px" }}>WINS</div>
+                    </div>
+                    <span style={{ padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, background: winBg, color: winColor, border: `1px solid ${winColor}30` }}>
+                      {winPct}%
+                    </span>
+                    {c.avg_rate && (
+                      <div style={{ textAlign: "right", minWidth: 70 }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>${c.avg_rate.toLocaleString()}</div>
+                        <div style={{ fontSize: 8, color: "#5A6478", fontWeight: 600 }}>AVG RATE</div>
+                      </div>
+                    )}
+                    <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.25)", color: "#60a5fa", fontSize: 9, fontWeight: 700 }}>
+                      {c.lanes_covered} lane{c.lanes_covered !== 1 ? "s" : ""}
+                    </span>
                     <span style={{ color: "#5A6478", fontSize: 14, transition: "transform 0.2s", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>&#9660;</span>
                   </div>
                 </div>
+
+                {/* Expanded: lane breakdown for this carrier */}
                 {isExpanded && (
-                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", padding: "8px 16px 12px" }}>
-                    {lane.carrier_quotes?.length > 0 && (
-                      <>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 6, letterSpacing: "0.5px" }}>CARRIER QUOTES</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          {lane.carrier_quotes.map((q, qi) => (
-                            <div key={qi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 6, background: q.status === "accepted" ? "rgba(34,197,94,0.06)" : q.status === "rejected" ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.02)" }}>
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", padding: "10px 16px 14px" }}>
+                    {carrierLanes.length === 0 && (
+                      <div style={{ padding: 12, textAlign: "center", color: "#5A6478", fontSize: 11 }}>No lane details available</div>
+                    )}
+                    {carrierLanes.map((cl, li) => (
+                      <div key={li} style={{ marginBottom: li < carrierLanes.length - 1 ? 10 : 0 }}>
+                        {/* Lane header */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#00D4AA" }}>{cl.lane}</div>
+                          <div style={{ fontSize: 9, color: "#5A6478" }}>{cl.move_type ? cl.move_type.toUpperCase() : ""}{cl.miles ? ` | ${cl.miles} mi` : ""}</div>
+                          {cl.isCheapest && (
+                            <span style={{ padding: "1px 6px", borderRadius: 4, fontSize: 8, fontWeight: 700, background: "rgba(34,197,94,0.12)", color: "#34d399", border: "1px solid rgba(34,197,94,0.3)" }}>CHEAPEST</span>
+                          )}
+                          {cl.avg_rate && (
+                            <span style={{ fontSize: 9, color: "#5A6478", marginLeft: "auto" }}>Lane avg: ${cl.avg_rate.toLocaleString()}</span>
+                          )}
+                        </div>
+                        {/* This carrier's quotes on this lane */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                          {cl.thisCarrierQuotes.map((q, qi) => (
+                            <div key={qi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", borderRadius: 6, background: q.status === "accepted" ? "rgba(34,197,94,0.06)" : q.status === "rejected" ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.02)" }}>
                               <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 11, fontWeight: 600, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.carrier?.split("<")[0]?.trim() || "Unknown"}</div>
-                                <div style={{ fontSize: 9, color: "#5A6478" }}>{q.efj || "—"} | {q.date ? new Date(q.date).toLocaleDateString() : "—"}{q.move_type ? ` | ${q.move_type.toUpperCase()}` : ""}</div>
+                                <div style={{ fontSize: 10, color: "#8B95A8" }}>
+                                  {q.efj || "—"} | {q.date ? new Date(q.date).toLocaleDateString() : "—"}{q.move_type ? ` | ${q.move_type.toUpperCase()}` : ""}
+                                </div>
                               </div>
-                              <div style={{ fontWeight: 800, fontSize: 13, color: q.rate ? "#F0F2F5" : "#5A6478", minWidth: 70, textAlign: "right" }}>{q.rate ? `$${q.rate.toLocaleString()}` : "No rate"}{q.rate_unit === "per_mile" ? "/mi" : ""}</div>
-                              <span style={{ fontSize: 8, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: q.status === "accepted" ? "rgba(34,197,94,0.15)" : q.status === "rejected" ? "rgba(239,68,68,0.15)" : "rgba(107,114,128,0.15)", color: q.status === "accepted" ? "#34d399" : q.status === "rejected" ? "#f87171" : "#8B95A8", border: `1px solid ${q.status === "accepted" ? "rgba(34,197,94,0.3)" : q.status === "rejected" ? "rgba(239,68,68,0.3)" : "rgba(107,114,128,0.3)"}` }}>{q.status || "pending"}</span>
+                              <div style={{ fontWeight: 800, fontSize: 13, color: q.rate ? "#F0F2F5" : "#5A6478", fontFamily: "'JetBrains Mono', monospace", minWidth: 70, textAlign: "right" }}>
+                                {q.rate ? `$${q.rate.toLocaleString()}` : "No rate"}{q.rate_unit === "per_mile" ? "/mi" : ""}
+                              </div>
+                              <span style={{ fontSize: 8, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: q.status === "accepted" ? "rgba(34,197,94,0.15)" : q.status === "rejected" ? "rgba(239,68,68,0.15)" : "rgba(107,114,128,0.15)", color: q.status === "accepted" ? "#34d399" : q.status === "rejected" ? "#f87171" : "#8B95A8", border: `1px solid ${q.status === "accepted" ? "rgba(34,197,94,0.3)" : q.status === "rejected" ? "rgba(239,68,68,0.3)" : "rgba(107,114,128,0.3)"}` }}>
+                                {q.status || "pending"}
+                              </span>
                               {q.status === "pending" && q.id && (
                                 <div style={{ display: "flex", gap: 3 }}>
-                                  <button onClick={() => handleQuoteAction(q.id, "accepted")} style={{ padding: "2px 8px", fontSize: 8, fontWeight: 700, borderRadius: 4, border: "1px solid rgba(34,197,94,0.3)", background: "rgba(34,197,94,0.1)", color: "#34d399", cursor: "pointer", fontFamily: "inherit" }}>Accept</button>
-                                  <button onClick={() => handleQuoteAction(q.id, "rejected")} style={{ padding: "2px 8px", fontSize: 8, fontWeight: 700, borderRadius: 4, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", cursor: "pointer", fontFamily: "inherit" }}>Reject</button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleQuoteAction(q.id, "accepted"); }} style={{ padding: "2px 8px", fontSize: 8, fontWeight: 700, borderRadius: 4, border: "1px solid rgba(34,197,94,0.3)", background: "rgba(34,197,94,0.1)", color: "#34d399", cursor: "pointer", fontFamily: "inherit" }}>Accept</button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleQuoteAction(q.id, "rejected"); }} style={{ padding: "2px 8px", fontSize: 8, fontWeight: 700, borderRadius: 4, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", cursor: "pointer", fontFamily: "inherit" }}>Reject</button>
                                 </div>
                               )}
                             </div>
                           ))}
                         </div>
-                      </>
-                    )}
-                    {lane.customer_requests?.length > 0 && (
-                      <div style={{ marginTop: 10 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 6, letterSpacing: "0.5px" }}>CUSTOMER REQUESTS</div>
-                        {lane.customer_requests.map((cr, ci) => (
-                          <div key={ci} style={{ padding: "4px 10px", fontSize: 11, color: "#8B95A8" }}>
-                            <span style={{ color: "#FBBF24", fontWeight: 600 }}>{cr.sender?.split("<")[0]?.trim()}</span> — {cr.subject?.slice(0, 60)} <span style={{ fontSize: 9, color: "#5A6478" }}>{cr.sent_at ? new Date(cr.sent_at).toLocaleDateString() : ""}</span>
-                          </div>
-                        ))}
                       </div>
-                    )}
+                    ))}
                   </div>
                 )}
               </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Scorecard Tab */}
-      {tab === "scorecard" && (
-        <div className="glass" style={{ borderRadius: 12, overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                <th style={{ padding: "10px 14px", textAlign: "left", color: "#8B95A8", fontWeight: 700, fontSize: 9, letterSpacing: "0.5px" }}>CARRIER</th>
-                <th style={{ padding: "10px 14px", textAlign: "center", color: "#8B95A8", fontWeight: 700, fontSize: 9 }}>QUOTES</th>
-                <th style={{ padding: "10px 14px", textAlign: "center", color: "#8B95A8", fontWeight: 700, fontSize: 9 }}>WINS</th>
-                <th style={{ padding: "10px 14px", textAlign: "center", color: "#8B95A8", fontWeight: 700, fontSize: 9 }}>WIN %</th>
-                <th style={{ padding: "10px 14px", textAlign: "right", color: "#8B95A8", fontWeight: 700, fontSize: 9 }}>AVG RATE</th>
-                <th style={{ padding: "10px 14px", textAlign: "center", color: "#8B95A8", fontWeight: 700, fontSize: 9 }}>LANES</th>
-              </tr>
-            </thead>
-            <tbody>
-              {scorecard.length === 0 && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#5A6478" }}>No carrier data yet</td></tr>}
-              {scorecard.map((c, i) => {
-                const winPct = c.quote_count > 0 ? Math.round((c.win_count / c.quote_count) * 100) : 0;
-                return (
-                  <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}
-                    onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
-                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                    <td style={{ padding: "8px 14px", color: "#F0F2F5", fontWeight: 600 }}>{c.carrier?.split("<")[0]?.trim()}</td>
-                    <td style={{ padding: "8px 14px", textAlign: "center", color: "#8B95A8" }}>{c.quote_count}</td>
-                    <td style={{ padding: "8px 14px", textAlign: "center", color: "#34d399", fontWeight: 600 }}>{c.win_count}</td>
-                    <td style={{ padding: "8px 14px", textAlign: "center" }}>
-                      <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, background: winPct >= 50 ? "rgba(34,197,94,0.12)" : "rgba(107,114,128,0.12)", color: winPct >= 50 ? "#34d399" : "#8B95A8" }}>{winPct}%</span>
-                    </td>
-                    <td style={{ padding: "8px 14px", textAlign: "right", color: c.avg_rate ? "#F0F2F5" : "#5A6478", fontWeight: 600 }}>{c.avg_rate ? `$${c.avg_rate.toLocaleString()}` : "—"}</td>
-                    <td style={{ padding: "8px 14px", textAlign: "center", color: "#8B95A8" }}>{c.lanes_covered}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
         </div>
       )}
 

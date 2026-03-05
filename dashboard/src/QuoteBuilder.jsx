@@ -53,8 +53,9 @@ const DEFAULT_TERMS = [
 // ════════════════════════════════════════════════════════════
 // ─── Quote Preview Card (customer-facing) ───
 // ════════════════════════════════════════════════════════════
-function QuotePreview({ route, linehaul, accessorials, marginPct, terms, quoteNumber, shipmentType }) {
+function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, terms, quoteNumber, shipmentType }) {
   const margin = parseNum(marginPct) / 100;
+  const flatMarkup = marginType === "flat" ? parseNum(marginPct) : 0;
   const isRoundTrip = shipmentType === "Dray";
 
   // Build route data for card — format-specific labels (always show rows, "—" if empty)
@@ -82,12 +83,17 @@ function QuotePreview({ route, linehaul, accessorials, marginPct, terms, quoteNu
   linehaul.filter(r => r.description && parseNum(r.rate) > 0).forEach(r => {
     const sec = r.section || "Charges";
     if (!lhBySection[sec]) lhBySection[sec] = [];
+    const base = parseNum(r.rate);
+    const sell = marginType === "flat" ? base + flatMarkup : base * (1 + margin);
     lhBySection[sec].push({
       desc: r.description,
-      rate: fmt(parseNum(r.rate) * (1 + margin)),
+      rate: fmt(sell),
     });
   });
-  const sellSubtotal = linehaul.reduce((sum, r) => sum + parseNum(r.rate) * (1 + margin), 0);
+  const sellSubtotal = linehaul.reduce((sum, r) => {
+    const base = parseNum(r.rate);
+    return sum + (marginType === "flat" ? base + flatMarkup : base * (1 + margin));
+  }, 0);
 
   // All accessorials with amounts show on preview; only checked ones count toward total
   const accRows = accessorials.filter(a => parseNum(a.amount) > 0).map(a => ({
@@ -412,6 +418,7 @@ export default function QuoteBuilder() {
 
   // ── Margin ──
   const [marginPct, setMarginPct] = useState(15);
+  const [marginType, setMarginType] = useState("pct"); // "pct" or "flat"
 
   // ── Accessorials ──
   const [accessorials, setAccessorials] = useState(JSON.parse(JSON.stringify(DEFAULT_ACCESSORIALS)));
@@ -464,8 +471,12 @@ export default function QuoteBuilder() {
 
   // ── Calculations ──
   const margin = parseNum(marginPct) / 100;
+  const flatMarkup = marginType === "flat" ? parseNum(marginPct) : 0;
   const carrierSubtotal = linehaul.reduce((s, r) => s + parseNum(r.rate), 0);
-  const sellSubtotal = linehaul.reduce((s, r) => s + parseNum(r.rate) * (1 + margin), 0);
+  const sellSubtotal = linehaul.reduce((s, r) => {
+    const base = parseNum(r.rate);
+    return s + (marginType === "flat" ? base + flatMarkup : base * (1 + margin));
+  }, 0);
   const accTotal = accessorials.filter(a => a.checked).reduce((s, a) => s + parseNum(a.amount), 0);
   const estimatedTotal = sellSubtotal + accTotal;
 
@@ -647,7 +658,7 @@ export default function QuoteBuilder() {
         round_trip_miles: route.roundTripMiles, one_way_miles: route.oneWayMiles,
         transit_time: route.transitTime, shipment_type: route.shipmentType,
         carrier_name: carrierName, carrier_total: carrierSubtotal,
-        margin_pct: marginPct, sell_subtotal: sellSubtotal,
+        margin_pct: marginPct, margin_type: marginType, sell_subtotal: sellSubtotal,
         accessorial_total: accTotal, estimated_total: estimatedTotal,
         customer_name: customerName, customer_email: customerEmail,
         linehaul_items: linehaul, accessorials, terms,
@@ -696,6 +707,7 @@ export default function QuoteBuilder() {
       setCarrierName(q.carrier_name || "");
       setCustomerName(q.customer_name || "");
       setCustomerEmail(q.customer_email || "");
+      setMarginType(q.margin_type || "pct");
       setMarginPct(q.margin_pct || 15);
       if (q.linehaul_json?.length) setLinehaul(q.linehaul_json);
       if (q.accessorials_json?.length) setAccessorials(q.accessorials_json);
@@ -794,6 +806,7 @@ export default function QuoteBuilder() {
     setRoute({ pod: "", finalDelivery: "", finalZip: "", roundTripMiles: "", oneWayMiles: "", transitTime: "", shipmentType: "Dray" });
     setLinehaul([{ description: "", rate: "", section: "Charges" }]);
     setMarginPct(15);
+    setMarginType("pct");
     setAccessorials(JSON.parse(JSON.stringify(DEFAULT_ACCESSORIALS)));
     setTerms([...DEFAULT_TERMS]);
     setCustomerName("");
@@ -810,7 +823,7 @@ export default function QuoteBuilder() {
   const sectionTitle = { fontSize: 11, fontWeight: 800, color: "#8B95A8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10, marginTop: 20 };
 
   return (
-    <div style={{ display: "flex", gap: 24, height: "100%", minHeight: 0, overflow: "hidden" }}>
+    <div style={{ display: "flex", gap: 40, height: "100%", minHeight: 0, overflow: "hidden", maxWidth: 1100, margin: "0 auto" }}>
 
       {/* ═══ LEFT: Builder Panel ═══ */}
       <div style={{ width: 480, flexShrink: 0, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -961,10 +974,15 @@ export default function QuoteBuilder() {
             ))}
 
             {/* ── Margin ── */}
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8, marginBottom: 4 }}>
-              <div style={{ ...labelStyle, margin: 0, whiteSpace: "nowrap" }}>Margin %</div>
-              <input value={marginPct} onChange={e => setMarginPct(e.target.value)} type="number" min="0" max="100" step="0.5"
-                style={{ ...inputStyle, width: 70, textAlign: "center" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, marginBottom: 4, flexWrap: "wrap" }}>
+              <select value={marginType} onChange={e => { setMarginType(e.target.value); setMarginPct(e.target.value === "flat" ? "" : "15"); }}
+                style={{ ...inputStyle, width: 90, fontSize: 11, cursor: "pointer", padding: "8px 4px" }}>
+                <option value="pct">% Markup</option>
+                <option value="flat">$ Flat</option>
+              </select>
+              <input value={marginPct} onChange={e => setMarginPct(e.target.value)} type="number" min="0" step={marginType === "flat" ? "25" : "0.5"}
+                placeholder={marginType === "flat" ? "0.00" : "15"}
+                style={{ ...inputStyle, width: 80, textAlign: "center" }} />
               <div style={{ fontSize: 12, color: "#5A6478", whiteSpace: "nowrap" }}>
                 Carrier: {fmt(carrierSubtotal)} → Sell: <span style={{ color: "#00D4AA", fontWeight: 700 }}>{fmt(sellSubtotal)}</span>
               </div>
@@ -1031,7 +1049,7 @@ export default function QuoteBuilder() {
       </div>
 
       {/* ═══ RIGHT: Live Preview ═══ */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", overflowY: "auto", padding: "0 20px", position: "relative" }}>
+      <div style={{ width: 560, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", overflowY: "auto", padding: "0 20px", position: "relative" }}>
         <img src="/rateiq-bot.png" alt="" style={{ width: "100%", maxWidth: 520, pointerEvents: "none", userSelect: "none", borderRadius: 12, marginBottom: 20 }} />
         <div style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 16, textAlign: "center" }}>
           Customer Preview {quoteNumber && `— ${quoteNumber}`}
@@ -1041,6 +1059,7 @@ export default function QuoteBuilder() {
           linehaul={linehaul}
           accessorials={accessorials}
           marginPct={marginPct}
+          marginType={marginType}
           terms={terms}
           quoteNumber={quoteNumber}
           shipmentType={route.shipmentType}
