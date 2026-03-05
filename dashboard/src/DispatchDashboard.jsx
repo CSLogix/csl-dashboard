@@ -953,6 +953,7 @@ export default function DispatchDashboard() {
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes glow-pulse { 0%, 100% { box-shadow: 0 0 16px rgba(0,222,180,0.08); } 50% { box-shadow: 0 0 28px rgba(0,222,180,0.18); } }
         @keyframes alert-pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(239,68,68,0.5); } 50% { opacity: 0.6; box-shadow: 0 0 12px rgba(239,68,68,0.3); } }
+        @keyframes unbilled-pulse { 0%, 100% { box-shadow: 0 0 8px rgba(249,115,22,0.15); border-color: rgba(249,115,22,0.4); } 50% { box-shadow: 0 0 20px rgba(249,115,22,0.3); border-color: rgba(249,115,22,0.7); } }
         .glass { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: var(--radius-card); box-shadow: var(--shadow-card); position: relative; }
         .glass::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent); border-radius: var(--radius-card) var(--radius-card) 0 0; pointer-events: none; }
         .glass-strong { background: var(--bg-elevated); border: 1px solid var(--border-emphasis); border-radius: var(--radius-card); box-shadow: var(--shadow-elevated); position: relative; }
@@ -1255,22 +1256,25 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
       {/* Operational Stats Row — clickable stat cards */}
       <div className="dash-stat-row" style={{ display: "flex", gap: 12, marginBottom: 16 }}>
         {[
-          { label: "Active", value: activeCount, color: "#F0F2F5", indicator: "linear-gradient(135deg, #00D4AA, #00A8CC, #0088E8)", action: () => onFilterStatus("all") },
+          { label: "Active", value: activeCount, color: "#F0F2F5", indicator: "linear-gradient(135deg, #00D4AA, #00A8CC, #0088E8)", action: () => onFilterStatus("all"), emphasis: true },
           { label: "Picking Up", value: pickingUpCount, color: "#3B82F6", indicator: "#3B82F6", action: () => onFilterDate("pickup_today") },
           { label: "Delivering", value: deliveringCount, color: "#22C55E", indicator: "#22C55E", action: () => onFilterDate("delivery_today") },
           { label: "In Transit", value: inTransitCount, color: "#60A5FA", indicator: "#60A5FA", action: () => onFilterStatus("in_transit") },
           { label: "Upcoming", value: upcomingCount, color: "#F59E0B", indicator: "#F59E0B", action: () => onFilterDate("upcoming") },
-          { label: "Unbilled", value: unbilledStats?.count || 0, color: "#F97316", indicator: "#F97316", action: onNavigateUnbilled },
-        ].map((s, i) => (
+          { label: "Unbilled", value: unbilledStats?.count || 0, color: "#F97316", indicator: "#F97316", action: onNavigateUnbilled, emphasis: true, pulse: true },
+        ].map((s, i) => {
+          const isUnbilledPulsing = s.pulse && s.value > 0;
+          return (
           <div key={i} onClick={s.action}
-            style={{ flex: 1, minWidth: 0, background: "#141A28", border: "1px solid rgba(255,255,255,0.10)", borderRadius: 14, padding: "16px 16px", cursor: "pointer", position: "relative", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.2)", transition: "border-color 0.2s, box-shadow 0.2s" }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.16)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.4), 0 8px 32px rgba(0,0,0,0.2)"; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.2)"; }}>
-            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: s.indicator, borderRadius: "0 0 2px 2px" }} />
-            <div className="stat-value" style={{ fontSize: 32, fontWeight: 800, letterSpacing: "-0.04em", lineHeight: 1.1, color: s.color, marginBottom: 2 }}>{s.value}</div>
+            style={{ flex: s.emphasis ? 1.4 : 1, minWidth: s.emphasis ? 100 : 0, background: isUnbilledPulsing ? "rgba(249,115,22,0.06)" : "#141A28", border: `1px solid ${isUnbilledPulsing ? "rgba(249,115,22,0.4)" : "rgba(255,255,255,0.10)"}`, borderRadius: 14, padding: "16px 16px", cursor: "pointer", position: "relative", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.2)", transition: "border-color 0.2s, box-shadow 0.2s", animation: isUnbilledPulsing ? "unbilled-pulse 2.5s ease infinite" : "none" }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = isUnbilledPulsing ? "rgba(249,115,22,0.7)" : "rgba(255,255,255,0.16)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.4), 0 8px 32px rgba(0,0,0,0.2)"; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = isUnbilledPulsing ? "rgba(249,115,22,0.4)" : "rgba(255,255,255,0.10)"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.2)"; }}>
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: s.emphasis ? 3 : 2, background: s.indicator, borderRadius: "0 0 2px 2px" }} />
+            <div className="stat-value" style={{ fontSize: s.emphasis ? 32 : 24, fontWeight: 800, letterSpacing: "-0.04em", lineHeight: 1.1, color: s.color, marginBottom: 2 }}>{s.value}</div>
             <div className="stat-label" style={{ fontSize: 11, fontWeight: 600, color: "#8B95A8", textTransform: "uppercase", letterSpacing: "0.06em" }}>{s.label}</div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Row 1: Today's Actions + Live Alerts */}
