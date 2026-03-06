@@ -681,10 +681,10 @@ export default function DispatchDashboard() {
   const fetchData = useCallback(async () => {
     try {
       const [shipmentsRes, statsRes, botRes, accountsRes, trackRes, docRes] = await Promise.allSettled([
-        apiFetch(`${API_BASE}/api/shipments`).then(r => r.json()),
-        apiFetch(`${API_BASE}/api/stats`).then(r => r.json()),
+        apiFetch(`${API_BASE}/api/v2/shipments`).then(r => r.json()),
+        apiFetch(`${API_BASE}/api/v2/stats`).then(r => r.json()),
         apiFetch(`${API_BASE}/api/bot-status`).then(r => r.json()),
-        apiFetch(`${API_BASE}/api/accounts`).then(r => r.json()),
+        apiFetch(`${API_BASE}/api/v2/accounts`).then(r => r.json()),
         apiFetch(`${API_BASE}/api/shipments/tracking-summary`).then(r => r.json()),
         apiFetch(`${API_BASE}/api/shipments/document-summary`).then(r => r.json()),
       ]);
@@ -936,13 +936,13 @@ export default function DispatchDashboard() {
       if (s.id === shipmentId) {
         addSheetLog(`Status -> ${statusLabel} | ${s.loadNumber}`);
         if (s.efj) {
-          apiFetch(`${API_BASE}/api/load/${s.efj}/status`, {
+          apiFetch(`${API_BASE}/api/v2/load/${s.efj}/status`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status: statusLabel }),
           }).then(r => {
             if (r.ok) {
               setShipments(p => p.map(x => x.id === shipmentId ? { ...x, synced: true } : x));
-              addSheetLog(`Synced -> Google Sheets | ${s.loadNumber}`);
+              addSheetLog(`Synced -> Postgres | ${s.loadNumber}`);
               // Delivered → auto-transition to Ready to Close Out
               if (newStatus === "delivered") {
                 setTimeout(() => handleStatusUpdate(shipmentId, "ready_to_close"), 1500);
@@ -1043,7 +1043,7 @@ export default function DispatchDashboard() {
   const handleAddShipment = async (data) => {
     const { pendingDocs, ...loadData } = data;
     try {
-      const res = await apiFetch(`${API_BASE}/api/load/add`, {
+      const res = await apiFetch(`${API_BASE}/api/v2/load/add`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(loadData),
