@@ -623,6 +623,9 @@ export default function DispatchDashboard() {
     dateRangeEnd, setDateRangeEnd,
   } = useAppStore();
 
+  // Clean up stale localStorage keys from old builds
+  useState(() => { try { localStorage.removeItem("csl_preferred_rep"); } catch {} });
+
   // ── Local-only UI state (not shared) ──
   const [dismissedAlertIds, setDismissedAlertIds] = useState(() => loadDismissedAlerts());
   const prevStatusMapRef = useRef({});
@@ -1118,14 +1121,14 @@ export default function DispatchDashboard() {
       {/* ═══ SIDEBAR ═══ */}
       <div className="dash-sidebar" style={{ width: sidebarW, minHeight: "100vh", background: "#0D1119", borderRight: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 16, gap: 4, position: "relative", zIndex: 20, flexShrink: 0 }}>
         <div style={{ width: 52, height: 52, borderRadius: 12, background: "#0F1A14", border: "1px solid rgba(0,222,180,0.25)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20, animation: "glow-pulse 3s ease infinite", cursor: "pointer", overflow: "hidden", padding: 2, boxShadow: "0 0 20px rgba(0,212,170,0.15)" }}
-          onClick={() => { setActiveView("dashboard"); const s = localStorage.getItem("csl_preferred_rep"); if (s) setSelectedRep(s); }}>
+          onClick={() => { setActiveView("dashboard"); setSelectedRep(null); }}>
           <img src="/logo.svg" alt="CSL" style={{ width: 44, height: 44, objectFit: "contain", filter: "hue-rotate(-15deg) saturate(1.3)" }} />
         </div>
         {NAV_ITEMS.map(item => {
           const isActive = activeView === item.key;
           return (
             <button key={item.key} className="nav-item"
-              onClick={() => { setActiveView(item.key); if (item.key === "dashboard") { const s = localStorage.getItem("csl_preferred_rep"); if (s) setSelectedRep(s); } else { setSelectedRep(null); } }}
+              onClick={() => { setActiveView(item.key); setSelectedRep(null); }}
               style={{ width: sidebarW - 12, padding: "10px 0", borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
                 background: isActive ? "rgba(0,212,170,0.10)" : "transparent",
                 borderLeft: isActive ? "3px solid #00D4AA" : "3px solid transparent",
@@ -2621,6 +2624,11 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
   const [aiSummary, setAiSummary] = useState(null);
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
 
+  // Timestamped notes log state
+  const [loadNotes, setLoadNotes] = useState([]);
+  const [noteInput, setNoteInput] = useState("");
+  const [noteSubmitting, setNoteSubmitting] = useState(false);
+
   // Fetch tracking + documents + driver info when slide-over opens
   useEffect(() => {
     if (!selectedShipment) {
@@ -2633,6 +2641,8 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
       setStatusExpanded(false);
       setAiSummary(null);
       setAiSummaryLoading(false);
+      setLoadNotes([]);
+      setNoteInput("");
       return;
     }
     setAiSummary(null);
@@ -2646,6 +2656,11 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
       .then(r => r.ok ? r.json() : { emails: [] })
       .then(data => setLoadEmails(data.emails || []))
       .catch(() => setLoadEmails([]));
+    // Fetch timestamped notes
+    apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/notes`)
+      .then(r => r.ok ? r.json() : { notes: [] })
+      .then(data => setLoadNotes(data.notes || []))
+      .catch(() => setLoadNotes([]));
     // Fetch driver contact info
     apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/driver`)
       .then(r => r.ok ? r.json() : null)
@@ -2690,6 +2705,26 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
   };
 
   // AI Summary — send pre-loaded context to Claude Haiku for operational summary
+  // Submit a timestamped note
+  const submitNote = async () => {
+    const text = noteInput.trim();
+    if (!text || !selectedShipment?.efj || noteSubmitting) return;
+    setNoteSubmitting(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.note) setLoadNotes(prev => [data.note, ...prev]);
+        setNoteInput("");
+      }
+    } catch (e) { /* ignore */ }
+    setNoteSubmitting(false);
+  };
+
   const requestAiSummary = async () => {
     if (!selectedShipment?.efj || aiSummaryLoading) return;
     setAiSummaryLoading(true);
@@ -3118,6 +3153,39 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
               style={{ width: "100%", minHeight: 50, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "#F0F2F5", padding: 10, fontSize: 11, resize: "vertical", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
           </div>
 
+          {/* Timestamped Notes Log */}
+          <div style={{ padding: "4px 20px 14px" }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>
+              Notes Log {loadNotes.length > 0 && <span style={{ color: "#5A6478" }}>({loadNotes.length})</span>}
+            </div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              <input
+                value={noteInput}
+                onChange={e => setNoteInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitNote(); } }}
+                placeholder="Add a timestamped note..."
+                style={{ flex: 1, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, color: "#F0F2F5", padding: "7px 10px", fontSize: 11, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
+              <button
+                onClick={submitNote}
+                disabled={!noteInput.trim() || noteSubmitting}
+                style={{ background: noteInput.trim() ? "#00D4AA" : "rgba(255,255,255,0.06)", color: noteInput.trim() ? "#0A0E17" : "#5A6478", border: "none", borderRadius: 8, padding: "6px 14px", fontSize: 10, fontWeight: 700, cursor: noteInput.trim() ? "pointer" : "default", opacity: noteSubmitting ? 0.5 : 1, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                {noteSubmitting ? "..." : "Add"}
+              </button>
+            </div>
+            {loadNotes.length > 0 && (
+              <div style={{ maxHeight: 180, overflow: "auto", borderLeft: "2px solid rgba(0,212,170,0.15)", paddingLeft: 12 }}>
+                {loadNotes.map(n => (
+                  <div key={n.id} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                    <div style={{ fontSize: 10, color: "#F0F2F5", lineHeight: 1.4 }}>{n.note_text}</div>
+                    <div style={{ fontSize: 9, color: "#5A6478", marginTop: 3 }}>
+                      {n.created_by} &middot; {new Date(n.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Email History (collapsible) */}
           {loadEmails.length > 0 && (
             <div style={{ padding: "8px 20px 12px" }}>
@@ -3133,15 +3201,28 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                   {loadEmails.map(em => (
                     <div key={em.id} style={{ display: "flex", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                       <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{em.has_attachments ? "\u{1F4CE}" : "\u2709"}</span>
+                      {em.priority && <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, marginTop: 5, background: em.priority >= 5 ? "#EF4444" : em.priority >= 4 ? "#F97316" : em.priority >= 3 ? "#3B82F6" : "#6B7280" }} />}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 10, color: "#F0F2F5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {em.subject || "(no subject)"}
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <div style={{ fontSize: 10, color: "#F0F2F5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+                            {em.subject || "(no subject)"}
+                          </div>
+                          {em.email_type && em.email_type !== "general" && (
+                            <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, fontWeight: 600, background: em.email_type.includes("rate") ? "rgba(0,212,170,0.15)" : em.email_type === "detention" ? "rgba(239,68,68,0.15)" : "rgba(59,130,246,0.15)", color: em.email_type.includes("rate") ? "#00D4AA" : em.email_type === "detention" ? "#EF4444" : "#3B82F6", whiteSpace: "nowrap", flexShrink: 0 }}>
+                              {em.email_type.replace(/_/g, " ").toUpperCase()}
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontSize: 8, color: "#8B95A8" }}>
                           {(em.sender || "").replace(/<[^>]+>/g, "").trim()}
                           {" \u00B7 "}
                           {em.sent_at ? new Date(em.sent_at).toLocaleDateString("en-US", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""}
                         </div>
+                        {em.ai_summary && (
+                          <div style={{ fontSize: 8, color: "#5A6478", marginTop: 2, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {em.ai_summary}
+                          </div>
+                        )}
                         {em.attachment_names && (
                           <div style={{ fontSize: 8, color: "#4D5669", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {em.attachment_names}
@@ -3438,6 +3519,11 @@ function DispatchView({
       .then(r => r.ok ? r.json() : { emails: [] })
       .then(data => setLoadEmails(data.emails || []))
       .catch(() => setLoadEmails([]));
+    // Fetch timestamped notes
+    apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/notes`)
+      .then(r => r.ok ? r.json() : { notes: [] })
+      .then(data => setLoadNotes(data.notes || []))
+      .catch(() => setLoadNotes([]));
     // Fetch driver contact info
     apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/driver`)
       .then(r => r.ok ? r.json() : null)
@@ -4175,6 +4261,39 @@ function DispatchView({
                   style={{ width: "100%", minHeight: 50, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "#F0F2F5", padding: 10, fontSize: 11, resize: "vertical", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
               </div>
 
+              {/* Timestamped Notes Log */}
+              <div style={{ padding: "4px 20px 14px" }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>
+                  Notes Log {loadNotes.length > 0 && <span style={{ color: "#5A6478" }}>({loadNotes.length})</span>}
+                </div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                  <input
+                    value={noteInput}
+                    onChange={e => setNoteInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitNote(); } }}
+                    placeholder="Add a timestamped note..."
+                    style={{ flex: 1, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, color: "#F0F2F5", padding: "7px 10px", fontSize: 11, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
+                  <button
+                    onClick={submitNote}
+                    disabled={!noteInput.trim() || noteSubmitting}
+                    style={{ background: noteInput.trim() ? "#00D4AA" : "rgba(255,255,255,0.06)", color: noteInput.trim() ? "#0A0E17" : "#5A6478", border: "none", borderRadius: 8, padding: "6px 14px", fontSize: 10, fontWeight: 700, cursor: noteInput.trim() ? "pointer" : "default", opacity: noteSubmitting ? 0.5 : 1, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                    {noteSubmitting ? "..." : "Add"}
+                  </button>
+                </div>
+                {loadNotes.length > 0 && (
+                  <div style={{ maxHeight: 180, overflow: "auto", borderLeft: "2px solid rgba(0,212,170,0.15)", paddingLeft: 12 }}>
+                    {loadNotes.map(n => (
+                      <div key={n.id} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                        <div style={{ fontSize: 10, color: "#F0F2F5", lineHeight: 1.4 }}>{n.note_text}</div>
+                        <div style={{ fontSize: 9, color: "#5A6478", marginTop: 3 }}>
+                          {n.created_by} &middot; {new Date(n.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Email History */}
               {loadEmails.length > 0 && (
                 <div style={{ padding: "8px 20px 12px" }}>
@@ -4185,15 +4304,28 @@ function DispatchView({
                     {loadEmails.map(em => (
                       <div key={em.id} style={{ display: "flex", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                         <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{em.has_attachments ? "\u{1F4CE}" : "\u2709"}</span>
+                        {em.priority && <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, marginTop: 5, background: em.priority >= 5 ? "#EF4444" : em.priority >= 4 ? "#F97316" : em.priority >= 3 ? "#3B82F6" : "#6B7280" }} />}
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 10, color: "#F0F2F5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {em.subject || "(no subject)"}
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <div style={{ fontSize: 10, color: "#F0F2F5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+                              {em.subject || "(no subject)"}
+                            </div>
+                            {em.email_type && em.email_type !== "general" && (
+                              <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, fontWeight: 600, background: em.email_type.includes("rate") ? "rgba(0,212,170,0.15)" : em.email_type === "detention" ? "rgba(239,68,68,0.15)" : "rgba(59,130,246,0.15)", color: em.email_type.includes("rate") ? "#00D4AA" : em.email_type === "detention" ? "#EF4444" : "#3B82F6", whiteSpace: "nowrap", flexShrink: 0 }}>
+                                {em.email_type.replace(/_/g, " ").toUpperCase()}
+                              </span>
+                            )}
                           </div>
                           <div style={{ fontSize: 8, color: "#8B95A8" }}>
                             {(em.sender || "").replace(/<[^>]+>/g, "").trim()}
                             {" \u00B7 "}
                             {em.sent_at ? new Date(em.sent_at).toLocaleDateString("en-US", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""}
                           </div>
+                          {em.ai_summary && (
+                            <div style={{ fontSize: 8, color: "#5A6478", marginTop: 2, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {em.ai_summary}
+                            </div>
+                          )}
                           {em.attachment_names && (
                             <div style={{ fontSize: 8, color: "#4D5669", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {em.attachment_names}
@@ -5217,15 +5349,18 @@ function RateIQView() {
   const [expandedCarrier, setExpandedCarrier] = useState(null);
   const [tab, setTab] = useState("dray"); // dray | ftl | oog | scorecard
   const [replyAlerts, setReplyAlerts] = useState([]);
+  const [scorecardPerf, setScorecardPerf] = useState([]);
 
   const fetchData = useCallback(async () => {
     try {
-      const [rateRes, alertRes] = await Promise.all([
+      const [rateRes, alertRes, perfRes] = await Promise.all([
         apiFetch(`${API_BASE}/api/rate-iq`).then(r => r.json()),
         apiFetch(`${API_BASE}/api/customer-reply-alerts`).then(r => r.json()).catch(() => []),
+        apiFetch(`${API_BASE}/api/carriers/scorecard`).then(r => r.json()).catch(() => ({ carriers: [] })),
       ]);
       setData(rateRes);
       setReplyAlerts(alertRes);
+      setScorecardPerf(perfRes.carriers || []);
     } catch (e) { console.error("Rate IQ fetch:", e); }
     setLoading(false);
   }, []);
@@ -5272,7 +5407,7 @@ function RateIQView() {
           { key: "dray", label: "Dray IQ" },
           { key: "ftl", label: "FTL IQ" },
           { key: "oog", label: "OOG IQ" },
-          { key: "scorecard", label: `Scorecard (${scorecard.length})` },
+          { key: "scorecard", label: `Scorecard (${scorecardPerf.length})` },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             style={{ padding: "6px 16px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid " + (tab === t.key ? "rgba(0,212,170,0.4)" : "rgba(255,255,255,0.06)"), background: tab === t.key ? "rgba(0,212,170,0.08)" : "transparent", color: tab === t.key ? "#00D4AA" : "#8B95A8", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s ease" }}>
@@ -5302,117 +5437,61 @@ function RateIQView() {
         <OOGQuoteBuilder />
       )}
 
-      {/* Scorecard Tab — Carrier cards with lane drill-down */}
+      {/* Scorecard Tab — Carrier Performance from completed loads */}
       {tab === "scorecard" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {scorecard.length === 0 && (
+          {scorecardPerf.length === 0 && (
             <div style={{ padding: 40, textAlign: "center", color: "#5A6478", fontSize: 12 }}>
-              No carrier data yet — rates will appear as the inbox scanner classifies emails.
+              No carrier performance data yet — data populates from completed loads.
             </div>
           )}
-          {scorecard.map((c, i) => {
-            const carrierKey = c.carrier;
-            const isExpanded = expandedCarrier === carrierKey;
-            const winPct = c.quote_count > 0 ? Math.round((c.win_count / c.quote_count) * 100) : 0;
-            const winColor = winPct >= 50 ? "#34d399" : winPct >= 25 ? "#FBBF24" : winPct > 0 ? "#f87171" : "#8B95A8";
-            const winBg = winPct >= 50 ? "rgba(34,197,94,0.12)" : winPct >= 25 ? "rgba(245,158,11,0.12)" : winPct > 0 ? "rgba(239,68,68,0.12)" : "rgba(107,114,128,0.12)";
-
-            // Cross-reference: find lanes where this carrier has quotes
-            const carrierLanes = lanes.filter(l =>
-              l.carrier_quotes?.some(q => q.carrier === c.carrier || q.carrier_email === c.carrier)
-            ).map(l => ({
-              ...l,
-              thisCarrierQuotes: l.carrier_quotes?.filter(q => q.carrier === c.carrier || q.carrier_email === c.carrier) || [],
-              isCheapest: l.cheapest?.carrier === c.carrier,
-            }));
+          {scorecardPerf.map((c, i) => {
+            const isExpanded = expandedCarrier === c.carrier;
+            const otColor = c.on_time_pct >= 90 ? "#34d399" : c.on_time_pct >= 70 ? "#FBBF24" : c.on_time_pct > 0 ? "#f87171" : "#8B95A8";
+            const otBg = c.on_time_pct >= 90 ? "rgba(34,197,94,0.12)" : c.on_time_pct >= 70 ? "rgba(245,158,11,0.12)" : c.on_time_pct > 0 ? "rgba(239,68,68,0.12)" : "rgba(107,114,128,0.12)";
 
             return (
               <div key={i} className="glass" style={{ borderRadius: 12, overflow: "hidden", border: isExpanded ? "1px solid rgba(0,212,170,0.2)" : "1px solid rgba(255,255,255,0.04)" }}>
-                {/* Carrier summary row */}
-                <div onClick={() => setExpandedCarrier(isExpanded ? null : carrierKey)}
+                <div onClick={() => setExpandedCarrier(isExpanded ? null : c.carrier)}
                   style={{ padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 16, transition: "background 0.15s ease" }}
                   onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
                   onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  {/* Carrier name + email */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {c.carrier?.split("<")[0]?.trim() || "Unknown"}
+                      {c.carrier}
                     </div>
-                    {c.carrier?.includes("<") && (
-                      <div style={{ fontSize: 9, color: "#5A6478", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {c.carrier.match(/<(.+?)>/)?.[1] || ""}
-                      </div>
-                    )}
+                    <div style={{ fontSize: 9, color: "#5A6478", marginTop: 1 }}>
+                      {c.primary_move_type || "—"}{c.last_delivery ? ` · Last: ${c.last_delivery}` : ""}
+                    </div>
                   </div>
-                  {/* Stats */}
                   <div style={{ display: "flex", gap: 16, alignItems: "center", flexShrink: 0 }}>
                     <div style={{ textAlign: "center", minWidth: 44 }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{c.quote_count}</div>
-                      <div style={{ fontSize: 8, color: "#5A6478", fontWeight: 600, letterSpacing: "0.5px" }}>QUOTES</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{c.total_loads}</div>
+                      <div style={{ fontSize: 8, color: "#5A6478", fontWeight: 600, letterSpacing: "0.5px" }}>LOADS</div>
                     </div>
-                    <div style={{ textAlign: "center", minWidth: 36 }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: "#34d399", fontFamily: "'JetBrains Mono', monospace" }}>{c.win_count}</div>
-                      <div style={{ fontSize: 8, color: "#5A6478", fontWeight: 600, letterSpacing: "0.5px" }}>WINS</div>
-                    </div>
-                    <span style={{ padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, background: winBg, color: winColor, border: `1px solid ${winColor}30` }}>
-                      {winPct}%
+                    <span style={{ padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, background: otBg, color: otColor, border: `1px solid ${otColor}30` }}>
+                      {c.on_time_pct}% OT
                     </span>
-                    {c.avg_rate && (
-                      <div style={{ textAlign: "right", minWidth: 70 }}>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>${c.avg_rate.toLocaleString()}</div>
-                        <div style={{ fontSize: 8, color: "#5A6478", fontWeight: 600 }}>AVG RATE</div>
+                    {c.avg_transit_days != null && (
+                      <div style={{ textAlign: "center", minWidth: 44 }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{c.avg_transit_days}</div>
+                        <div style={{ fontSize: 8, color: "#5A6478", fontWeight: 600 }}>AVG DAYS</div>
                       </div>
                     )}
                     <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.25)", color: "#60a5fa", fontSize: 9, fontWeight: 700 }}>
-                      {c.lanes_covered} lane{c.lanes_covered !== 1 ? "s" : ""}
+                      {c.lanes_served} lane{c.lanes_served !== 1 ? "s" : ""}
                     </span>
                     <span style={{ color: "#5A6478", fontSize: 14, transition: "transform 0.2s", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>&#9660;</span>
                   </div>
                 </div>
-
-                {/* Expanded: lane breakdown for this carrier */}
-                {isExpanded && (
+                {isExpanded && c.top_lanes?.length > 0 && (
                   <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", padding: "10px 16px 14px" }}>
-                    {carrierLanes.length === 0 && (
-                      <div style={{ padding: 12, textAlign: "center", color: "#5A6478", fontSize: 11 }}>No lane details available</div>
-                    )}
-                    {carrierLanes.map((cl, li) => (
-                      <div key={li} style={{ marginBottom: li < carrierLanes.length - 1 ? 10 : 0 }}>
-                        {/* Lane header */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: "#00D4AA" }}>{cl.lane}</div>
-                          <div style={{ fontSize: 9, color: "#5A6478" }}>{cl.move_type ? cl.move_type.toUpperCase() : ""}{cl.miles ? ` | ${cl.miles} mi` : ""}</div>
-                          {cl.isCheapest && (
-                            <span style={{ padding: "1px 6px", borderRadius: 4, fontSize: 8, fontWeight: 700, background: "rgba(34,197,94,0.12)", color: "#34d399", border: "1px solid rgba(34,197,94,0.3)" }}>CHEAPEST</span>
-                          )}
-                          {cl.avg_rate && (
-                            <span style={{ fontSize: 9, color: "#5A6478", marginLeft: "auto" }}>Lane avg: ${cl.avg_rate.toLocaleString()}</span>
-                          )}
-                        </div>
-                        {/* This carrier's quotes on this lane */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                          {cl.thisCarrierQuotes.map((q, qi) => (
-                            <div key={qi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", borderRadius: 6, background: q.status === "accepted" ? "rgba(34,197,94,0.06)" : q.status === "rejected" ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.02)" }}>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 10, color: "#8B95A8" }}>
-                                  {q.efj || "—"} | {q.date ? new Date(q.date).toLocaleDateString() : "—"}{q.move_type ? ` | ${q.move_type.toUpperCase()}` : ""}
-                                </div>
-                              </div>
-                              <div style={{ fontWeight: 800, fontSize: 13, color: q.rate ? "#F0F2F5" : "#5A6478", fontFamily: "'JetBrains Mono', monospace", minWidth: 70, textAlign: "right" }}>
-                                {q.rate ? `$${q.rate.toLocaleString()}` : "No rate"}{q.rate_unit === "per_mile" ? "/mi" : ""}
-                              </div>
-                              <span style={{ fontSize: 8, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: q.status === "accepted" ? "rgba(34,197,94,0.15)" : q.status === "rejected" ? "rgba(239,68,68,0.15)" : "rgba(107,114,128,0.15)", color: q.status === "accepted" ? "#34d399" : q.status === "rejected" ? "#f87171" : "#8B95A8", border: `1px solid ${q.status === "accepted" ? "rgba(34,197,94,0.3)" : q.status === "rejected" ? "rgba(239,68,68,0.3)" : "rgba(107,114,128,0.3)"}` }}>
-                                {q.status || "pending"}
-                              </span>
-                              {q.status === "pending" && q.id && (
-                                <div style={{ display: "flex", gap: 3 }}>
-                                  <button onClick={(e) => { e.stopPropagation(); handleQuoteAction(q.id, "accepted"); }} style={{ padding: "2px 8px", fontSize: 8, fontWeight: 700, borderRadius: 4, border: "1px solid rgba(34,197,94,0.3)", background: "rgba(34,197,94,0.1)", color: "#34d399", cursor: "pointer", fontFamily: "inherit" }}>Accept</button>
-                                  <button onClick={(e) => { e.stopPropagation(); handleQuoteAction(q.id, "rejected"); }} style={{ padding: "2px 8px", fontSize: 8, fontWeight: 700, borderRadius: 4, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", cursor: "pointer", fontFamily: "inherit" }}>Reject</button>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8 }}>Top Lanes</div>
+                    {c.top_lanes.map((tl, li) => (
+                      <div key={li} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", borderRadius: 6, background: "rgba(255,255,255,0.02)", marginBottom: 3 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "#00D4AA", flex: 1 }}>{tl.lane}</div>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{tl.count}</div>
+                        <div style={{ fontSize: 8, color: "#5A6478" }}>loads</div>
                       </div>
                     ))}
                   </div>
