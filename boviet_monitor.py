@@ -49,7 +49,7 @@ SCOPES = [
 ]
 
 # Skip these statuses — already done or canceled
-SKIP_STATUSES = {"Delivered", "Completed", "Canceled", "Cancelled", "Ready to Close"}
+SKIP_STATUSES = {"delivered", "completed", "canceled", "cancelled", "ready to close"}
 
 # Skip these tabs — not load data
 SKIP_TABS = {"POCs", "Boviet Master"}
@@ -94,9 +94,12 @@ TAB_CONFIGS = {
     "Piedra": {
         "efj_col":       0,
         "load_id_col":   2,   # C — Load ID is col C for Piedra
-        "pickup_col":    5,   # F
-        "delivery_col":  6,   # G
-        "status_col":    7,   # H
+        "pickup_col":    6,   # G — Pickup Date/Time
+        "delivery_col":  7,   # H — Delivery Date/Time
+        "status_col":    8,   # I — Status
+        "phone_col":    11,   # L — Driver Phone#
+        "trailer_col":  12,   # M — Trailer#
+        "start_row":    45,   # skip historical rows
     },
     "Hanson": {
         "efj_col":       0,
@@ -104,6 +107,8 @@ TAB_CONFIGS = {
         "pickup_col":    4,   # E
         "delivery_col":  5,   # F
         "status_col":    6,   # G
+        "phone_col":     8,   # I — Driver Phone#
+        "trailer_col":  10,   # K — Trailer#
     },
 }
 
@@ -230,6 +235,47 @@ def _is_load_behind(stop_times):
     return False
 
 
+
+def _send_pod_reminder(tab_name, efj, load_id, dest, driver_phone):
+    """Send POD reminder when Macropoint marks Delivered."""
+    now = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
+    ref = f"Boviet/{tab_name}--{load_id}"
+    subject = f"POD Needed \u2014 {ref} Has Delivered"
+
+    phone_display = driver_phone if driver_phone else "(not on file)"
+
+    body = f"""<html><body style="font-family:Arial,sans-serif;">
+<div style="background:#c62828;color:white;padding:12px 16px;border-radius:6px 6px 0 0;">
+  <b>POD Reminder \u2014 {ref}</b>
+</div>
+<div style="padding:16px;border:1px solid #ddd;border-top:none;border-radius:0 0 6px 6px;">
+  <p style="font-size:15px;margin:0 0 12px;">
+    <b>{ref}</b> has been marked <b style="color:#c62828;">Delivered</b> by Macropoint tracking.
+  </p>
+  <p style="font-size:15px;margin:0 0 12px;">
+    Please contact the driver to obtain the POD as soon as possible.
+  </p>
+  <table style="border-collapse:collapse;margin:12px 0;">
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">Account</td><td style="padding:4px 0;"><b>{tab_name}</b></td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">EFJ #</td><td style="padding:4px 0;"><b>{efj}</b></td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">Load #</td><td style="padding:4px 0;"><b>{load_id}</b></td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">Destination</td><td style="padding:4px 0;">{dest}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">Driver Phone</td><td style="padding:4px 0;"><b>{phone_display}</b></td></tr>
+  </table>
+  <p style="font-size:12px;color:#888;margin:16px 0 0;">
+    Once POD is received, update the Status column accordingly.<br>
+    Sent at {now}
+  </p>
+</div>
+</body></html>"""
+
+    try:
+        _send_email(ALERT_EMAIL, subject, body)
+        print(f"      POD reminder sent for {ref}")
+    except Exception as exc:
+        print(f"      WARNING: POD reminder email failed: {exc}")
+
+
 def send_boviet_alert(efj, load_id, status, tab_name, pickup="", delivery="", mp_load_id=None, stop_times=None):
     now = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
 
@@ -326,13 +372,16 @@ def run_once():
                     continue
 
                 # Collect rows to process
+                start_row = cfg.get("start_row", 1)
                 to_process = []
                 for i, row in enumerate(rows):
                     if i == 0:  # skip header
                         continue
+                    if i < start_row:
+                        continue
 
                     status = _safe_get(row, cfg["status_col"])
-                    if status in SKIP_STATUSES:
+                    if status.lower() in SKIP_STATUSES:
                         continue
 
                     efj     = _safe_get(row, cfg["efj_col"])
@@ -347,6 +396,8 @@ def run_once():
                     pickup   = _safe_get(row, cfg["pickup_col"])
                     delivery = _safe_get(row, cfg["delivery_col"])
 
+                    phone = _safe_get(row, cfg.get("phone_col", -1)) if cfg.get("phone_col") is not None else ""
+                    dest_val = delivery  # Use delivery location as destination
                     to_process.append({
                         "sheet_row": i + 1,
                         "efj":       efj,
@@ -356,6 +407,8 @@ def run_once():
                         "status":    status,
                         "mp_url":    mp_url,
                         "tab_name":  tab_name,
+                        "phone":     phone,
+                        "dest":      dest_val,
                     })
 
                 print(f"    Rows: {len(rows)-1}  |  To track: {len(to_process)}")
@@ -363,6 +416,8 @@ def run_once():
 
                 for item in to_process:
                     alert_key = f"{tab_name}|{item['efj']}|{item['load_id']}"
+                    driver_phone = item.get("phone", "")
+                    dest = item.get("dest", "")
                     print(f"\n    [{item['sheet_row']}] {item['efj']} / {item['load_id']}")
                     print(f"      Scraping: {item['mp_url'][:60]}...")
 
@@ -403,6 +458,12 @@ def run_once():
                             mp_load_id=mp_load_id, stop_times=stop_times,
                         )
                         total_alerts += 1
+
+                        # POD reminder when Macropoint marks Delivered
+                        if ("delivered" in mp_status.lower()
+                                or "tracking completed" in mp_status.lower()):
+                            _send_pod_reminder(tab_name, item["efj"], item["load_id"],
+                                               dest, driver_phone)
                     else:
                         print("      On time, no new events — no alert needed")
 
@@ -472,7 +533,7 @@ if __name__ == "__main__":
                         if i == 0:
                             continue
                         status = _safe_get(row, cfg["status_col"])
-                        if status in SKIP_STATUSES:
+                        if status.lower() in SKIP_STATUSES:
                             continue
                         efj     = _safe_get(row, cfg["efj_col"])
                         load_id = _safe_get(row, cfg["load_id_col"])
@@ -561,7 +622,7 @@ if __name__ == "__main__":
                         if i == 0:
                             continue
                         status = _safe_get(row, cfg["status_col"])
-                        if status in SKIP_STATUSES:
+                        if status.lower() in SKIP_STATUSES:
                             continue
                         mp_url = links[i] if i < len(links) else ""
                         if not mp_url or "macropoint" not in mp_url.lower():

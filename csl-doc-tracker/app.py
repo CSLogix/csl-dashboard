@@ -32,6 +32,116 @@ import database as db
 # ── Macropoint tracking constants ──
 TRACKING_PHONE = os.getenv("MACROPOINT_TRACKING_PHONE", "4437614954")
 DISPATCH_EMAIL = os.getenv("EMAIL_CC", "efj-operations@evansdelivery.com")
+
+# ── Delivery Email Notification ──────────────────────────────────────────
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+import threading
+
+JANICE_EMAIL = "Janice.Cortes@evansdelivery.com"
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+
+def _has_delivery_email_been_sent(efj: str) -> bool:
+    """Check if delivery email was already sent for this EFJ."""
+    try:
+        with db.get_cursor() as cur:
+            cur.execute("SELECT efj FROM delivery_emails_sent WHERE efj = %s", (efj,))
+            return cur.fetchone() is not None
+    except Exception:
+        return False
+
+def _record_delivery_email(efj: str, account: str):
+    """Record that delivery email was sent for this EFJ."""
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute(
+                    "INSERT INTO delivery_emails_sent (efj, account) VALUES (%s, %s) ON CONFLICT (efj) DO NOTHING",
+                    (efj, account)
+                )
+    except Exception as e:
+        log.error("Failed to record delivery email for %s: %s", efj, e)
+
+def send_delivery_email(shipment: dict):
+    """Send delivery notification email to Janice for Master loads."""
+    efj = shipment.get("efj", "")
+    account = shipment.get("account", "")
+
+    # Only Master loads (not Tolead/Boviet)
+    if account in ("Tolead", "Boviet"):
+        return
+    # Dedup check
+    if _has_delivery_email_been_sent(efj):
+        log.info("Delivery email already sent for %s — skipping", efj)
+        return
+    if not SMTP_USER or not SMTP_PASSWORD:
+        log.warning("SMTP credentials not configured — skipping delivery email for %s", efj)
+        return
+
+    container = shipment.get("container", "") or shipment.get("loadNumber", "")
+    carrier = shipment.get("carrier", "")
+    origin = shipment.get("origin", "")
+    destination = shipment.get("destination", "")
+    delivery_date = shipment.get("delivery", "")
+    rep = shipment.get("rep", "")
+
+    subject = f"CSL — Delivered: {efj} | {account} | {container}"
+    deep_link = f"https://cslogixdispatch.com/app?view=billing&load={efj}"
+
+    body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background: linear-gradient(135deg, #22C55E, #4ADE80); padding: 16px 24px; border-radius: 12px 12px 0 0;">
+        <h2 style="color: white; margin: 0; font-size: 18px;">&#10022; Load Delivered</h2>
+      </div>
+      <div style="background: #141A28; padding: 24px; border: 1px solid #1E293B; border-top: none; border-radius: 0 0 12px 12px;">
+        <table style="width: 100%; border-collapse: collapse; color: #F0F2F5; font-size: 14px;">
+          <tr><td style="padding: 8px 0; color: #8B95A8; width: 120px;">EFJ #</td><td style="padding: 8px 0; font-weight: 600;">{efj}</td></tr>
+          <tr><td style="padding: 8px 0; color: #8B95A8;">Account</td><td style="padding: 8px 0; font-weight: 600;">{account}</td></tr>
+          <tr><td style="padding: 8px 0; color: #8B95A8;">Container/Load</td><td style="padding: 8px 0;">{container}</td></tr>
+          <tr><td style="padding: 8px 0; color: #8B95A8;">Carrier</td><td style="padding: 8px 0;">{carrier}</td></tr>
+          <tr><td style="padding: 8px 0; color: #8B95A8;">Route</td><td style="padding: 8px 0;">{origin} &#8594; {destination}</td></tr>
+          <tr><td style="padding: 8px 0; color: #8B95A8;">Delivery Date</td><td style="padding: 8px 0;">{delivery_date}</td></tr>
+          <tr><td style="padding: 8px 0; color: #8B95A8;">Rep</td><td style="padding: 8px 0;">{rep}</td></tr>
+        </table>
+        <div style="margin-top: 20px; text-align: center;">
+          <a href="{deep_link}" style="display: inline-block; background: #00D4AA; color: #0A0E17; padding: 10px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px;">
+            Open in Billing Dashboard
+          </a>
+        </div>
+      </div>
+      <p style="color: #64748B; font-size: 11px; margin-top: 12px; text-align: center;">
+        CSLogix Dispatch &mdash; Automated delivery notification
+      </p>
+    </div>
+    """
+
+    def _send():
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = SMTP_USER
+            msg["To"] = JANICE_EMAIL
+            msg["Cc"] = DISPATCH_EMAIL
+            msg.attach(MIMEText(body, "html"))
+
+            recipients = [JANICE_EMAIL, DISPATCH_EMAIL]
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
+                smtp.ehlo()
+                smtp.starttls()
+                smtp.login(SMTP_USER, SMTP_PASSWORD)
+                smtp.sendmail(SMTP_USER, recipients, msg.as_string())
+
+            _record_delivery_email(efj, account)
+            log.info("Delivery email sent for %s → %s (cc: %s)", efj, JANICE_EMAIL, DISPATCH_EMAIL)
+        except Exception as exc:
+            log.error("Failed to send delivery email for %s: %s", efj, exc)
+
+    threading.Thread(target=_send, daemon=True).start()
+
 TRACKING_CACHE_FILE = "/root/csl-bot/ftl_tracking_cache.json"
 
 # Status → progress step mapping (cumulative: each status implies all prior steps done)
@@ -88,7 +198,8 @@ def _get_driver_contact(efj: str) -> dict:
     try:
         with db.get_cursor() as cur:
             cur.execute(
-                "SELECT driver_name, driver_phone, driver_email, notes "
+                "SELECT driver_name, driver_phone, driver_email, notes, "
+                "carrier_email, trailer_number, macropoint_url "
                 "FROM driver_contacts WHERE efj = %s",
                 (efj,),
             )
@@ -231,16 +342,51 @@ SKIP_TABS = {
 CACHE_TTL = 600  # 10 minutes
 # Boviet + Tolead separate sheets
 BOVIET_SHEET_ID = "1OP-ZDaMCOsPxcxezHSPfN5ftUXlUcOjFgsfCQgDp3wI"
+import re as _re
+
+def _shorten_address(addr):
+    """Shorten full address to city/state/zip format.
+    '640 N Central Ave, Wood Dale, IL 60191' -> 'Wood Dale, IL 60191'
+    '(66Z) Kansas City, MO (14hrs)' -> 'Kansas City, MO'
+    '(ATL) 495 Horizon Dr Ste 300 Suwanee GA 30024' -> 'Suwanee, GA 30024'
+    """
+    if not addr:
+        return addr
+    # Strip leading parenthetical codes like (66Z), (ATL), (LAX)
+    addr = _re.sub(r'^\(\w+\)\s*', '', addr).strip()
+    # Strip trailing parenthetical like (14hrs)
+    addr = _re.sub(r'\s*\([^)]*\)\s*$', '', addr).strip()
+    # Try to match "City, ST ZIP" at end of address
+    m = _re.search(r'([A-Za-z][A-Za-z .]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$', addr)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2)} {m.group(3)}"
+    # Try "City, ST" without zip
+    m = _re.search(r'([A-Za-z][A-Za-z .]+),\s*([A-Z]{2})\s*$', addr)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2)}"
+    # Try "City ST ZIP" without comma (common in some formats)
+    m = _re.search(r'([A-Za-z][A-Za-z .]+)\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$', addr)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2)} {m.group(3)}"
+    return addr
+
+
 BOVIET_SKIP_TABS = {"POCs", "Boviet Master"}
 BOVIET_TAB_CONFIGS = {
     "DTE Fresh/Stock":  {"efj_col": 0, "load_id_col": 1, "status_col": 5},
     "Sundance":         {"efj_col": 0, "load_id_col": 1, "status_col": 6},
     "Renewable Energy": {"efj_col": 0, "load_id_col": 1, "status_col": 5},
     "Radiance Solar":   {"efj_col": 0, "load_id_col": 1, "status_col": 5},
-    "Piedra":           {"efj_col": 0, "load_id_col": 2, "status_col": 7},
-    "Hanson":           {"efj_col": 0, "load_id_col": 1, "status_col": 6},
+    "Piedra":           {"efj_col": 0, "load_id_col": 2, "status_col": 8,
+                         "pickup_col": 6, "delivery_col": 7,
+                         "phone_col": 11, "trailer_col": 12,
+                         "default_origin": "Greenville, NC", "default_dest": "Mexia, TX",
+                         "start_row": 45},
+    "Hanson":           {"efj_col": 0, "load_id_col": 1, "status_col": 6,
+                         "pickup_col": 4, "delivery_col": 5,
+                         "phone_col": 8, "trailer_col": 10},
 }
-BOVIET_DONE_STATUSES = {"Delivered", "Completed", "Canceled", "Cancelled", "Ready to Close"}
+BOVIET_DONE_STATUSES = {"delivered", "completed", "canceled", "cancelled", "ready to close"}
 
 TOLEAD_SHEET_ID = "1-zl7CCFdy2bWRTm1FsGDDjU-KVwqPiThQuvJc2ZU2ac"
 TOLEAD_TAB = "Schedule"
@@ -250,24 +396,30 @@ TOLEAD_COL_STATUS = 9   # J
 TOLEAD_COL_ORIGIN = 6   # G
 TOLEAD_COL_DEST = 7     # H
 TOLEAD_COL_DATE = 4     # E
-TOLEAD_SKIP_STATUSES = {"Delivered", "Canceled", "CANCELLED"}
+TOLEAD_SKIP_STATUSES = {"delivered", "canceled", "cancelled"}
 
 # --- Tolead JFK ---
 TOLEAD_JFK_SHEET_ID = "1mfhEsK2zg6GWTqMDTo5VwCgY-QC1tkNPknurHMxtBhs"
 TOLEAD_JFK_TAB = "Schedule"
+TOLEAD_ORD_COLS = {
+    "efj": 15, "load_id": 1, "status": 9, "origin": 6,
+    "destination": 7, "pickup_date": 4, "pickup_time": 5,
+    "delivery": 3, "driver": 16, "phone": 17, "appt_id": 2,
+}
+
 TOLEAD_JFK_COLS = {
     "efj": 14, "load_id": 0, "status": 9, "origin": 6,
     "destination": 7, "pickup_date": 3, "pickup_time": 4,
-    "delivery": 5, "driver": 15,
+    "delivery": 5, "driver": 15, "phone": 16,
 }
 
 # --- Tolead LAX ---
 TOLEAD_LAX_SHEET_ID = "1YLB6z5LdL0kFYTcfq_H5e6acU8-VLf8nN0XfZrJ-bXo"
 TOLEAD_LAX_TAB = "LAX"
 TOLEAD_LAX_COLS = {
-    "efj": 0, "load_id": 3, "status": 8, "origin": None,
-    "destination": 6, "pickup_date": 4, "pickup_time": 5,
-    "delivery": 7, "driver": 10,
+    "efj": 0, "load_id": 3, "status": 9, "origin": 6,
+    "destination": 7, "pickup_date": 4, "pickup_time": 5,
+    "delivery": 8, "driver": 11, "phone": 12,
 }
 
 # --- Tolead DFW ---
@@ -276,13 +428,15 @@ TOLEAD_DFW_TAB = "DFW"
 TOLEAD_DFW_COLS = {
     "efj": 10, "load_id": 4, "status": 11, "origin": None,
     "destination": 3, "pickup_date": 5, "pickup_time": 6,
-    "delivery": None, "driver": 6,
+    "delivery": 2, "driver": 12, "phone": 13,
+    "appt_id": 1, "equipment": 8,
 }
 
 TOLEAD_HUB_CONFIGS = {
-    "JFK": {"sheet_id": TOLEAD_JFK_SHEET_ID, "tab": TOLEAD_JFK_TAB, "cols": TOLEAD_JFK_COLS, "default_origin": "JFK"},
-    "LAX": {"sheet_id": TOLEAD_LAX_SHEET_ID, "tab": TOLEAD_LAX_TAB, "cols": TOLEAD_LAX_COLS, "default_origin": "LAX"},
-    "DFW": {"sheet_id": TOLEAD_DFW_SHEET_ID, "tab": TOLEAD_DFW_TAB, "cols": TOLEAD_DFW_COLS, "default_origin": "DFW"},
+    "ORD": {"sheet_id": TOLEAD_SHEET_ID, "tab": TOLEAD_TAB, "cols": TOLEAD_ORD_COLS, "default_origin": "ORD", "start_row": 790},
+    "JFK": {"sheet_id": TOLEAD_JFK_SHEET_ID, "tab": TOLEAD_JFK_TAB, "cols": TOLEAD_JFK_COLS, "default_origin": "Garden City, NY", "start_row": 184},
+    "LAX": {"sheet_id": TOLEAD_LAX_SHEET_ID, "tab": TOLEAD_LAX_TAB, "cols": TOLEAD_LAX_COLS, "default_origin": "Vernon, CA", "start_row": 755},
+    "DFW": {"sheet_id": TOLEAD_DFW_SHEET_ID, "tab": TOLEAD_DFW_TAB, "cols": TOLEAD_DFW_COLS, "default_origin": "Irving, TX", "start_row": 172},
 }
 
 def _get_sheet_hyperlinks(creds, sheet_id, tab_name):
@@ -320,8 +474,9 @@ COL = {
 }
 
 BOT_SERVICES = [
-    {"unit": "csl-import", "name": "Dray Import Scanner", "poll_min": 180},
-    {"unit": "csl-export", "name": "Dray Export Scanner", "poll_min": 60},
+    # Import/Export are cron jobs (7:30 AM & 1:30 PM M-F), not systemd services
+    # {"unit": "csl-import", "name": "Dray Import Scanner", "poll_min": 180},
+    # {"unit": "csl-export", "name": "Dray Export Scanner", "poll_min": 60},
     {"unit": "csl-ftl", "name": "FTL / MacroPoint Tracker", "poll_min": 30},
     {"unit": "csl-boviet", "name": "Boviet Monitor", "poll_min": 20},
     {"unit": "csl-tolead", "name": "Tolead Monitor", "poll_min": 20},
@@ -454,23 +609,46 @@ class SheetCache:
                     rows = vr.get("values", [])
                     # Get hyperlinks separately (1 call per tab — needed for Macropoint URLs)
                     bov_links = _get_sheet_hyperlinks(creds, BOVIET_SHEET_ID, tab_name)
+                    bov_start = cfg.get("start_row", 1)
                     for ri, row in enumerate(rows[1:], start=1):
+                        if ri + 1 < bov_start:
+                            continue
                         efj = row[cfg["efj_col"]].strip() if len(row) > cfg["efj_col"] else ""
                         load_id = row[cfg["load_id_col"]].strip() if len(row) > cfg["load_id_col"] else ""
                         status = row[cfg["status_col"]].strip() if len(row) > cfg["status_col"] else ""
-                        if not efj or status in BOVIET_DONE_STATUSES:
+                        if not efj or status.lower() in BOVIET_DONE_STATUSES:
                             continue
                         bov_mp_url = ""
                         if ri < len(bov_links) and len(bov_links[ri]) > cfg["efj_col"]:
                             bov_mp_url = bov_links[ri][cfg["efj_col"]] or ""
+                        # Extract optional fields from config
+                        bov_pickup = ""
+                        bov_delivery = ""
+                        bov_phone = ""
+                        bov_trailer = ""
+                        bov_origin = cfg.get("default_origin", "")
+                        bov_dest = cfg.get("default_dest", "")
+                        if "pickup_col" in cfg:
+                            bov_pickup = row[cfg["pickup_col"]].strip() if len(row) > cfg["pickup_col"] else ""
+                        if "delivery_col" in cfg:
+                            bov_delivery = row[cfg["delivery_col"]].strip() if len(row) > cfg["delivery_col"] else ""
+                        if "phone_col" in cfg:
+                            bov_phone = row[cfg["phone_col"]].strip() if len(row) > cfg["phone_col"] else ""
+                        if "trailer_col" in cfg:
+                            bov_trailer = row[cfg["trailer_col"]].strip() if len(row) > cfg["trailer_col"] else ""
+
                         all_shipments.append({
                             "account": "Boviet", "efj": efj, "move_type": "FTL",
                             "container": load_id, "bol": "", "ssl": "",
-                            "carrier": "", "origin": "", "destination": "",
-                            "eta": "", "lfd": "", "pickup": "", "delivery": "",
+                            "carrier": "", "origin": bov_origin, "destination": bov_dest,
+                            "eta": "", "lfd": "",
+                            "pickup": bov_pickup, "delivery": bov_delivery,
                             "status": status, "notes": "", "bot_alert": "",
                             "return_port": "", "rep": "Boviet",
                             "container_url": bov_mp_url,
+                            "driver": bov_trailer,
+                            "driver_phone": bov_phone,
+                            "hub": tab_name,
                         })
                     _time.sleep(1)
                 except Exception as e:
@@ -480,40 +658,7 @@ class SheetCache:
 
         _time.sleep(2)  # breathing room before Tolead
 
-        # --- Read Tolead sheet (2 API calls: values + hyperlinks) ---
-        try:
-            tol_sh = gc.open_by_key(TOLEAD_SHEET_ID)
-            ws = tol_sh.worksheet(TOLEAD_TAB)
-            rows = ws.get_all_values()
-            tol_links = _get_sheet_hyperlinks(creds, TOLEAD_SHEET_ID, TOLEAD_TAB)
-            for ri, row in enumerate(rows[772:], start=772):  # Start at row 773
-                def tol_cell(idx):
-                    return row[idx].strip() if len(row) > idx else ""
-                efj = tol_cell(TOLEAD_COL_EFJ)
-                ord_num = tol_cell(TOLEAD_COL_ORD)
-                status = tol_cell(TOLEAD_COL_STATUS)
-                if not efj and not ord_num:
-                    continue
-                if not status or status in TOLEAD_SKIP_STATUSES:
-                    continue
-                mp_url = ""
-                if ri < len(tol_links) and len(tol_links[ri]) > TOLEAD_COL_EFJ:
-                    mp_url = tol_links[ri][TOLEAD_COL_EFJ] or ""
-                all_shipments.append({
-                    "account": "Tolead", "efj": efj or ord_num,
-                    "move_type": "FTL", "container": ord_num, "bol": "",
-                    "ssl": "", "carrier": "",
-                    "origin": tol_cell(TOLEAD_COL_ORIGIN),
-                    "destination": tol_cell(TOLEAD_COL_DEST),
-                    "eta": tol_cell(TOLEAD_COL_DATE), "lfd": "",
-                    "pickup": "", "delivery": "",
-                    "status": status, "notes": "", "bot_alert": "",
-                    "return_port": "", "rep": "Tolead",
-                    "container_url": mp_url,
-                    "hub": "ORD",
-                })
-        except Exception as e:
-            log.warning("Tolead ORD sheet read failed: %s", e)
+        # ORD now handled via TOLEAD_HUB_CONFIGS (legacy block removed)
 
         # --- Read Tolead JFK / LAX / DFW sheets ---
         for hub_name, hub_cfg in TOLEAD_HUB_CONFIGS.items():
@@ -524,7 +669,10 @@ class SheetCache:
                 hub_rows = hub_ws.get_all_values()
                 cols = hub_cfg["cols"]
                 hub_count = 0
+                hub_start = hub_cfg.get("start_row", 1)
                 for ri, row in enumerate(hub_rows[1:], start=1):
+                    if ri + 1 < hub_start:
+                        continue
                     def _cell(idx, r=row):
                         if idx is None:
                             return ""
@@ -532,27 +680,75 @@ class SheetCache:
                     efj = _cell(cols["efj"])
                     load_id = _cell(cols["load_id"])
                     status = _cell(cols["status"])
-                    if not efj and not load_id:
-                        continue
-                    if not status or status in TOLEAD_SKIP_STATUSES:
-                        continue
-                    origin = _cell(cols["origin"]) or hub_cfg["default_origin"]
+
+                    # Hub-specific status derivation
+                    if hub_name == "DFW":
+                        if not load_id:
+                            continue
+                        if status and status.lower() in TOLEAD_SKIP_STATUSES:
+                            continue
+                        col_j = row[9].strip() if len(row) > 9 else ""
+                        if col_j.lower() not in ("scheduled", "picked"):
+                            status = "Needs to Cover"
+                        elif not status:
+                            status = col_j.capitalize()
+                    elif hub_name == "ORD":
+                        if not load_id:
+                            continue
+                        if status and status.lower() in TOLEAD_SKIP_STATUSES:
+                            continue
+                        if status and status.lower() == "new":
+                            status = "Needs to Cover"
+                        elif not status:
+                            continue
+                    elif hub_name == "LAX":
+                        if not load_id:
+                            continue
+                        if status and status.lower() in TOLEAD_SKIP_STATUSES:
+                            continue
+                        if status and status.lower() == "unassigned":
+                            status = "Needs to Cover"
+                        elif not status:
+                            continue
+                    elif hub_name == "JFK":
+                        if not load_id:
+                            continue
+                        if status and status.lower() in TOLEAD_SKIP_STATUSES:
+                            continue
+                        if status and status.lower() == "new":
+                            status = "Needs to Cover"
+                        elif not status:
+                            continue
+                    else:
+                        if not efj and not load_id:
+                            continue
+                        if status and status in TOLEAD_SKIP_STATUSES:
+                            continue
+                        if not status:
+                            continue
+
+                    origin = _shorten_address(_cell(cols["origin"]) or hub_cfg["default_origin"])
                     pickup_date = _cell(cols["pickup_date"])
                     pickup_time = _cell(cols["pickup_time"])
                     pickup = f"{pickup_date} {pickup_time}".strip() if pickup_date else ""
                     delivery = _cell(cols["delivery"])
+                    driver_trailer = _cell(cols.get("driver")) if cols.get("driver") is not None else ""
+                    driver_phone = _cell(cols.get("phone")) if cols.get("phone") is not None else ""
+
                     all_shipments.append({
                         "account": "Tolead", "efj": efj or load_id,
                         "move_type": "FTL", "container": load_id, "bol": "",
                         "ssl": "", "carrier": "",
                         "origin": origin,
-                        "destination": _cell(cols["destination"]),
+                        "destination": _shorten_address(_cell(cols["destination"])),
                         "eta": pickup_date, "lfd": "",
                         "pickup": pickup, "delivery": delivery,
                         "status": status, "notes": "", "bot_alert": "",
                         "return_port": "", "rep": "Tolead",
                         "container_url": "",
                         "hub": hub_name,
+                        "driver": driver_trailer,
+                        "driver_phone": driver_phone,
                     })
                     hub_count += 1
                 log.info("Tolead %s: %d active loads", hub_name, hub_count)
@@ -2969,6 +3165,116 @@ async def update_rate_quote(quote_id: int, request: Request):
             "carrier": row["carrier_name"], "rate": float(row["rate_amount"]) if row["rate_amount"] else None}
 
 
+@app.get("/api/rate-iq/search-lane")
+async def api_search_lane(origin: str = Query(""), destination: str = Query("")):
+    """
+    Search for carrier rates matching an origin/destination lane.
+    Used by QuoteBuilder to show rate intelligence when building a quote.
+    Returns matching carrier quotes ranked by rate, plus carrier directory info.
+    """
+    if not origin and not destination:
+        return {"matches": [], "carriers": [], "stats": {}}
+
+    origin_q = origin.strip().lower()
+    dest_q = destination.strip().lower()
+
+    with db.get_cursor() as cur:
+        # Search rate_quotes for matching lanes (fuzzy match on origin/destination)
+        conditions = []
+        params = []
+        if origin_q:
+            conditions.append("(LOWER(rq.origin) LIKE %s OR LOWER(rq.lane) LIKE %s)")
+            params.extend([f"%{origin_q}%", f"%{origin_q}%"])
+        if dest_q:
+            conditions.append("(LOWER(rq.destination) LIKE %s OR LOWER(rq.lane) LIKE %s)")
+            params.extend([f"%{dest_q}%", f"%{dest_q}%"])
+
+        where = " AND ".join(conditions) if conditions else "TRUE"
+        cur.execute(f"""
+            SELECT rq.id, rq.lane, rq.origin, rq.destination, rq.miles,
+                   rq.carrier_name, rq.carrier_email, rq.rate_amount,
+                   rq.rate_unit, rq.quote_date, rq.status, rq.move_type
+            FROM rate_quotes rq
+            WHERE {where}
+            ORDER BY rq.rate_amount ASC NULLS LAST, rq.quote_date DESC NULLS LAST
+            LIMIT 50
+        """, params)
+        rate_matches = cur.fetchall()
+
+        # Search carriers directory for matching pickup/destination areas
+        carrier_conditions = []
+        carrier_params = []
+        if origin_q:
+            carrier_conditions.append("LOWER(c.pickup_area) LIKE %s")
+            carrier_params.append(f"%{origin_q}%")
+        if dest_q:
+            carrier_conditions.append("LOWER(c.destination_area) LIKE %s")
+            carrier_params.append(f"%{dest_q}%")
+
+        carrier_where = " OR ".join(carrier_conditions) if carrier_conditions else "FALSE"
+        try:
+            cur.execute(f"""
+                SELECT c.id, c.name, c.mc_number, c.email, c.phone,
+                       c.pickup_area, c.destination_area, c.regions, c.equipment,
+                       c.can_dray, c.hazmat, c.overweight, c.date_quoted
+                FROM carriers c
+                WHERE {carrier_where}
+                ORDER BY c.date_quoted DESC NULLS LAST
+                LIMIT 20
+            """, carrier_params)
+            matching_carriers = cur.fetchall()
+        except Exception:
+            matching_carriers = []
+
+    # Build response
+    matches = []
+    for rq in rate_matches:
+        matches.append({
+            "id": rq["id"],
+            "lane": rq["lane"],
+            "origin": rq["origin"],
+            "destination": rq["destination"],
+            "miles": rq["miles"],
+            "carrier": rq["carrier_name"] or "Unknown",
+            "carrier_email": rq["carrier_email"],
+            "rate": float(rq["rate_amount"]) if rq["rate_amount"] else None,
+            "rate_unit": rq["rate_unit"],
+            "date": rq["quote_date"].isoformat() if rq["quote_date"] else None,
+            "status": rq["status"],
+            "move_type": rq["move_type"],
+        })
+
+    carriers = []
+    for c in matching_carriers:
+        carriers.append({
+            "id": c["id"],
+            "name": c["name"],
+            "mc": c["mc_number"],
+            "email": c["email"],
+            "phone": c["phone"],
+            "pickup": c["pickup_area"],
+            "destination": c["destination_area"],
+            "can_dray": c["can_dray"],
+            "hazmat": c["hazmat"],
+            "overweight": c["overweight"],
+            "date_quoted": c["date_quoted"].isoformat() if c["date_quoted"] else None,
+        })
+
+    # Stats
+    rates = [m["rate"] for m in matches if m["rate"]]
+    stats = {}
+    if rates:
+        stats = {
+            "floor": min(rates),
+            "ceiling": max(rates),
+            "avg": round(sum(rates) / len(rates), 2),
+            "count": len(rates),
+            "total_carriers": len(set(m["carrier"] for m in matches)),
+        }
+
+    return {"matches": matches, "carriers": carriers, "stats": stats}
+
+
 @app.get("/api/customer-reply-alerts")
 async def api_customer_reply_alerts():
     """Get active customer reply alerts (unreplied for 15+ min)."""
@@ -3262,7 +3568,7 @@ def _calc_age(entered_str):
 
 @app.post("/api/unbilled/upload")
 async def api_unbilled_upload(request: Request):
-    """Upload .xls/.xlsx file of unbilled orders. Replaces non-dismissed orders."""
+    """Upload .xls/.xlsx file of unbilled orders. Smart UPSERT reconciliation."""
     form = await request.form()
     file = form.get("file")
     if not file:
@@ -3284,22 +3590,54 @@ async def api_unbilled_upload(request: Request):
     from datetime import datetime
     batch_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
+    inserted = 0
+    updated = 0
+    reconciled = 0
+
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
-            # Clear old non-dismissed orders
-            cur.execute("DELETE FROM unbilled_orders WHERE dismissed = FALSE")
-            # Insert new batch
+            # UPSERT each row — preserves billing_status for existing orders
             for m in mapped:
                 age = _calc_age(m["entered"])
                 cur.execute(
                     """INSERT INTO unbilled_orders
                        (order_num, container, bill_to, tractor, entered, appt_date, dliv_dt, act_dt, age_days, upload_batch)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (order_num) WHERE dismissed = FALSE
+                       DO UPDATE SET
+                           container = EXCLUDED.container,
+                           bill_to = EXCLUDED.bill_to,
+                           tractor = EXCLUDED.tractor,
+                           entered = EXCLUDED.entered,
+                           appt_date = EXCLUDED.appt_date,
+                           dliv_dt = EXCLUDED.dliv_dt,
+                           act_dt = EXCLUDED.act_dt,
+                           age_days = EXCLUDED.age_days,
+                           upload_batch = EXCLUDED.upload_batch""",
                     (m["order_num"], m["container"], m["bill_to"], m["tractor"],
                      m["entered"], m["appt_date"], m["dliv_dt"], m["act_dt"], age, batch_id)
                 )
+                if cur.statusmessage.startswith("INSERT"):
+                    inserted += 1
+                else:
+                    updated += 1
 
-    return JSONResponse({"ok": True, "imported": len(mapped), "batch": batch_id})
+            # Auto-dismiss orders NOT in this upload (they dropped off the report)
+            cur.execute(
+                """UPDATE unbilled_orders
+                   SET dismissed = TRUE, dismissed_at = NOW(), dismissed_reason = 'reconciled'
+                   WHERE dismissed = FALSE AND upload_batch != %s""",
+                (batch_id,)
+            )
+            reconciled = cur.rowcount
+
+    log.info("Unbilled upload: %d inserted, %d updated, %d reconciled (batch=%s)",
+             inserted, updated, reconciled, batch_id)
+    return JSONResponse({
+        "ok": True, "imported": inserted + updated,
+        "inserted": inserted, "updated": updated, "reconciled": reconciled,
+        "batch": batch_id
+    })
 
 
 @app.get("/api/unbilled")
@@ -3309,7 +3647,8 @@ def api_unbilled_list():
         cur.execute(
             """SELECT id, order_num, container, bill_to, tractor,
                       entered::text, appt_date::text, dliv_dt::text, act_dt::text,
-                      age_days, upload_batch, created_at::text
+                      age_days, upload_batch, created_at::text,
+                      COALESCE(billing_status, 'ready_to_bill') as billing_status
                FROM unbilled_orders
                WHERE dismissed = FALSE
                ORDER BY age_days DESC"""
@@ -3344,12 +3683,59 @@ def api_unbilled_dismiss(order_id: int):
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
             cur.execute(
-                "UPDATE unbilled_orders SET dismissed = TRUE, dismissed_at = NOW() WHERE id = %s",
+                "UPDATE unbilled_orders SET dismissed = TRUE, dismissed_at = NOW(), dismissed_reason = 'manual' WHERE id = %s",
                 (order_id,)
             )
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/unbilled/{order_id}/status")
+async def api_unbilled_update_status(order_id: int, request: Request):
+    """Update billing status of an unbilled order."""
+    body = await request.json()
+    new_status = body.get("billing_status", "").strip()
+    if not new_status:
+        raise HTTPException(400, "Missing billing_status")
+    valid = ("ready_to_bill", "billed_cx", "driver_paid", "closed")
+    if new_status not in valid:
+        raise HTTPException(400, f"Invalid billing_status: {new_status}")
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute(
+                "UPDATE unbilled_orders SET billing_status = %s WHERE id = %s AND dismissed = FALSE",
+                (new_status, order_id)
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(404, f"Order {order_id} not found or dismissed")
+    # Auto-dismiss when closed
+    if new_status == "closed":
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute(
+                    "UPDATE unbilled_orders SET dismissed = TRUE, dismissed_at = NOW(), dismissed_reason = 'closed' WHERE id = %s",
+                    (order_id,)
+                )
+    return JSONResponse({"ok": True, "billing_status": new_status})
+
+
+
+
+
+@app.post("/api/unbilled/{order_id}/status")
+async def api_unbilled_update_status(order_id: int, request: Request):
+    """Update billing status of an unbilled order."""
+    data = await request.json()
+    billing_status = data.get("billing_status")
+    allowed = ["ready_to_bill", "billed_cx", "driver_paid", "closed"]
+    if billing_status not in allowed:
+        return JSONResponse({"error": f"Invalid status. Must be one of: {allowed}"}, status_code=400)
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute(
+                "UPDATE unbilled_orders SET billing_status = %s WHERE id = %s",
+                (billing_status, order_id)
+            )
+    return JSONResponse({"ok": True})
 
 
 # ===================================================================
@@ -3501,6 +3887,9 @@ async def api_get_driver(efj: str):
         "driverName": contact.get("driver_name") or sheet_driver or "",
         "driverPhone": contact.get("driver_phone") or cached_phone or "",
         "driverEmail": contact.get("driver_email") or "",
+        "carrierEmail": contact.get("carrier_email") or "",
+        "trailerNumber": contact.get("trailer_number") or "",
+        "macropointUrl": contact.get("macropoint_url") or "",
         "notes": contact.get("notes") or "",
         "phoneSource": "db" if contact.get("driver_phone") else ("macropoint" if cached_phone else ""),
     }
@@ -3519,6 +3908,44 @@ async def api_update_driver(efj: str, request: Request):
     )
     log.info("Driver contact updated for %s", efj)
     return {"status": "ok", "efj": efj}
+
+
+# -- Timestamped Notes Log ---------------------------------------------------
+
+@app.get("/api/load/{efj}/notes")
+def api_load_notes_list(efj: str):
+    """List all timestamped notes for a load, newest first."""
+    with db.get_cursor() as cur:
+        cur.execute(
+            """SELECT id, efj, note_text, created_by, created_at::text
+               FROM load_notes
+               WHERE efj = %s
+               ORDER BY created_at DESC""",
+            (efj,)
+        )
+        rows = cur.fetchall()
+    return JSONResponse({"notes": [dict(r) for r in rows]})
+
+
+@app.post("/api/load/{efj}/notes")
+async def api_load_notes_add(efj: str, request: Request):
+    """Add a timestamped note to a load."""
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "Missing note text")
+    created_by = (body.get("created_by") or "dashboard").strip()
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute(
+                """INSERT INTO load_notes (efj, note_text, created_by)
+                   VALUES (%s, %s, %s)
+                   RETURNING id, efj, note_text, created_by, created_at::text""",
+                (efj, text, created_by)
+            )
+            row = cur.fetchone()
+    log.info("Note added for %s by %s", efj, created_by)
+    return JSONResponse({"ok": True, "note": dict(row)})
 
 
 @app.get("/api/macropoint/{efj}/screenshot")
@@ -3721,9 +4148,40 @@ async def api_update_status(efj: str, request: Request):
                 raise HTTPException(404, f"Row for {efj} not found in {tab}")
             ws.update_cell(target_row, status_col + 1, new_status)
 
+            # ── Auto-archive to Completed tab on billed_closed ──
+            if new_status == "billed_closed" and target_row:
+                try:
+                    rep_name = sheet_cache.rep_map.get(tab, "")
+                    completed_tab = f"Completed {rep_name}" if rep_name else ""
+                    if completed_tab and completed_tab in _COMPLETED_TABS:
+                        row_data = rows[target_row - 1] if target_row - 1 < len(rows) else []
+                        if row_data:
+                            # Write billed_closed into the row data before archiving
+                            while len(row_data) <= status_col:
+                                row_data.append("")
+                            row_data[status_col] = new_status
+                            # Append to Completed tab
+                            cws = sh.worksheet(completed_tab)
+                            cws.append_row(row_data, value_input_option="USER_ENTERED")
+                            # Delete from active tab
+                            ws.delete_rows(target_row)
+                            log.info("Archived %s from %s → %s (row %d)", efj, tab, completed_tab, target_row)
+                            # Invalidate completed cache so it refreshes
+                            _completed_cache["ts"] = 0
+                    else:
+                        log.warning("No completed tab for rep=%r (account=%s) — skipping archive", rep_name, tab)
+                except Exception as archive_err:
+                    log.error("Auto-archive failed for %s: %s (status still updated)", efj, archive_err)
+
         # Update cache
         shipment["status"] = new_status
         log.info("Status updated: %s → %s (tab=%s)", efj, new_status, tab)
+
+        # Send delivery email for Master loads
+        _normalized = new_status.strip().lower()
+        if _normalized == "delivered" and tab not in ("Tolead", "Boviet"):
+            send_delivery_email(shipment)
+
         return {"status": "ok", "efj": efj, "new_status": new_status}
 
     except HTTPException:
@@ -3735,6 +4193,410 @@ async def api_update_status(efj: str, request: Request):
 
 
 
+# ── SeaRates Vessel Schedules + Port Codes ──
+
+import requests as _requests
+from datetime import timedelta as _timedelta
+
+_CARRIER_SCAC_MAP = {
+    "maersk": "MAEU", "msc": "MSCU", "cosco": "COSU",
+    "evergreen": "EGLV", "yang ming": "YMLU", "hmm": "HDMU",
+    "hyundai": "HDMU", "oocl": "OOLU", "one": "ONEY",
+    "ocean network": "ONEY", "cma": "CMDU", "cma cgm": "CMDU",
+    "hapag": "HLCU", "hapag-lloyd": "HLCU", "zim": "ZIMU",
+    "wan hai": "WHLC", "apl": "CMDU",
+}
+
+def _resolve_locode(city_name):
+    """Resolve a city name to a UN/LOCODE via DB lookup."""
+    if not city_name:
+        return None
+    clean = city_name.strip().lower()
+    # Strip state/country suffixes like ", NJ" or ", OH"
+    for sep in [",", " - "]:
+        if sep in clean:
+            clean = clean.split(sep)[0].strip()
+    # Remove common prefixes
+    for prefix in ["port ", "port of "]:
+        if clean.startswith(prefix):
+            clean = clean[len(prefix):]
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("SELECT locode FROM port_locode_map WHERE city_name = %s", (clean,))
+                row = cur.fetchone()
+                if row:
+                    return row[0] if isinstance(row, tuple) else row.get("locode")
+    except Exception:
+        pass
+    return None
+
+def _resolve_scac(ssl_field):
+    """Extract SCAC code from carrier/vessel name."""
+    if not ssl_field:
+        return None
+    lower = ssl_field.lower()
+    for key, scac in _CARRIER_SCAC_MAP.items():
+        if key in lower:
+            return scac
+    return None
+
+def _searates_schedule_lookup(origin_locode, dest_locode, carrier_scac=None, from_date=None):
+    """Query SeaRates Ship Schedules API for sailing schedules."""
+    api_key = os.environ.get("SEARATES_SCHEDULES_API_KEY") or os.environ.get("SEARATES_API_KEY")
+    if not api_key:
+        return []
+    if not from_date:
+        from_date = datetime.now().strftime("%Y-%m-%d")
+    params = {
+        "cargo_type": "GC",
+        "origin": origin_locode,
+        "destination": dest_locode,
+        "from_date": from_date,
+        "weeks": 4,
+        "sort": "DEP",
+    }
+    if carrier_scac:
+        params["carriers"] = carrier_scac
+    try:
+        resp = _requests.get(
+            "https://schedules.searates.com/api/v2/schedules/by-points",
+            params=params,
+            headers={"X-API-KEY": api_key},
+            timeout=30
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("data", {}).get("schedules", [])
+    except Exception as e:
+        log.warning("SeaRates schedules lookup failed: %s", e)
+    return []
+
+def _searates_container_lookup(number):
+    """Query SeaRates Container Tracking API."""
+    api_key = os.environ.get("SEARATES_API_KEY")
+    if not api_key:
+        return {}
+    try:
+        resp = _requests.get(
+            "https://tracking.searates.com/tracking",
+            params={"api_key": api_key, "number": number, "sealine": "auto"},
+            timeout=30
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception as e:
+        log.warning("SeaRates container lookup failed: %s", e)
+    return {}
+
+def _extract_tracking_data(raw):
+    """Extract ETA, vessel, carrier, LFD from SeaRates tracking response."""
+    result = {"eta": None, "vessel": None, "carrier": None, "lfd": None, "status": None}
+    if not raw or not raw.get("data"):
+        return result
+    data = raw.get("data", {})
+    # Carrier info
+    metadata = data.get("metadata", {})
+    if metadata.get("sealine_name"):
+        result["carrier"] = metadata["sealine_name"]
+    # Parse route/events for ETA
+    route = data.get("route", {})
+    pod = route.get("pod", {})
+    if pod.get("date"):
+        result["eta"] = pod["date"][:10] if len(pod.get("date", "")) >= 10 else None
+    # Vessel from route
+    prepol = route.get("prepol", {})
+    if prepol.get("name") and "vessel" in prepol.get("transport_type", "").lower():
+        result["vessel"] = prepol.get("name")
+    # Parse containers for status
+    containers = data.get("containers", [])
+    if containers:
+        events = containers[0].get("events", [])
+        if events:
+            last = events[-1]
+            result["status"] = last.get("description", "")
+            # Look for LFD in event descriptions
+            for ev in events:
+                desc = (ev.get("description") or "").lower()
+                if "last free" in desc or "lfd" in desc:
+                    result["lfd"] = ev.get("date", "")[:10] if ev.get("date") else None
+    return result
+
+
+@app.post("/api/searates/lookup")
+async def api_searates_lookup(request: Request):
+    """Auto-fetch vessel schedule data from SeaRates APIs."""
+    body = await request.json()
+    move_type = body.get("moveType", "")
+    number = body.get("number", "").strip()
+    origin = body.get("origin", "")
+    destination = body.get("destination", "")
+
+    result = {
+        "eta": None, "lfd": None, "cutoff": None, "erd": None,
+        "vessel": None, "carrier": None, "terminal": None,
+        "voyage": None, "transitDays": None
+    }
+
+    # Step 1: Container/booking tracking
+    if number:
+        raw = _searates_container_lookup(number)
+        tracking = _extract_tracking_data(raw)
+        result["eta"] = tracking.get("eta")
+        result["lfd"] = tracking.get("lfd")
+        result["vessel"] = tracking.get("vessel")
+        result["carrier"] = tracking.get("carrier")
+
+    # Step 2: Ship Schedules (if ports resolve)
+    origin_locode = _resolve_locode(origin)
+    dest_locode = _resolve_locode(destination)
+    carrier_scac = _resolve_scac(result.get("carrier") or "")
+
+    if origin_locode and dest_locode:
+        schedules = _searates_schedule_lookup(origin_locode, dest_locode, carrier_scac)
+        if schedules:
+            best = schedules[0]  # Already sorted by departure
+            is_export = "Export" in move_type
+            if is_export:
+                dep = best.get("origin", {}).get("estimated_date", "")
+                result["erd"] = dep[:10] if dep else None
+                # Cut-off from legs or schedule data
+                legs = best.get("legs", [])
+                if legs:
+                    cut = legs[0].get("departure", {}).get("estimated_date", "")
+                    result["cutoff"] = cut[:10] if cut else result["erd"]
+                result["terminal"] = best.get("origin", {}).get("terminal_name")
+            else:
+                arr = best.get("destination", {}).get("estimated_date", "")
+                if not result["eta"] and arr:
+                    result["eta"] = arr[:10]
+                result["terminal"] = best.get("destination", {}).get("terminal_name")
+
+            result["vessel"] = result["vessel"] or (best.get("legs", [{}])[0].get("vessel_name") if best.get("legs") else None)
+            result["voyage"] = (best.get("legs", [{}])[0].get("voyages", [{}])[0].get("voyage") if best.get("legs") and best["legs"][0].get("voyages") else None)
+            result["transitDays"] = best.get("transit_time")
+            result["carrier"] = result["carrier"] or best.get("carrier_name")
+
+    return JSONResponse(result)
+
+
+@app.get("/api/port-codes")
+async def api_port_codes():
+    """Return all known port code mappings."""
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("SELECT city_name, locode, port_name, country, region FROM port_locode_map ORDER BY city_name")
+                rows = cur.fetchall()
+        ports = []
+        for r in rows:
+            if isinstance(r, dict):
+                ports.append(r)
+            else:
+                ports.append({"city_name": r[0], "locode": r[1], "port_name": r[2], "country": r[3], "region": r[4]})
+        return {"ports": ports, "count": len(ports)}
+    except Exception as e:
+        log.error("Failed to fetch port codes: %s", e)
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/reps")
+async def api_reps():
+    """Return list of account reps."""
+    return {"reps": ["Eli", "Radka", "John F", "Janice"]}
+
+
+@app.post("/api/accounts/add")
+async def api_add_account(request: Request):
+    """Add a new account tab to the Master Tracker."""
+    body = await request.json()
+    name = body.get("name", "").strip()
+    rep = body.get("rep", "").strip()
+    if not name:
+        raise HTTPException(400, "Account name is required")
+    # For now, just return success — actual sheet tab creation would need gspread
+    log.info("New account requested: %s (rep: %s)", name, rep)
+    return {"ok": True, "account": name, "rep": rep}
+
+
+# ── Add New Load ──
+
+# Master Tracker account tabs (anything NOT in SKIP_TABS, Tolead, or Boviet)
+_TOLEAD_ACCOUNTS = {"Tolead", "Tolead ORD", "Tolead JFK", "Tolead LAX", "Tolead DFW"}
+_BOVIET_ACCOUNTS = set(BOVIET_TAB_CONFIGS.keys()) | {"Boviet"}
+
+@app.post("/api/load/add")
+async def api_add_load(request: Request):
+    """Add a new load to the appropriate Google Sheet tab."""
+    body = await request.json()
+    efj = body.get("efj", "").strip()
+    account = body.get("account", "").strip()
+    if not efj:
+        raise HTTPException(400, "EFJ Pro # is required")
+    if not account:
+        raise HTTPException(400, "Account is required")
+
+    move_type = body.get("moveType", "Dray Import")
+    container = body.get("container", "").strip()
+    carrier = body.get("carrier", "").strip()
+    origin = body.get("origin", "").strip()
+    destination = body.get("destination", "").strip()
+    eta = body.get("eta", "")
+    lfd = body.get("lfd", "")
+    pickup = body.get("pickupDate", "")
+    delivery = body.get("deliveryDate", "")
+    status = body.get("status", "")
+    notes = body.get("notes", "")
+    bol = body.get("bol", "").strip()
+    customer_ref = body.get("customerRef", "").strip()
+    equipment_type = body.get("equipmentType", "").strip()
+    rep = body.get("rep", "").strip()
+    driver_phone = body.get("driverPhone", "")
+    trailer = body.get("trailerNumber", "")
+    carrier_email = body.get("carrierEmail", "")
+    mp_url = body.get("macropointUrl", "")
+
+    try:
+        creds = Credentials.from_service_account_file(
+            CREDS_FILE, scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        gc = gspread.authorize(creds)
+
+        # --- Determine which sheet to write to ---
+        target_sheet = "master"
+        hub_key = None
+        boviet_tab = None
+
+        # Check if Tolead hub
+        if account in _TOLEAD_ACCOUNTS:
+            hub_key = account.replace("Tolead ", "").upper() if account != "Tolead" else "ORD"
+            if hub_key not in TOLEAD_HUB_CONFIGS:
+                raise HTTPException(400, f"Unknown Tolead hub: {hub_key}")
+            target_sheet = "tolead"
+
+        # Check if Boviet tab
+        elif account in _BOVIET_ACCOUNTS:
+            boviet_tab = account if account != "Boviet" else "Piedra"
+            if boviet_tab not in BOVIET_TAB_CONFIGS:
+                raise HTTPException(400, f"Unknown Boviet tab: {boviet_tab}")
+            target_sheet = "boviet"
+
+        if target_sheet == "master":
+            # --- Master Tracker: columns A-P ---
+            sh = gc.open_by_key(SHEET_ID)
+            try:
+                ws = sh.worksheet(account)
+            except gspread.WorksheetNotFound:
+                raise HTTPException(400, f"Account tab '{account}' not found in Master Tracker")
+            status_display = status.replace("_", " ").title() if status else ""
+            row = [""] * 16
+            row[COL["efj"]] = efj
+            row[COL["move_type"]] = move_type
+            row[COL["container"]] = container
+            row[COL["carrier"]] = carrier
+            if bol:
+                row[3] = bol  # Column D: BOL/Booking
+            row[COL["origin"]] = origin
+            row[COL["destination"]] = destination
+            row[COL["eta"]] = eta
+            row[COL["lfd"]] = lfd
+            row[COL["pickup"]] = pickup
+            row[COL["delivery"]] = delivery
+            row[COL["status"]] = status_display
+            row[COL["notes"]] = notes
+            ws.append_row(row, value_input_option="USER_ENTERED")
+            log.info("Added load %s to Master/%s", efj, account)
+            result_tab = account
+
+        elif target_sheet == "tolead":
+            # --- Tolead hub sheet ---
+            hub_cfg = TOLEAD_HUB_CONFIGS[hub_key]
+            sh = gc.open_by_key(hub_cfg["sheet_id"])
+            ws = sh.worksheet(hub_cfg["tab"])
+            cols = hub_cfg["cols"]
+            max_col = max(v for v in cols.values() if v is not None) + 1
+            row = [""] * max_col
+            if cols.get("efj") is not None:
+                row[cols["efj"]] = efj
+            if cols.get("load_id") is not None:
+                row[cols["load_id"]] = container or efj
+            if cols.get("status") is not None:
+                row[cols["status"]] = status.replace("_", " ").title() if status else ""
+            if cols.get("origin") is not None:
+                row[cols["origin"]] = origin or hub_cfg.get("default_origin", "")
+            if cols.get("destination") is not None:
+                row[cols["destination"]] = destination
+            if cols.get("pickup_date") is not None:
+                row[cols["pickup_date"]] = pickup
+            if cols.get("delivery") is not None:
+                row[cols["delivery"]] = delivery
+            if cols.get("driver") is not None:
+                row[cols["driver"]] = trailer
+            if cols.get("phone") is not None:
+                row[cols["phone"]] = driver_phone
+            ws.append_row(row, value_input_option="USER_ENTERED")
+            log.info("Added load %s to Tolead/%s", efj, hub_key)
+            result_tab = f"Tolead {hub_key}"
+
+        elif target_sheet == "boviet":
+            # --- Boviet tab ---
+            cfg = BOVIET_TAB_CONFIGS[boviet_tab]
+            sh = gc.open_by_key(BOVIET_SHEET_ID)
+            ws = sh.worksheet(boviet_tab)
+            max_col = max(v for v in cfg.values() if isinstance(v, int)) + 1
+            row = [""] * max_col
+            row[cfg["efj_col"]] = efj
+            row[cfg["load_id_col"]] = container or efj
+            row[cfg["status_col"]] = status.replace("_", " ").title() if status else ""
+            if cfg.get("pickup_col") is not None:
+                row[cfg["pickup_col"]] = pickup
+            if cfg.get("delivery_col") is not None:
+                row[cfg["delivery_col"]] = delivery
+            if cfg.get("phone_col") is not None:
+                row[cfg["phone_col"]] = driver_phone
+            if cfg.get("trailer_col") is not None:
+                row[cfg["trailer_col"]] = trailer
+            ws.append_row(row, value_input_option="USER_ENTERED")
+            log.info("Added load %s to Boviet/%s", efj, boviet_tab)
+            result_tab = f"Boviet {boviet_tab}"
+
+        # Invalidate cache so next fetch picks up the new row
+        sheet_cache._last = 0
+
+        # Store FTL driver info in DB if provided
+        if move_type == "FTL" and (driver_phone or carrier_email):
+            try:
+                # Build notes with trailer/MP URL info
+                extra_notes = []
+                if trailer:
+                    extra_notes.append(f"Trailer: {trailer}")
+                if mp_url:
+                    extra_notes.append(f"MP: {mp_url}")
+                notes_str = " | ".join(extra_notes) or None
+                with db.get_conn() as conn:
+                    with db.get_cursor(conn) as cur:
+                        cur.execute(
+                            """INSERT INTO driver_contacts (efj, driver_phone, driver_email, notes, updated_at)
+                               VALUES (%s, %s, %s, %s, NOW())
+                               ON CONFLICT (efj) DO UPDATE SET
+                                 driver_phone = COALESCE(EXCLUDED.driver_phone, driver_contacts.driver_phone),
+                                 driver_email = COALESCE(EXCLUDED.driver_email, driver_contacts.driver_email),
+                                 notes        = COALESCE(EXCLUDED.notes, driver_contacts.notes),
+                                 updated_at = NOW()""",
+                            (efj, driver_phone or None, carrier_email or None, notes_str),
+                        )
+            except Exception as db_err:
+                log.warning("Driver contact save failed for %s: %s", efj, db_err)
+
+        return {"ok": True, "efj": efj, "tab": result_tab, "sheet": target_sheet}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("Failed to add load %s: %s", efj, e)
+        raise HTTPException(500, f"Failed to add load: {e}")
+
+
 # ── Email History & Unmatched Inbox Endpoints ──
 
 @app.get("/api/load/{efj}/emails")
@@ -3744,7 +4606,7 @@ async def get_load_emails(efj: str):
         cur.execute(
             """SELECT id, gmail_message_id, gmail_thread_id, subject, sender,
                       recipients, body_preview, has_attachments, attachment_names,
-                      sent_at, indexed_at
+                      sent_at, indexed_at, email_type, lane, priority, ai_summary
                FROM email_threads
                WHERE efj = %s
                ORDER BY sent_at DESC NULLS LAST""",
@@ -3763,10 +4625,151 @@ async def get_load_emails(efj: str):
             "attachment_names": r["attachment_names"],
             "sent_at": r["sent_at"].isoformat() if r["sent_at"] else None,
             "indexed_at": r["indexed_at"].isoformat() if r["indexed_at"] else None,
+            "email_type": r.get("email_type"),
+            "lane": r.get("lane"),
+            "priority": r.get("priority"),
+            "ai_summary": r.get("ai_summary"),
         }
         for r in rows
     ]
     return JSONResponse({"emails": emails, "count": len(emails)})
+
+
+
+
+@app.post("/api/load/{efj}/summary")
+async def api_load_summary(efj: str, request: Request):
+    """Generate an AI-powered operational summary for a load using Claude."""
+    if not config.ANTHROPIC_API_KEY:
+        raise HTTPException(422, "ANTHROPIC_API_KEY not configured")
+
+    body = await request.json()
+    shipment = body.get("shipment", {})
+    emails = body.get("emails", [])
+    documents = body.get("documents", [])
+    driver = body.get("driver", {})
+    tracking = body.get("tracking")
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    lines = [
+        f"Load: {shipment.get('efj', efj)}",
+        f"Move Type: {shipment.get('moveType', 'Unknown')}",
+        f"Account: {shipment.get('account', 'Unknown')}",
+        f"Status: {shipment.get('rawStatus', shipment.get('status', 'Unknown'))}",
+        f"Container/Load#: {shipment.get('container', 'N/A')}",
+        f"Carrier: {shipment.get('carrier', 'N/A')}",
+        f"Origin: {shipment.get('origin', 'N/A')} -> Destination: {shipment.get('destination', 'N/A')}",
+        f"ETA: {shipment.get('eta', 'N/A')}",
+        f"LFD/Cutoff: {shipment.get('lfd', 'N/A')}",
+        f"Pickup: {shipment.get('pickupDate', 'N/A')}",
+        f"Delivery: {shipment.get('deliveryDate', 'N/A')}",
+        f"BOL: {shipment.get('bol', 'N/A')}",
+        f"SSL/Vessel: {shipment.get('ssl', 'N/A')}",
+        f"Return Port: {shipment.get('returnPort', 'N/A')}",
+        f"Notes: {shipment.get('notes', 'None')}",
+        f"Bot Alert: {shipment.get('botAlert', 'None')}",
+        f"Rep: {shipment.get('rep', 'N/A')}",
+    ]
+    if shipment.get('hub'):
+        lines.append(f"Hub: {shipment['hub']}")
+    if shipment.get('project'):
+        lines.append(f"Project: {shipment['project']}")
+
+    if any(driver.get(k) for k in ("driverName", "driverPhone", "driverEmail", "trailerNumber")):
+        lines.append("")
+        lines.append("--- Driver/Carrier Contact ---")
+        if driver.get("driverName"):
+            lines.append(f"Driver: {driver['driverName']}")
+        if driver.get("driverPhone"):
+            lines.append(f"Phone: {driver['driverPhone']}")
+        if driver.get("driverEmail"):
+            lines.append(f"Email: {driver['driverEmail']}")
+        if driver.get("carrierEmail"):
+            lines.append(f"Carrier Email: {driver['carrierEmail']}")
+        if driver.get("trailerNumber"):
+            lines.append(f"Trailer: {driver['trailerNumber']}")
+
+    if tracking:
+        lines.append("")
+        lines.append("--- Tracking Status ---")
+        lines.append(f"Tracking Status: {tracking.get('trackingStatus', 'N/A')}")
+        if tracking.get('eta'):
+            lines.append(f"Tracking ETA: {tracking['eta']}")
+        if tracking.get('behindSchedule'):
+            lines.append("WARNING: Behind Schedule")
+        if tracking.get('cantMakeIt'):
+            lines.append(f"CRITICAL: {tracking['cantMakeIt']}")
+
+    lines.append("")
+    lines.append("--- Documents on File ---")
+    if documents:
+        doc_types = {}
+        for d in documents:
+            dt = d.get("doc_type", "other")
+            doc_types.setdefault(dt, []).append(d.get("original_name", "unknown"))
+        for dt, names in doc_types.items():
+            lines.append(f"  {dt}: {len(names)} file(s) - {', '.join(names[:3])}")
+    else:
+        lines.append("  No documents uploaded")
+
+    doc_type_set = {d.get("doc_type") for d in documents}
+    missing_docs = []
+    if "bol" not in doc_type_set:
+        missing_docs.append("BOL")
+    if "pod" not in doc_type_set:
+        missing_docs.append("POD")
+    if "customer_rate" not in doc_type_set:
+        missing_docs.append("Customer Rate Con")
+    if "carrier_rate" not in doc_type_set:
+        missing_docs.append("Carrier Rate Con")
+    if missing_docs:
+        lines.append(f"  MISSING: {', '.join(missing_docs)}")
+
+    lines.append("")
+    lines.append("--- Recent Email Activity ---")
+    if emails:
+        lines.append(f"Total emails: {len(emails)}")
+        for e in emails[:5]:
+            sent = e.get('sent_at', '')[:10] if e.get('sent_at') else 'N/A'
+            lines.append(f"  [{sent}] From: {e.get('sender', 'Unknown')}")
+            lines.append(f"    Subject: {e.get('subject', 'No subject')}")
+            if e.get('body_preview'):
+                lines.append(f"    Preview: {e['body_preview'][:120]}")
+    else:
+        lines.append("  No emails indexed for this load")
+
+    context_str = "\n".join(lines)
+
+    system_prompt = (
+        "You are a logistics operations assistant for Evans Delivery (EFJ Operations). "
+        "You produce concise, actionable load summaries for dispatchers.\n\n"
+        "Rules:\n"
+        "- Output exactly 3-5 bullet points using the bullet character\n"
+        "- Each bullet should be one sentence, max 20 words\n"
+        "- First bullet: Current status and location context\n"
+        "- Flag any issues: behind schedule, missing documents, approaching LFD, no driver, no tracking\n"
+        "- Note document completeness (what is present vs missing)\n"
+        "- Summarize recent email activity if any\n"
+        "- If everything looks good, say so\n"
+        "- Today is: " + today + "\n"
+        "- Use plain text only, no markdown, no bold, no headers\n"
+        "- Be direct and operational for experienced dispatchers"
+    )
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            system=system_prompt,
+            messages=[{"role": "user", "content": f"Generate an operational summary for this load:\n\n{context_str}"}],
+        )
+        summary_text = message.content[0].text.strip()
+        return JSONResponse({"summary": summary_text})
+    except Exception as e:
+        log.error("AI summary generation failed for %s: %s", efj, e)
+        raise HTTPException(500, f"Summary generation failed: {str(e)}")
 
 
 @app.get("/api/unmatched-emails")
@@ -3776,10 +4779,11 @@ async def get_unmatched_emails():
         cur.execute(
             """SELECT id, gmail_message_id, subject, sender, recipients,
                       body_preview, has_attachments, attachment_names,
-                      sent_at, indexed_at, review_status
+                      sent_at, indexed_at, review_status,
+                      email_type, lane, priority, ai_summary, suggested_rep
                FROM unmatched_inbox_emails
                WHERE review_status = 'pending'
-               ORDER BY sent_at DESC NULLS LAST
+               ORDER BY COALESCE(priority, 0) DESC, sent_at DESC NULLS LAST
                LIMIT 100""",
         )
         rows = cur.fetchall()
@@ -3793,6 +4797,11 @@ async def get_unmatched_emails():
             "attachment_names": r["attachment_names"],
             "sent_at": r["sent_at"].isoformat() if r["sent_at"] else None,
             "review_status": r["review_status"],
+            "email_type": r.get("email_type"),
+            "lane": r.get("lane"),
+            "priority": r.get("priority"),
+            "ai_summary": r.get("ai_summary"),
+            "suggested_rep": r.get("suggested_rep"),
         }
         for r in rows
     ]
@@ -4333,6 +5342,33 @@ async def api_get_quote(quote_id: int):
     if not row:
         raise HTTPException(404, "Quote not found")
     return JSONResponse(_sanitize_row(row))
+
+
+
+@app.patch("/api/quotes/{quote_id}/status")
+async def update_quote_status(quote_id: int, request: Request):
+    """Quick status update for a quote (won/lost/expired/sent)"""
+    body = await request.json()
+    new_status = body.get("status")
+    if new_status not in ("draft", "sent", "accepted", "lost", "expired"):
+        return JSONResponse({"error": "Invalid status"}, status_code=400)
+    conn = db.get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE quotes SET status=%s, updated_at=NOW() WHERE id=%s RETURNING id, quote_number, status",
+            (new_status, quote_id)
+        )
+        row = cur.fetchone()
+        conn.commit()
+        if not row:
+            return JSONResponse({"error": "Quote not found"}, status_code=404)
+        return {"id": row[0], "quote_number": row[1], "status": row[2]}
+    except Exception as e:
+        conn.rollback()
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        db.put_conn(conn)
 
 
 @app.put("/api/quotes/{quote_id}")
@@ -5285,6 +6321,98 @@ def _refresh_completed_cache():
             log.error("Completed cache refresh failed: %s", e)
 
 
+
+
+# -- Carrier Performance Scorecard ─────────────────────────────────────
+
+@app.get("/api/carriers/scorecard")
+async def api_carrier_scorecard():
+    """Aggregate carrier delivery performance from completed loads."""
+    from datetime import datetime as _dt
+    from collections import defaultdict
+
+    _refresh_completed_cache()
+    loads = _completed_cache.get("data", [])
+
+    carriers = defaultdict(lambda: {
+        "loads": 0, "on_time": 0, "total_transit": 0, "transit_count": 0,
+        "lanes": defaultdict(int), "last_delivery": None, "move_types": defaultdict(int),
+    })
+
+    def _parse_date(s):
+        if not s:
+            return None
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y", "%m-%d-%Y", "%m-%d-%y"):
+            try:
+                return _dt.strptime(s.strip(), fmt)
+            except ValueError:
+                continue
+        return None
+
+    for load in loads:
+        carrier = (load.get("carrier") or "").strip()
+        if not carrier or carrier.lower() in ("", "tbd", "tba", "n/a", "none"):
+            continue
+
+        carriers[carrier]["loads"] += 1
+        move = load.get("move_type", "").strip()
+        if move:
+            carriers[carrier]["move_types"][move] += 1
+
+        origin = load.get("origin", "").strip()
+        dest = load.get("destination", "").strip()
+        if origin and dest:
+            lane = f"{origin} → {dest}"
+            carriers[carrier]["lanes"][lane] += 1
+
+        pickup_dt = _parse_date(load.get("pickup"))
+        delivery_dt = _parse_date(load.get("delivery"))
+        lfd_dt = _parse_date(load.get("lfd"))
+
+        # Transit time
+        if pickup_dt and delivery_dt and delivery_dt > pickup_dt:
+            delta = (delivery_dt - pickup_dt).days
+            if 0 < delta < 60:
+                carriers[carrier]["total_transit"] += delta
+                carriers[carrier]["transit_count"] += 1
+
+        # On-time: delivery <= LFD (for dray) or delivery exists (for FTL)
+        if delivery_dt:
+            if lfd_dt:
+                if delivery_dt <= lfd_dt:
+                    carriers[carrier]["on_time"] += 1
+            else:
+                carriers[carrier]["on_time"] += 1
+
+        # Track most recent delivery
+        if delivery_dt:
+            if not carriers[carrier]["last_delivery"] or delivery_dt > carriers[carrier]["last_delivery"]:
+                carriers[carrier]["last_delivery"] = delivery_dt
+
+    # Build response
+    results = []
+    for name, data in carriers.items():
+        total = data["loads"]
+        on_time_pct = round(data["on_time"] / total * 100) if total > 0 else 0
+        avg_transit = round(data["total_transit"] / data["transit_count"], 1) if data["transit_count"] > 0 else None
+        top_lanes = sorted(data["lanes"].items(), key=lambda x: -x[1])[:5]
+        primary_move = max(data["move_types"].items(), key=lambda x: x[1])[0] if data["move_types"] else None
+
+        results.append({
+            "carrier": name,
+            "total_loads": total,
+            "on_time_pct": on_time_pct,
+            "avg_transit_days": avg_transit,
+            "lanes_served": len(data["lanes"]),
+            "top_lanes": [{"lane": l, "count": c} for l, c in top_lanes],
+            "primary_move_type": primary_move,
+            "last_delivery": data["last_delivery"].strftime("%Y-%m-%d") if data["last_delivery"] else None,
+        })
+
+    results.sort(key=lambda x: -x["total_loads"])
+    return JSONResponse({"carriers": results, "total": len(results)})
+
+
 @app.get("/api/completed")
 async def api_completed(
     request: Request,
@@ -5354,33 +6482,74 @@ def _analyze_service_health(unit: str, name: str, poll_min: int) -> dict:
     except Exception:
         lines = []
 
-    # 3. Crash / error count
-    error_pattern = re.compile(r"error|traceback|failed|exception", re.IGNORECASE)
-    error_lines = [l for l in lines if error_pattern.search(l)]
-    crash_count = len(error_lines)
-    recent_errors = error_lines[-5:] if error_lines else []
+    # 3. Count ACTUAL crashes = systemd restart events (not just any error line)
+    crash_pattern = re.compile(
+        r"(Failed with result|Main process exited, code=exited, status=1|"
+        r"Scheduled restart job, restart counter|"
+        r"systemd\[\d+\]: .+: Main process exited)",
+        re.IGNORECASE,
+    )
+    crash_count = sum(1 for l in lines if crash_pattern.search(l))
 
-    # 4. Email count
+    # 4. Operational errors (for display, not health determination)
+    error_pattern = re.compile(r"error|traceback|failed|exception", re.IGNORECASE)
+    error_lines = [l for l in lines if error_pattern.search(l) and not crash_pattern.search(l)]
+    recent_errors = []
+    for el in (error_lines[-5:] if error_lines else []):
+        tm = re.match(r"\w+ \d+ (\d+:\d+:\d+)", el)
+        time_str = tm.group(1) if tm else ""
+        msg = el.split(":", 3)[-1].strip() if ":" in el else el
+        recent_errors.append({"time": time_str, "level": "error", "msg": msg[:120]})
+
+    # Also add crash lines to recent_errors
+    crash_lines = [l for l in lines if crash_pattern.search(l)]
+    for cl in (crash_lines[-3:] if crash_lines else []):
+        tm = re.match(r"\w+ \d+ (\d+:\d+:\d+)", cl)
+        time_str = tm.group(1) if tm else ""
+        msg = cl.split(":", 3)[-1].strip() if ":" in cl else cl
+        recent_errors.append({"time": time_str, "level": "crash", "msg": msg[:120]})
+    recent_errors.sort(key=lambda e: e.get("time", ""), reverse=True)
+    recent_errors = recent_errors[:8]
+
+    # 5. Email count
     email_pattern = re.compile(r"Sent alert|SMTP|email sent", re.IGNORECASE)
     email_count = sum(1 for l in lines if email_pattern.search(l))
 
-    # 5. Cycle count
+    # 6. Cycle count
     cycle_pattern = re.compile(
         r"\[Dray Import\]|\[Dray Export\]|\[FTL\]|\[Boviet\]|\[Tolead\]|Tab:|Checking |Starting cycle|--- Cycle"
     )
     cycle_count = sum(1 for l in lines if cycle_pattern.search(l))
 
-    # 6. Health status
+    # 7. Loads tracked
+    loads_pattern = re.compile(r"Tracking|Scraping|Container:|Row \d+:")
+    loads_count = sum(1 for l in lines if loads_pattern.search(l))
+
+    # 8. Last successful cycle timestamp
+    last_cycle_ts = None
+    cycle_end_pattern = re.compile(r"Run complete|poll complete|Done|Sleeping")
+    for l in reversed(lines):
+        if cycle_end_pattern.search(l):
+            tm = re.match(r"(\w+ \d+ \d+:\d+:\d+)", l)
+            if tm:
+                try:
+                    from datetime import datetime as _dt
+                    last_cycle_ts = _dt.strptime(f"2026 {tm.group(1)}", "%Y %b %d %H:%M:%S").isoformat()
+                except Exception:
+                    pass
+            break
+
+    # 9. Health status — based on real crashes, not operational errors
     if active_state not in ("active", "activating"):
         health = "down"
-    elif crash_count > 3:
+    elif crash_count > 10:
         health = "crash_loop"
-    elif crash_count > 0:
+    elif crash_count > 3:
         health = "degraded"
     else:
         health = "healthy"
 
-    # 7. Uptime from systemctl
+    # 10. Uptime
     uptime_str = ""
     try:
         r = _sp.run(
@@ -5408,6 +6577,24 @@ def _analyze_service_health(unit: str, name: str, poll_min: int) -> dict:
     except Exception:
         pass
 
+    # 11. Last run / next run
+    last_run = ""
+    next_run = ""
+    for l in reversed(lines):
+        tm = re.match(r"(\w+ \d+ \d+:\d+:\d+)", l)
+        if tm:
+            try:
+                from datetime import datetime as _dt
+                ts = _dt.strptime(f"2026 {tm.group(1)}", "%Y %b %d %H:%M:%S")
+                mins = int((_dt.now() - ts).total_seconds() / 60)
+                last_run = "just now" if mins < 1 else (f"{mins}m ago" if mins < 60 else f"{mins // 60}h {mins % 60}m ago")
+                if poll_min > 0:
+                    nm = poll_min - mins
+                    next_run = "overdue" if nm < 0 else (f"{nm} min" if nm < 60 else f"{nm // 60}h {nm % 60}m")
+            except Exception:
+                pass
+            break
+
     return {
         "unit": unit,
         "name": name,
@@ -5418,14 +6605,25 @@ def _analyze_service_health(unit: str, name: str, poll_min: int) -> dict:
         "crashes_24h": crash_count,
         "emails_24h": email_count,
         "cycles_24h": cycle_count,
+        "loads_24h": loads_count,
+        "last_run": last_run or "unknown",
+        "next_run": next_run,
+        "last_successful_cycle": last_cycle_ts,
         "recent_errors": recent_errors,
+        "journal_24h": {
+            "crashes": crash_count,
+            "emails_sent": email_count,
+            "cycles_completed": cycle_count,
+            "loads_tracked": loads_count,
+        },
     }
+
 
 
 @app.get("/api/bot-health")
 def api_bot_health():
-    """Deep health check for all bot services â 24h window."""
-    services = []
+    """Deep health check for all bot services - 24h window."""
+    services = {}
     total_crashes = 0
     total_emails = 0
     total_cycles = 0
@@ -5433,7 +6631,7 @@ def api_bot_health():
 
     for svc in BOT_SERVICES:
         info = _analyze_service_health(svc["unit"], svc["name"], svc["poll_min"])
-        services.append(info)
+        services[svc["unit"]] = info
         total_crashes += info["crashes_24h"]
         total_emails += info["emails_24h"]
         total_cycles += info["cycles_24h"]
@@ -5448,7 +6646,20 @@ def api_bot_health():
         "services_total": len(services),
     }
 
-    return {"services": services, "summary": summary}
+    return {"services": services, "summary": summary, "generated_at": __import__("datetime").datetime.now().isoformat()}
+
+
+@app.get("/api/cron-status")
+def api_cron_status():
+    """Status of cron-based monitors (dray import/export)."""
+    import sys
+    if "/root/csl-bot" not in sys.path:
+        sys.path.insert(0, "/root/csl-bot")
+    try:
+        from cron_log_parser import get_all_cron_status
+        return {"cron_jobs": get_all_cron_status()}
+    except Exception as exc:
+        return {"cron_jobs": {}, "error": str(exc)}
 
 
 def main():
@@ -5468,6 +6679,369 @@ def main():
         log_level=config.LOG_LEVEL.lower(),
     )
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# V2 API ENDPOINTS — Postgres-backed (Phase 1 migration)
+# Coexist with existing sheet-based /api/ endpoints.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Shared accounts that still need Google Sheet writes
+_SHARED_SHEET_ACCOUNTS = {"Tolead", "Boviet"}
+
+
+def _shipment_row_to_dict(row: dict) -> dict:
+    """Convert a Postgres shipments row to the same JSON shape as sheet_cache."""
+    return {
+        "efj": row["efj"] or "",
+        "move_type": row["move_type"] or "",
+        "container": row["container"] or "",
+        "bol": row["bol"] or "",
+        "ssl": row["vessel"] or "",
+        "carrier": row["carrier"] or "",
+        "origin": row["origin"] or "",
+        "destination": row["destination"] or "",
+        "eta": row["eta"] or "",
+        "lfd": row["lfd"] or "",
+        "pickup": row["pickup_date"] or "",
+        "delivery": row["delivery_date"] or "",
+        "status": row["status"] or "",
+        "notes": row["notes"] or "",
+        "bot_alert": row["bot_notes"] or "",
+        "return_port": row["return_date"] or "",
+        "container_url": row["container_url"] or "",
+        "rep": row["rep"] or "Unassigned",
+        "account": row["account"] or "",
+        "hub": row["hub"] or "",
+        "driver": row["driver"] or "",
+        "driver_phone": row["driver_phone"] or "",
+        "source": row["source"] or "sheet",
+        "archived": row.get("archived", False),
+        "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else "",
+    }
+
+
+@app.get("/api/v2/shipments")
+async def api_v2_shipments(request: Request, account: str = None, status: str = None,
+                            hub: str = None, rep: str = None, archived: bool = False):
+    """Return shipments from Postgres, same shape as /api/shipments."""
+    where_clauses = ["archived = %s"]
+    params = [archived]
+
+    if account:
+        where_clauses.append("LOWER(account) = LOWER(%s)")
+        params.append(account)
+    if status:
+        where_clauses.append("LOWER(status) = LOWER(%s)")
+        params.append(status)
+    if hub:
+        where_clauses.append("LOWER(hub) = LOWER(%s)")
+        params.append(hub)
+    if rep:
+        where_clauses.append("LOWER(rep) = LOWER(%s)")
+        params.append(rep)
+
+    where = " AND ".join(where_clauses)
+
+    with db.get_cursor() as cur:
+        cur.execute(
+            f"SELECT * FROM shipments WHERE {where} ORDER BY created_at DESC",
+            params,
+        )
+        rows = cur.fetchall()
+
+    shipments = [_shipment_row_to_dict(r) for r in rows]
+
+    # Enrich with invoiced status from DB
+    try:
+        invoiced_map = db.get_invoiced_map()
+    except Exception:
+        invoiced_map = {}
+    for s in shipments:
+        s["_invoiced"] = invoiced_map.get(s["efj"], False)
+
+    return {"shipments": shipments, "total": len(shipments)}
+
+
+@app.get("/api/v2/shipments/{efj}")
+async def api_v2_shipment_detail(efj: str, request: Request):
+    """Return a single shipment from Postgres."""
+    with db.get_cursor() as cur:
+        cur.execute("SELECT * FROM shipments WHERE efj = %s", (efj,))
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, f"Shipment {efj} not found")
+    return _shipment_row_to_dict(row)
+
+
+@app.get("/api/v2/stats")
+async def api_v2_stats(request: Request):
+    """Dashboard stats computed from Postgres."""
+    from datetime import datetime as _dt, timedelta as _td
+    today = _dt.now().strftime("%Y-%m-%d")
+    tomorrow = (_dt.now() + _td(days=1)).strftime("%Y-%m-%d")
+
+    with db.get_cursor() as cur:
+        # Active count (not archived, not delivered/completed)
+        cur.execute("""
+            SELECT COUNT(*) as cnt FROM shipments
+            WHERE archived = FALSE
+              AND LOWER(status) NOT IN ('delivered', 'completed', 'empty returned', 'billed_closed')
+        """)
+        active = cur.fetchone()["cnt"]
+
+        # At risk (LFD is today or tomorrow)
+        cur.execute("""
+            SELECT COUNT(*) as cnt FROM shipments
+            WHERE archived = FALSE
+              AND LOWER(status) NOT IN ('delivered', 'completed', 'empty returned', 'billed_closed')
+              AND lfd != '' AND lfd IS NOT NULL
+              AND LEFT(lfd, 10) <= %s
+        """, (tomorrow,))
+        at_risk = cur.fetchone()["cnt"]
+
+        # Completed today
+        cur.execute("""
+            SELECT COUNT(*) as cnt FROM shipments
+            WHERE archived = FALSE
+              AND LOWER(status) IN ('delivered', 'completed')
+              AND delivery_date LIKE %s
+        """, (f"%{today}%",))
+        completed_today = cur.fetchone()["cnt"]
+
+        # ETA changed (bot_notes mentions today)
+        cur.execute("""
+            SELECT COUNT(*) as cnt FROM shipments
+            WHERE archived = FALSE
+              AND bot_notes LIKE %s
+        """, (f"%{today}%",))
+        eta_changed = cur.fetchone()["cnt"]
+
+    on_schedule = max(0, active - at_risk)
+
+    return {
+        "active": active,
+        "on_schedule": on_schedule,
+        "eta_changed": eta_changed,
+        "at_risk": at_risk,
+        "completed_today": completed_today,
+    }
+
+
+@app.get("/api/v2/accounts")
+async def api_v2_accounts(request: Request):
+    from datetime import datetime as _dt, timedelta as _td
+    """Account list with counts from Postgres."""
+    with db.get_cursor() as cur:
+        cur.execute("""
+            SELECT
+                account,
+                COUNT(*) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as active,
+                COUNT(*) FILTER (WHERE LOWER(status) IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as done,
+                COUNT(*) FILTER (
+                    WHERE archived = FALSE
+                      AND LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed')
+                      AND lfd != '' AND lfd IS NOT NULL
+                      AND LEFT(lfd, 10) <= %s
+                ) as alerts
+            FROM shipments
+            WHERE archived = FALSE
+            GROUP BY account
+            ORDER BY active DESC
+        """, ((_dt.now() + _td(days=1)).strftime("%Y-%m-%d"),))
+        rows = cur.fetchall()
+
+    accounts = [{"name": r["account"], "active": r["active"], "done": r["done"], "alerts": r["alerts"]} for r in rows]
+    return {"accounts": accounts}
+
+
+@app.get("/api/v2/team")
+async def api_v2_team(request: Request):
+    """Team member summaries from Postgres."""
+    with db.get_cursor() as cur:
+        cur.execute("""
+            SELECT rep,
+                   COUNT(*) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as loads,
+                   array_agg(DISTINCT account) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as accounts,
+                   COUNT(*) FILTER (
+                       WHERE archived = FALSE
+                         AND LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed')
+                         AND lfd != '' AND lfd IS NOT NULL
+                         AND LEFT(lfd, 10) <= to_char(NOW() + interval '1 day', 'YYYY-MM-DD')
+                   ) as at_risk
+            FROM shipments
+            WHERE archived = FALSE AND rep IS NOT NULL AND rep != ''
+            GROUP BY rep
+        """)
+        rows = cur.fetchall()
+    team = {}
+    for r in rows:
+        accts = r["accounts"] if r["accounts"] else []
+        accts = [a for a in accts if a]
+        team[r["rep"]] = {"loads": r["loads"], "accounts": sorted(accts), "at_risk": r["at_risk"]}
+    return {"team": team}
+
+
+@app.post("/api/v2/load/{efj}/status")
+async def api_v2_update_status(efj: str, request: Request):
+    """Update status in Postgres. Write back to Google Sheet if shared account."""
+    body = await request.json()
+    new_status = body.get("status", "").strip()
+    if not new_status:
+        raise HTTPException(400, "Missing status")
+
+    # Update Postgres
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute(
+                "UPDATE shipments SET status = %s, updated_at = NOW() WHERE efj = %s RETURNING account, hub",
+                (new_status, efj),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, f"Shipment {efj} not found")
+
+    account = row["account"]
+
+    # Write back to Google Sheet for shared accounts
+    if account in _SHARED_SHEET_ACCOUNTS:
+        try:
+            _v2_write_status_to_sheet(efj, new_status, account, row.get("hub"))
+        except Exception as e:
+            log.warning("Sheet write-back failed for %s: %s (Postgres updated OK)", efj, e)
+
+    return {"ok": True, "efj": efj, "status": new_status}
+
+
+def _v2_write_status_to_sheet(efj: str, new_status: str, account: str, hub: str = None):
+    """Write status back to Google Sheet for shared accounts (Tolead/Boviet)."""
+    creds = Credentials.from_service_account_file(
+        CREDS_FILE, scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+    gc = gspread.authorize(creds)
+
+    if account == "Tolead" and hub and hub in TOLEAD_HUB_CONFIGS:
+        cfg = TOLEAD_HUB_CONFIGS[hub]
+        sh = gc.open_by_key(cfg["sheet_id"])
+        ws = sh.worksheet(cfg["tab"])
+        rows = ws.get_all_values()
+        cols = cfg["cols"]
+        for i, row in enumerate(rows):
+            efj_val = row[cols["efj"]].strip() if len(row) > cols["efj"] else ""
+            load_val = row[cols["load_id"]].strip() if len(row) > cols["load_id"] else ""
+            if efj_val == efj or load_val == efj:
+                ws.update_cell(i + 1, cols["status"] + 1, new_status)
+                log.info("Sheet write-back: Tolead %s %s → %s (row %d)", hub, efj, new_status, i + 1)
+                return
+        log.warning("Sheet write-back: %s not found in Tolead %s", efj, hub)
+
+    elif account == "Boviet":
+        sh = gc.open_by_key(BOVIET_SHEET_ID)
+        for bov_tab, cfg in BOVIET_TAB_CONFIGS.items():
+            try:
+                ws = sh.worksheet(bov_tab)
+                rows = ws.get_all_values()
+                for i, row in enumerate(rows):
+                    if len(row) > cfg["efj_col"] and row[cfg["efj_col"]].strip() == efj:
+                        ws.update_cell(i + 1, cfg["status_col"] + 1, new_status)
+                        log.info("Sheet write-back: Boviet/%s %s → %s (row %d)", bov_tab, efj, new_status, i + 1)
+                        return
+            except Exception:
+                continue
+        log.warning("Sheet write-back: %s not found in Boviet tabs", efj)
+
+
+@app.post("/api/v2/load/{efj}/update")
+async def api_v2_update_field(efj: str, request: Request):
+    """Update any field(s) on a shipment in Postgres."""
+    body = await request.json()
+
+    # Allowed fields to update
+    ALLOWED = {
+        "move_type", "container", "bol", "vessel", "carrier",
+        "origin", "destination", "eta", "lfd", "pickup_date", "delivery_date",
+        "status", "notes", "driver", "bot_notes", "return_date",
+        "rep", "customer_ref", "equipment_type", "container_url",
+        "driver_phone", "hub", "archived",
+    }
+    updates = {k: v for k, v in body.items() if k in ALLOWED}
+    if not updates:
+        raise HTTPException(400, "No valid fields to update")
+
+    set_clauses = [f"{k} = %({k})s" for k in updates]
+    set_clauses.append("updated_at = NOW()")
+    updates["efj"] = efj
+
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute(
+                f"UPDATE shipments SET {', '.join(set_clauses)} WHERE efj = %(efj)s RETURNING *",
+                updates,
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, f"Shipment {efj} not found")
+
+    return {"ok": True, "shipment": _shipment_row_to_dict(row)}
+
+
+@app.post("/api/v2/load/add")
+async def api_v2_add_shipment(request: Request):
+    """Insert a new shipment into Postgres. Write to Google Sheet if shared account."""
+    body = await request.json()
+    efj = body.get("efj", "").strip()
+    account = body.get("account", "").strip()
+    if not efj:
+        raise HTTPException(400, "Missing EFJ #")
+    if not account:
+        raise HTTPException(400, "Missing account")
+
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute("""
+                INSERT INTO shipments (
+                    efj, move_type, container, bol, vessel, carrier,
+                    origin, destination, eta, lfd, pickup_date, delivery_date,
+                    status, notes, driver, bot_notes, return_date,
+                    account, hub, rep, source
+                ) VALUES (
+                    %(efj)s, %(move_type)s, %(container)s, %(bol)s, %(vessel)s, %(carrier)s,
+                    %(origin)s, %(destination)s, %(eta)s, %(lfd)s, %(pickup_date)s, %(delivery_date)s,
+                    %(status)s, %(notes)s, %(driver)s, %(bot_notes)s, %(return_date)s,
+                    %(account)s, %(hub)s, %(rep)s, 'dashboard'
+                )
+                ON CONFLICT (efj) DO NOTHING
+                RETURNING *
+            """, {
+                "efj": efj,
+                "move_type": body.get("move_type", ""),
+                "container": body.get("container", ""),
+                "bol": body.get("bol", ""),
+                "vessel": body.get("vessel", ""),
+                "carrier": body.get("carrier", ""),
+                "origin": body.get("origin", ""),
+                "destination": body.get("destination", ""),
+                "eta": body.get("eta", ""),
+                "lfd": body.get("lfd", ""),
+                "pickup_date": body.get("pickup_date", ""),
+                "delivery_date": body.get("delivery_date", ""),
+                "status": body.get("status", ""),
+                "notes": body.get("notes", ""),
+                "driver": body.get("driver", ""),
+                "bot_notes": body.get("bot_notes", ""),
+                "return_date": body.get("return_date", ""),
+                "account": account,
+                "hub": body.get("hub", ""),
+                "rep": body.get("rep", "Unassigned"),
+            })
+            row = cur.fetchone()
+
+    if not row:
+        raise HTTPException(409, f"Shipment {efj} already exists")
+
+    return {"ok": True, "shipment": _shipment_row_to_dict(row)}
+
+# ═══ End of v2 endpoints ═══
 
 if __name__ == "__main__":
     main()

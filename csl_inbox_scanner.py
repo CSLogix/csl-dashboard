@@ -23,6 +23,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+import csl_email_classifier as classifier
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
@@ -1036,6 +1037,18 @@ def process_message(service, msg_id):
         if email_type:
             log.info("  Email type: %s | Lane: %s", email_type, lane or "none")
 
+        # AI classification (enhanced type, priority, summary)
+        ai_result = classifier.ai_classify_email(
+            sender, subject, body_preview,
+            ", ".join(attachment_names) if attachment_names else "")
+        ai_priority = ai_result.get("priority")
+        ai_summary_text = ai_result.get("summary")
+        ai_suggested_rep = ai_result.get("suggested_rep")
+        final_email_type = email_type or ai_result.get("type")
+        if ai_priority:
+            log.info("  AI: type=%s priority=%d summary=%s",
+                     ai_result.get("type", "?"), ai_priority, ai_summary_text or "?")
+
         # Insert into email_threads
         email_thread_db_id = None
         conn = get_conn()
@@ -1046,14 +1059,14 @@ def process_message(service, msg_id):
                        (efj, gmail_thread_id, gmail_message_id, message_id,
                         subject, sender, recipients, body_preview,
                         has_attachments, attachment_names, sent_at,
-                        email_type, lane)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        email_type, lane, priority, ai_summary, suggested_rep)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                        ON CONFLICT (gmail_message_id) DO NOTHING
                        RETURNING id""",
                     (efj, gmail_thread_id, msg_id, rfc_message_id,
                      subject, sender, recipients, body_preview[:500],
                      has_attachments, ", ".join(attachment_names), sent_at,
-                     email_type, lane),
+                     final_email_type, lane, ai_priority, ai_summary_text, ai_suggested_rep),
                 )
                 row = cur.fetchone()
                 if row:
@@ -1088,6 +1101,18 @@ def process_message(service, msg_id):
                  msg_id[:12], subject[:60], sender[:40],
                  email_type or "unknown", lane or "none")
 
+        # AI classification (enhanced type, priority, summary)
+        ai_result = classifier.ai_classify_email(
+            sender, subject, body_preview,
+            ", ".join(attachment_names) if attachment_names else "")
+        ai_priority = ai_result.get("priority")
+        ai_summary_text = ai_result.get("summary")
+        ai_suggested_rep = ai_result.get("suggested_rep")
+        final_email_type = email_type or ai_result.get("type")
+        if ai_priority:
+            log.info("  AI: type=%s priority=%d rep=%s",
+                     ai_result.get("type", "?"), ai_priority, ai_suggested_rep or "?")
+
         # Store in unmatched table
         conn = get_conn()
         try:
@@ -1096,14 +1121,18 @@ def process_message(service, msg_id):
                     """INSERT INTO unmatched_inbox_emails
                        (gmail_message_id, gmail_thread_id, subject, sender,
                         recipients, body_preview, has_attachments,
-                        attachment_names, sent_at, email_type, lane)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        attachment_names, sent_at, email_type, lane,
+                        priority, ai_summary, suggested_rep)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                        ON CONFLICT (gmail_message_id) DO NOTHING""",
                     (msg_id, gmail_thread_id, subject, sender,
                      recipients, body_preview[:500], has_attachments,
                      ", ".join(attachment_names), sent_at,
-                     email_type, lane),
+                     final_email_type, lane, ai_priority, ai_summary_text, ai_suggested_rep),
                 )
+                row = cur.fetchone()
+                if row:
+                    email_thread_db_id = row["id"] if isinstance(row, dict) else row[0]
             conn.commit()
         except Exception as e:
             conn.rollback()

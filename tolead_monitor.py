@@ -50,7 +50,9 @@ HUBS = [
         "tab": "Schedule",
         "col_load_id": 1, "col_date": 4, "col_time": 5,
         "col_origin": 6, "col_dest": 7, "col_status": 9,
-        "col_efj": 15, "col_trailer": 16,
+        "col_efj": 15, "col_trailer": 16, "col_phone": 17,
+        "col_delivery": 3, "col_appt_id": 2, "col_loads": 8,
+        "start_row": 790,
     },
     {
         "name": "JFK",
@@ -58,15 +60,21 @@ HUBS = [
         "tab": "Schedule",
         "col_load_id": 0, "col_date": 3, "col_time": 4,
         "col_origin": 6, "col_dest": 7, "col_status": 9,
-        "col_efj": 14, "col_trailer": 15,
+        "col_efj": 14, "col_trailer": 15, "col_phone": 16,
+        "col_delivery": 5,
+        "default_origin": "Garden City, NY",
+        "start_row": 184,
     },
     {
         "name": "LAX",
         "sheet_id": "1YLB6z5LdL0kFYTcfq_H5e6acU8-VLf8nN0XfZrJ-bXo",
         "tab": "LAX",
         "col_load_id": 3, "col_date": 4, "col_time": 5,
-        "col_origin": None, "col_dest": 6, "col_status": 8,
-        "col_efj": 0, "col_trailer": 10,
+        "col_origin": 6, "col_dest": 7, "col_status": 9,
+        "col_efj": 0, "col_trailer": 11, "col_phone": 12,
+        "col_delivery": 8,
+        "default_origin": "Vernon, CA",
+        "start_row": 755,
     },
     {
         "name": "DFW",
@@ -74,7 +82,10 @@ HUBS = [
         "tab": "DFW",
         "col_load_id": 4, "col_date": 5, "col_time": 6,
         "col_origin": None, "col_dest": 3, "col_status": 11,
-        "col_efj": 10, "col_trailer": 12,
+        "col_efj": 10, "col_trailer": 12, "col_phone": 13,
+        "col_delivery_date": 2, "col_appt_id": 1, "col_equipment": 8,
+        "default_origin": "Irving, TX",
+        "start_row": 172,
     },
 ]
 
@@ -208,6 +219,47 @@ def _is_load_behind(stop_times):
     return False
 
 
+def _send_pod_reminder(hub_name, load_id, dest, driver_phone, efj=""):
+    """Send POD reminder when Macropoint marks Delivered before manual close."""
+    now = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
+    ref = f"{hub_name}--{load_id}"
+
+    subject = f"POD Needed \u2014 {ref}({dest}) Has Delivered"
+
+    phone_display = driver_phone if driver_phone else "(not on file)"
+
+    body = f"""<html><body style="font-family:Arial,sans-serif;">
+<div style="background:#c62828;color:white;padding:12px 16px;border-radius:6px 6px 0 0;">
+  <b>POD Reminder \u2014 {ref}</b>
+</div>
+<div style="padding:16px;border:1px solid #ddd;border-top:none;border-radius:0 0 6px 6px;">
+  <p style="font-size:15px;margin:0 0 12px;">
+    <b>{ref}({dest})</b> has been marked <b style="color:#c62828;">Delivered</b> by Macropoint tracking.
+  </p>
+  <p style="font-size:15px;margin:0 0 12px;">
+    Please contact the driver to obtain the POD as soon as possible.
+  </p>
+  <table style="border-collapse:collapse;margin:12px 0;">
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">Hub</td><td style="padding:4px 0;"><b>{hub_name}</b></td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">Load #</td><td style="padding:4px 0;"><b>{load_id}</b></td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">EFJ #</td><td style="padding:4px 0;"><b>{efj}</b></td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">Destination</td><td style="padding:4px 0;">{dest}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">Driver Phone</td><td style="padding:4px 0;"><b>{phone_display}</b></td></tr>
+  </table>
+  <p style="font-size:12px;color:#888;margin:16px 0 0;">
+    Once POD is received, mark the Status column as "Delivered" to close this load.<br>
+    Sent at {now}
+  </p>
+</div>
+</body></html>"""
+
+    try:
+        _send_email("tolead-efj@evansdelivery.com", subject, body)
+        print(f"    POD reminder sent for {ref}({dest})")
+    except Exception as exc:
+        print(f"    WARNING: POD reminder email failed: {exc}")
+
+
 def send_tolead_alert(hub_name, load_id, efj, status, dest, pickup_date="", mp_load_id=None, stop_times=None):
     now = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
 
@@ -288,13 +340,35 @@ def run_once_hub(hub, creds, gc, browser, sent, dry_run=False):
     col_efj = hub["col_efj"]
     col_status = hub["col_status"]
 
+    start_row = hub.get("start_row", 2)
     to_process = []
     for i, row in enumerate(rows[1:], start=2):
+        if i < start_row:
+            continue
         if len(row) <= col_efj:
             continue
         status = _col(row, col_status)
-        if not status or status.lower() in SKIP_STATUSES:
-            continue
+        load_id_val = _col(row, hub["col_load_id"])
+
+        # DFW: status derived from Col E (LINE#) + Col J (Loads)
+        if hub["name"] == "DFW":
+            if not load_id_val:
+                continue  # No LINE# = no load
+            if status and status.lower() in SKIP_STATUSES:
+                continue
+            col_j = _col(row, 9)  # Col J = "Loads" / scheduling status
+            if col_j.lower() not in ("scheduled", "picked"):
+                # E has text + J not scheduled = needs covering, no MP to scrape
+                continue
+            # Covered load — use J value as status if L is empty
+            if not status:
+                status = col_j.capitalize()
+        else:
+            if status and status.lower() in SKIP_STATUSES:
+                continue
+            if not status:
+                continue
+
         mp_url = links[i - 1] if i - 1 < len(links) else ""
         if not mp_url or "macropoint" not in mp_url.lower():
             continue
@@ -311,6 +385,9 @@ def run_once_hub(hub, creds, gc, browser, sent, dry_run=False):
         efj         = _col(row, col_efj)
         dest        = _col(row, hub["col_dest"])
         pickup_date = _col(row, hub["col_date"])
+        driver_phone = _col(row, hub.get("col_phone", -1))
+        driver_trailer = _col(row, hub.get("col_trailer", -1))
+        sheet_status_L = _col(row, col_status)  # Col L — manual delivered flag
         alert_key   = f"{load_id}|{efj}"
 
         print(f"\n  [{sheet_row}] {load_id} / {efj}")
@@ -361,6 +438,11 @@ def run_once_hub(hub, creds, gc, browser, sent, dry_run=False):
         if is_critical or is_behind or has_new_stop:
             send_tolead_alert(name, load_id, efj, mp_status, dest, pickup_date, mp_load_id, stop_times=stop_times)
             changes += 1
+
+            # All hubs: if Macropoint says Delivered but status not yet Delivered → POD reminder
+            if (("delivered" in mp_status.lower() or "tracking completed" in mp_status.lower())
+                    and sheet_status_L.lower() != "delivered"):
+                _send_pod_reminder(name, load_id, dest, driver_phone, efj)
         else:
             print("    On time, no new events — no alert needed")
 

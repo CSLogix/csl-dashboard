@@ -566,7 +566,7 @@ def insert_quote(data: dict) -> dict:
                      sell_subtotal, accessorial_total, estimated_total,
                      customer_name, customer_email,
                      linehaul_json, accessorials_json, terms_json, route_json)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 RETURNING *
             """, (
                 qn, data.get("status", "draft"),
@@ -575,7 +575,7 @@ def insert_quote(data: dict) -> dict:
                 data.get("transit_time"), data.get("duration_hours"),
                 data.get("shipment_type", "Dray"),
                 data.get("carrier_name"), data.get("carrier_total", 0),
-                data.get("margin_pct", 15),
+                data.get("margin_pct", 15), data.get("margin_type", "pct"),
                 data.get("sell_subtotal", 0), data.get("accessorial_total", 0),
                 data.get("estimated_total", 0),
                 data.get("customer_name"), data.get("customer_email"),
@@ -597,7 +597,7 @@ def update_quote(quote_id: int, data: dict) -> dict:
                     round_trip_miles = %s, one_way_miles = %s,
                     transit_time = %s, duration_hours = %s,
                     shipment_type = %s, carrier_name = %s, carrier_total = %s,
-                    margin_pct = %s, sell_subtotal = %s, accessorial_total = %s,
+                    margin_pct = %s, margin_type = %s, sell_subtotal = %s, accessorial_total = %s,
                     estimated_total = %s, customer_name = %s, customer_email = %s,
                     linehaul_json = %s, accessorials_json = %s,
                     terms_json = %s, route_json = %s,
@@ -611,7 +611,7 @@ def update_quote(quote_id: int, data: dict) -> dict:
                 data.get("transit_time"), data.get("duration_hours"),
                 data.get("shipment_type", "Dray"),
                 data.get("carrier_name"), data.get("carrier_total", 0),
-                data.get("margin_pct", 15),
+                data.get("margin_pct", 15), data.get("margin_type", "pct"),
                 data.get("sell_subtotal", 0), data.get("accessorial_total", 0),
                 data.get("estimated_total", 0),
                 data.get("customer_name"), data.get("customer_email"),

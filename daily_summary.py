@@ -48,7 +48,7 @@ BOVIET_SHEET_ID = "1OP-ZDaMCOsPxcxezHSPfN5ftUXlUcOjFgsfCQgDp3wI"
 
 # FTL config
 FTL_SKIP_TABS = {"Sheet 4", "DTCELNJW", "Account Rep", "Completed Eli", "Completed Radka", "Boviet"}
-FTL_SKIP_STATUSES = {"Delivered", "Completed", "Canceled", "Ready to Close"}
+FTL_SKIP_STATUSES = {"delivered", "completed", "canceled", "ready to close"}
 FTL_COL_EFJ      = 0
 FTL_COL_LOAD     = 2
 FTL_COL_STATUS   = 12
@@ -58,15 +58,15 @@ FTL_HYPERLINK_COL = 2
 
 # Boviet config
 BOVIET_SKIP_TABS = {"POCs", "Boviet Master"}
-BOVIET_SKIP_STATUSES = {"Delivered", "Completed", "Canceled", "Cancelled", "Ready to Close"}
+BOVIET_SKIP_STATUSES = {"delivered", "completed", "canceled", "cancelled", "ready to close"}
 BOVIET_HYPERLINK_COL = 0
 BOVIET_TAB_CONFIGS = {
-    "Piedra":          {"efj_col": 0, "load_id_col": 2, "pickup_col": 5, "delivery_col": 6, "status_col": 7},
+    "Piedra":          {"efj_col": 0, "load_id_col": 2, "pickup_col": 5, "delivery_col": 6, "status_col": 7, "start_row": 45},
     "Hanson":          {"efj_col": 0, "load_id_col": 1, "pickup_col": 4, "delivery_col": 5, "status_col": 6},
 }
 
 # Tolead config — all 4 hubs
-TOLEAD_SKIP_STATUSES = {"Delivered", "Canceled", "Cancelled"}
+TOLEAD_SKIP_STATUSES = {"delivered", "canceled", "cancelled"}
 TOLEAD_HUBS = [
     {
         "name": "ORD",
@@ -74,6 +74,10 @@ TOLEAD_HUBS = [
         "tab": "Schedule",
         "col_load_id": 1, "col_date": 4, "col_origin": 6,
         "col_dest": 7, "col_status": 9, "col_efj": 15,
+        "col_phone": 17, "col_trailer": 16,
+        "col_delivery": 3, "col_appt_id": 2, "col_loads_j": 8,
+        "needs_cover_statuses": {"new"},
+        "start_row": 790,
     },
     {
         "name": "JFK",
@@ -81,13 +85,23 @@ TOLEAD_HUBS = [
         "tab": "Schedule",
         "col_load_id": 0, "col_date": 3, "col_origin": 6,
         "col_dest": 7, "col_status": 9, "col_efj": 14,
+        "col_phone": 16, "col_trailer": 15,
+        "col_delivery": 5, "col_loads_j": 9,
+        "default_origin": "Garden City, NY",
+        "needs_cover_statuses": {"new"},
+        "start_row": 184,
     },
     {
         "name": "LAX",
         "sheet_id": "1YLB6z5LdL0kFYTcfq_H5e6acU8-VLf8nN0XfZrJ-bXo",
         "tab": "LAX",
-        "col_load_id": 3, "col_date": 4, "col_origin": None,
-        "col_dest": 6, "col_status": 8, "col_efj": 0,
+        "col_load_id": 3, "col_date": 4, "col_origin": 6,
+        "col_dest": 7, "col_status": 9, "col_efj": 0,
+        "col_phone": 12, "col_trailer": 11,
+        "col_delivery": 8, "col_loads_j": 9,
+        "default_origin": "Vernon, CA",
+        "needs_cover_statuses": {"unassigned"},
+        "start_row": 755,
     },
     {
         "name": "DFW",
@@ -95,6 +109,9 @@ TOLEAD_HUBS = [
         "tab": "DFW",
         "col_load_id": 4, "col_date": 5, "col_origin": None,
         "col_dest": 3, "col_status": 11, "col_efj": 10,
+        "col_phone": 13, "col_trailer": 12, "col_delivery_date": 2,
+        "col_loads_j": 9, "default_origin": "Irving, TX",
+        "start_row": 172,
     },
 ]
 
@@ -110,6 +127,23 @@ def _load_credentials():
     creds.refresh(GoogleRequest())
     return creds
 
+
+
+
+def _retry_on_quota(fn, label="", max_retries=3, base_delay=30):
+    """Retry on 429 quota errors with exponential backoff."""
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except Exception as e:
+            if '429' in str(e) and attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                print(f"    Quota exceeded{' (' + label + ')' if label else ''}, "
+                      f"retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                import time
+                time.sleep(delay)
+            else:
+                raise
 
 def _safe_get(row, idx):
     return row[idx].strip() if len(row) > idx else ""
@@ -225,6 +259,39 @@ def classify_load(s):
 
 
 # ── HTML Table Builders ─────────────────────────────────────────────────────
+
+_O = "#e65100"  # Orange for Needs to Cover
+
+def _build_needs_cover_section(needs_cover):
+    """Build orange 'Needs to Cover' section for Tolead daily summary."""
+    if not needs_cover:
+        return ""
+    hdrs = ["LINE #", "EFJ #", "Destination", "Pickup Date", "Driver Phone"]
+    hdr_cells = "".join(f'<th {_TH}>{h}</th>' for h in hdrs)
+    rows_html = ""
+    for i, item in enumerate(needs_cover):
+        alt = i % 2 == 1
+        bg = ' style="background:#f9f9f9;"' if alt else ""
+        efj_display = item["efj"] or "&mdash;"
+        phone_display = item["phone"] or "(not assigned)"
+        rows_html += (
+            f'<tr{bg}>'
+            f'<td {_TD}><b>{item["load_id"]}</b></td>'
+            f'<td {_TD}>{efj_display}</td>'
+            f'<td {_TD}>{item["dest"]}</td>'
+            f'<td {_TD}>{item["pickup"]}</td>'
+            f'<td {_TD}>{phone_display}</td>'
+            f'</tr>'
+        )
+    return (
+        f'<div style="background:{_O};color:white;padding:8px 14px;'
+        f'border-radius:6px 6px 0 0;font-size:15px;margin-top:20px;">'
+        f"<b>Needs to Cover ({len(needs_cover)})</b></div>"
+        f'<table style="border-collapse:collapse;width:100%;border:1px solid #ddd;border-top:none;">'
+        f'<tr style="background:{_O};">{hdr_cells}</tr>'
+        f'{rows_html}</table>'
+    )
+
 _G = "#1b5e20"
 _R = "#c62828"
 _P = "#6a1b9a"
@@ -334,8 +401,12 @@ def build_summary_body(sheet_label, tab_name, summaries, skipped=0):
 def _load_ftl_account_lookup(creds):
     try:
         gc = gspread.authorize(creds)
-        ws = gc.open_by_key(FTL_SHEET_ID).worksheet("Account Rep")
-        rows = ws.get_all_values()
+        ws = _retry_on_quota(
+            lambda: gc.open_by_key(FTL_SHEET_ID).worksheet("Account Rep"),
+            label="Account Rep")
+        rows = _retry_on_quota(
+            lambda: ws.get_all_values(),
+            label="Account Rep values")
         lookup = {}
         for row in rows:
             if len(row) >= 3 and row[0].strip():
@@ -361,11 +432,17 @@ def scan_ftl(creds, gc):
 
     results = {}
     for tab_name in tabs:
-        time.sleep(1)
+        time.sleep(3)  # avoid quota spikes
         try:
-            ws = gc.open_by_key(FTL_SHEET_ID).worksheet(tab_name)
-            rows = ws.get_all_values()
-            links = _get_hyperlinks(creds, FTL_SHEET_ID, tab_name, FTL_HYPERLINK_COL)
+            ws = _retry_on_quota(
+                lambda: gc.open_by_key(FTL_SHEET_ID).worksheet(tab_name),
+                label=f"FTL/{tab_name}")
+            rows = _retry_on_quota(
+                lambda: ws.get_all_values(),
+                label=f"FTL/{tab_name} values")
+            links = _retry_on_quota(
+                lambda: _get_hyperlinks(creds, FTL_SHEET_ID, tab_name, FTL_HYPERLINK_COL),
+                label=f"FTL/{tab_name} hyperlinks")
         except Exception as exc:
             print(f"    [{tab_name}] ERROR: {exc}")
             continue
@@ -375,7 +452,7 @@ def scan_ftl(creds, gc):
             if i == 0:
                 continue
             status = _safe_get(row, FTL_COL_STATUS)
-            if status in FTL_SKIP_STATUSES:
+            if status.lower() in FTL_SKIP_STATUSES:
                 continue
             efj = _safe_get(row, FTL_COL_EFJ)
             load_id = _safe_get(row, FTL_COL_LOAD)
@@ -408,21 +485,30 @@ def scan_boviet(creds, gc):
     results = {}
     for tab_name in tabs:
         cfg = BOVIET_TAB_CONFIGS[tab_name]
-        time.sleep(1)
+        time.sleep(3)  # avoid quota spikes
         try:
-            ws = gc.open_by_key(BOVIET_SHEET_ID).worksheet(tab_name)
-            rows = ws.get_all_values()
-            links = _get_hyperlinks(creds, BOVIET_SHEET_ID, tab_name, BOVIET_HYPERLINK_COL)
+            ws = _retry_on_quota(
+                lambda: gc.open_by_key(BOVIET_SHEET_ID).worksheet(tab_name),
+                label=f"Boviet/{tab_name}")
+            rows = _retry_on_quota(
+                lambda: ws.get_all_values(),
+                label=f"Boviet/{tab_name} values")
+            links = _retry_on_quota(
+                lambda: _get_hyperlinks(creds, BOVIET_SHEET_ID, tab_name, BOVIET_HYPERLINK_COL),
+                label=f"Boviet/{tab_name} hyperlinks")
         except Exception as exc:
             print(f"    [{tab_name}] ERROR: {exc}")
             continue
 
+        bov_start = cfg.get("start_row", 1)
         entries = []
         for i, row in enumerate(rows):
             if i == 0:
                 continue
+            if i < bov_start:
+                continue
             status = _safe_get(row, cfg["status_col"])
-            if status in BOVIET_SKIP_STATUSES:
+            if status.lower() in BOVIET_SKIP_STATUSES:
                 continue
             efj = _safe_get(row, cfg["efj_col"])
             load_id = _safe_get(row, cfg["load_id_col"])
@@ -454,27 +540,75 @@ def scan_tolead(creds, gc):
         sheet_id = hub["sheet_id"]
         tab = hub["tab"]
         col_efj = hub["col_efj"]
-        time.sleep(1)
+        time.sleep(3)  # avoid quota spikes
         try:
-            ws = gc.open_by_key(sheet_id).worksheet(tab)
-            rows = ws.get_all_values()
-            links = _get_hyperlinks(creds, sheet_id, tab, col_efj)
+            ws = _retry_on_quota(
+                lambda sid=sheet_id, t=tab: gc.open_by_key(sid).worksheet(t),
+                label=f"Tolead/{hub_name}")
+            rows = _retry_on_quota(
+                lambda: ws.get_all_values(),
+                label=f"Tolead/{hub_name} values")
+            links = _retry_on_quota(
+                lambda sid=sheet_id, t=tab, c=col_efj: _get_hyperlinks(creds, sid, t, c),
+                label=f"Tolead/{hub_name} hyperlinks")
         except Exception as exc:
             print(f"    [{hub_name}] ERROR: {exc}")
             continue
 
+        start_row = hub.get("start_row", 2)
         entries = []
+        needs_cover = []  # loads needing coverage
         for i, row in enumerate(rows[1:], start=2):  # skip header
+            if i < start_row:
+                continue
             if len(row) <= col_efj:
                 continue
             status = _safe_get(row, hub["col_status"])
-            if status in TOLEAD_SKIP_STATUSES:
+            load_id_val = _safe_get(row, hub["col_load_id"])
+
+            if status and status.lower() in TOLEAD_SKIP_STATUSES:
                 continue
+            if not load_id_val:
+                continue
+
+            # Check if load "Needs to Cover" based on hub-specific logic
+            ntc_statuses = hub.get("needs_cover_statuses")
+            if ntc_statuses and status.lower() in ntc_statuses:
+                # Status indicates uncovered load
+                dest = _safe_get(row, hub["col_dest"])
+                pickup = _safe_get(row, hub["col_date"])
+                phone = _safe_get(row, hub.get("col_phone", -1)) if hub.get("col_phone") else ""
+                needs_cover.append({
+                    "load_id": load_id_val,
+                    "efj": _safe_get(row, col_efj),
+                    "dest": dest,
+                    "pickup": pickup,
+                    "phone": phone,
+                })
+                continue
+            # DFW: derive from col_loads_j (scheduling column separate from status)
+            if hub_name == "DFW":
+                col_j = _safe_get(row, hub.get("col_loads_j", 9))
+                if col_j.lower() not in ("scheduled", "picked"):
+                    dest = _safe_get(row, hub["col_dest"])
+                    pickup = _safe_get(row, hub["col_date"])
+                    phone = _safe_get(row, hub.get("col_phone", 13))
+                    needs_cover.append({
+                        "load_id": load_id_val,
+                        "efj": _safe_get(row, col_efj),
+                        "dest": dest,
+                        "pickup": pickup,
+                        "phone": phone,
+                    })
+                    continue
+
             mp_url = links[i - 1] if i - 1 < len(links) else ""
             if not mp_url or "macropoint" not in mp_url.lower():
                 continue
 
             origin = _safe_get(row, hub["col_origin"]) if hub["col_origin"] is not None else ""
+            if not origin and hub.get("default_origin"):
+                origin = hub["default_origin"]
             entries.append({
                 "efj": _safe_get(row, col_efj),
                 "load_id": _safe_get(row, hub["col_load_id"]),
@@ -487,9 +621,11 @@ def scan_tolead(creds, gc):
                 "hub": hub_name,
             })
 
-        if entries:
-            print(f"    [{hub_name}/{tab}] {len(entries)} tracked load(s)")
-            results[hub_name] = {"entries": entries, "tab": tab}
+        tracked_count = len(entries)
+        ntc_count = len(needs_cover)
+        if entries or needs_cover:
+            print(f"    [{hub_name}/{tab}] {tracked_count} tracked, {ntc_count} needs cover")
+            results[hub_name] = {"entries": entries, "tab": tab, "needs_cover": needs_cover}
 
     return results
 
@@ -644,19 +780,25 @@ def run():
             for hub_name, data in tolead_data.items():
                 entries = data["entries"]
                 tab = data["tab"]
+                needs_cover = data.get("needs_cover", [])
                 print(f"\n    Scraping [{hub_name}/{tab}] ({len(entries)} loads)...")
                 summaries, skipped = scrape_and_summarize(browser, entries)
                 if skipped:
                     print(f"    [{hub_name}] {skipped} load(s) skipped (scrape failed)")
-                if not summaries:
+                if not summaries and not needs_cover:
                     print(f"    [{hub_name}] No actively tracking loads")
                     continue
 
                 all_tolead_summaries.extend(summaries)
 
-                subject = f"{hub_name} Tolead Daily Summary \u2014 {tab} \u2014 {len(summaries)} Active"
-                body = build_summary_body(f"{hub_name} Tolead Daily Summary", tab, summaries, skipped=skipped)
-                print(f"    [{hub_name}] {len(summaries)} active — sending to tolead-efj")
+                total_active = len(summaries) + len(needs_cover)
+                subject = f"{hub_name} Tolead Daily Summary \u2014 Schedule \u2014 {total_active} Active"
+                body = build_summary_body(f"{hub_name} Tolead Daily Summary", "Schedule", summaries, skipped=skipped)
+                # Append Needs to Cover section if any
+                if needs_cover:
+                    ntc_html = _build_needs_cover_section(needs_cover)
+                    body = body.replace("</div>\n", ntc_html + "</div>\n", 1) if "</div>\n" in body else body[:-6] + ntc_html + "</div>"
+                print(f"    [{hub_name}] {len(summaries)} tracked + {len(needs_cover)} needs cover — sending to tolead-efj")
                 _send_email("tolead-efj@evansdelivery.com", subject, body)
 
             if all_tolead_summaries:

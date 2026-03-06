@@ -892,6 +892,50 @@ def _send_email(to_email: str, cc_email: str | None, subject: str, body: str):
         print(f"    WARNING: Email failed: {exc}")
 
 
+def _send_pod_reminder_ftl(efj, load_num, dest, tab_name, account_lookup, mp_load_id=None):
+    """Send POD reminder email when FTL tracking completes."""
+    info = account_lookup.get(tab_name, {})
+    rep_email = info.get("email", "")
+    to_email = rep_email if rep_email else EMAIL_FALLBACK
+
+    now = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
+    load_ref = mp_load_id or load_num
+    ref = f"{tab_name}--{load_ref}"
+
+    subject = f"POD Needed \u2014 {ref}({dest}) Has Delivered"
+
+    body = f"""<html><body style="font-family:Arial,sans-serif;">
+<div style="background:#c62828;color:white;padding:12px 16px;border-radius:6px 6px 0 0;">
+  <b>POD Reminder \u2014 {ref}</b>
+</div>
+<div style="padding:16px;border:1px solid #ddd;border-top:none;border-radius:0 0 6px 6px;">
+  <p style="font-size:15px;margin:0 0 12px;">
+    <b>{ref}({dest})</b> has been marked <b style="color:#c62828;">Delivered</b> by Macropoint tracking.
+  </p>
+  <p style="font-size:15px;margin:0 0 12px;">
+    Please obtain the POD from the driver/carrier as soon as possible.
+  </p>
+  <table style="border-collapse:collapse;margin:12px 0;">
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">Account</td><td style="padding:4px 0;"><b>{tab_name}</b></td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">EFJ #</td><td style="padding:4px 0;"><b>{efj}</b></td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">Load #</td><td style="padding:4px 0;"><b>{load_num}</b></td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#555;">Destination</td><td style="padding:4px 0;">{dest}</td></tr>
+  </table>
+  <p style="font-size:12px;color:#888;margin:16px 0 0;">
+    Status has been auto-set to "Need POD". Update to "POD Received" once obtained.<br>
+    Sent at {now}
+  </p>
+</div>
+</body></html>"""
+
+    try:
+        cc = None if tab_name.lower() == "boviet" else EMAIL_CC
+        _send_email(to_email, cc, subject, body)
+        log.info("POD reminder sent for %s to %s", ref, to_email)
+    except Exception as exc:
+        log.warning("POD reminder email failed for %s: %s", ref, exc)
+
+
 def send_ftl_email(efj: str, load_num: str, status: str, tab_name: str, account_lookup: dict, mp_load_id: str = None, stop_times: dict = None):
     """Send an FTL status alert email routed to the rep for this account tab."""
     info      = account_lookup.get(tab_name, {})
@@ -1267,6 +1311,10 @@ def run_once(account_lookup: dict):
                         try:
                             ws.update_cell(row_number, STATUS_COL + 1, "Need POD")
                             log.info("Auto-status: %s -> Need POD (tracking completed)", efj)
+                            # Send POD reminder email
+                            dest_val = row.get("dest", "") if isinstance(row, dict) else ""
+                            _send_pod_reminder_ftl(efj, row.get("load_num", ""), dest_val,
+                                                   tab_name, account_lookup, mp_load_id=mp_load_id)
                         except Exception as e:
                             log.warning("Failed to auto-status %s to Need POD: %s", efj, e)
 

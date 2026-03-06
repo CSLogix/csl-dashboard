@@ -163,17 +163,162 @@ def _detect_ssl_line(vessel, carrier_name=""):
             return val
     return None
 
+# -- SeaRates Container Tracking API ─────────────────────────────────────
+def _searates_container_track(container_num, ssl_line):
+    """Track a container via SeaRates API. Returns 4-tuple or None if not configured."""
+    sr_key = os.environ.get("SEARATES_API_KEY", "")
+    if not sr_key:
+        return None
+    try:
+        resp = requests.get(
+            "https://tracking.searates.com/tracking",
+            params={"api_key": sr_key, "number": container_num, "sealine": "auto"},
+            timeout=25,
+        )
+        data = resp.json()
+        if data.get("status") != "success":
+            msg = data.get("message", "unknown error")
+            print(f"    SeaRates: {msg}")
+            if any(kw in msg.lower() for kw in ("not found", "invalid", "not recognized")):
+                return None, None, None, "_fallback"
+            return None, None, None, None
+
+        # Gather event descriptions
+        events = []
+        raw = data.get("data", {}).get("events", [])
+        for ev in raw:
+            desc = (ev.get("description") or "").lower()
+            if desc:
+                events.append(desc)
+
+        # Fallback: container-level status
+        if not events:
+            for c in data.get("data", {}).get("containers", []):
+                cs = (c.get("status") or "").lower()
+                if cs:
+                    events.append(cs)
+
+        if not events:
+            meta_st = (data.get("data", {}).get("metadata", {}).get("status") or "").lower()
+            if meta_st:
+                events.append(meta_st)
+
+        if not events:
+            print("    SeaRates: response OK but no events")
+            return None, None, None, None
+
+        print(f"    SeaRates: {len(events)} events found")
+        all_text = " ".join(events)
+
+        # Status extraction — same keyword priority as JSONCargo
+        status = None
+        for kw in ["empty container returned", "empty container return",
+                    "empty return", "empty in", "gate in empty"]:
+            if kw in all_text:
+                status = "Returned to Port"; break
+        if not status:
+            for kw in ["gate out", "full out", "out gate",
+                        "pick-up by merchant haulage"]:
+                if kw in all_text:
+                    status = "Released"; break
+        if not status and ("discharged" in all_text or "discharge" in all_text
+                           or "unloaded from vessel" in all_text):
+            status = "Discharged"
+        if not status:
+            for kw in ["container to consignee", "pick up by consignee",
+                        "delivery to consignee"]:
+                if kw in all_text:
+                    status = "Released"; break
+        if not status:
+            for kw in ["vessel departure", "vessel sailed", "departed by vessel",
+                        "departed from"]:
+                if kw in all_text:
+                    status = "Vessel"; break
+        if not status:
+            for kw in ["vessel arrived", "actual arrival", "arrival in",
+                        "arrived at port"]:
+                if kw in all_text:
+                    status = "Vessel Arrived"; break
+        if not status:
+            for kw in ["rail", "on rail", "ramp arrival", "intermodal"]:
+                if kw in all_text:
+                    status = "Rail"; break
+        if not status:
+            for kw in ["vessel eta", "estimated arrival", "expected arrival"]:
+                if kw in all_text:
+                    status = "Vessel"; break
+
+        # SeaRates event_code fallback
+        if not status:
+            codes = [ev.get("event_code", "").upper() for ev in raw]
+            if "DISC" in codes: status = "Discharged"
+            elif "ARRI" in codes: status = "Vessel Arrived"
+            elif "DEPA" in codes: status = "Vessel"
+            elif "LOAD" in codes: status = "Vessel"
+            elif "PICK" in codes: status = "Released"
+
+        # SeaRates metadata status fallback
+        if not status:
+            meta_st = (data.get("data", {}).get("metadata", {}).get("status") or "").upper()
+            sr_status_map = {
+                "IN_TRANSIT": "Vessel", "ARRIVED": "Vessel Arrived",
+                "DISCHARGED": "Discharged", "DELIVERED": "Released",
+            }
+            status = sr_status_map.get(meta_st)
+
+        # Date extraction
+        eta = pickup = ret = None
+        for ev in raw:
+            desc = (ev.get("description") or "").lower()
+            d = ev.get("date") or ""
+            if not d:
+                continue
+            if not eta and any(k in desc for k in [
+                "vessel eta", "estimated arrival", "expected", "arrival"]):
+                eta = d
+            if not pickup and any(k in desc for k in [
+                "gate out", "full out", "pick-up", "available", "discharged"]):
+                pickup = d
+            if not ret and any(k in desc for k in [
+                "empty container return", "empty return", "empty in", "gate in empty"]):
+                ret = d
+
+        # ETA from containers array
+        if not eta:
+            for c in data.get("data", {}).get("containers", []):
+                if c.get("eta"):
+                    eta = c["eta"]; break
+
+        return eta, pickup, ret, status
+
+    except Exception as e:
+        print(f"    SeaRates error: {e}")
+        return None, None, None, None
+
+
 def _jsoncargo_container_track(container_num, ssl_line):
     """Track a container via JsonCargo API. Returns (eta, pickup, ret, status)."""
     container_num = container_num.strip()
     cached = _jc_cache_get(container_num)
     if cached is not None:
-        print(f"    JsonCargo: cache hit for {container_num}")
+        print(f"    Tracking: cache hit for {container_num}")
         return tuple(cached)
+    # -- Try SeaRates first (if SEARATES_API_KEY is configured) --
+    if os.environ.get("SEARATES_API_KEY"):
+        sr = _searates_container_track(container_num, ssl_line)
+        if sr is not None:
+            _eta, _pu, _ret, _st = sr
+            if _st and _st != "_fallback":
+                print(f"    SeaRates: resolved → {_st}")
+                _jc_cache_set(container_num, list(sr))
+                return sr
+            # SeaRates returned _fallback or empty — try JSONCargo
+    # -- Fall back to JSONCargo --
     JSONCARGO_API_KEY = _get_jsoncargo_key()
     if not JSONCARGO_API_KEY:
-        print("    JsonCargo: no API key configured")
-        return None, None, None, None
+        # Neither SeaRates nor JSONCargo available
+        print("    No tracking API keys configured")
+        return None, None, None, "_fallback"
     try:
         url = f"{JSONCARGO_BASE}/containers/{container_num}/"
         resp = requests.get(url, headers={"x-api-key": JSONCARGO_API_KEY},
@@ -321,6 +466,9 @@ COL_PICKUP    = 11  # K
 COL_RETURN    = 16  # P — Return to Port date
 COL_STATUS    = 13  # M — dropdown status
 COL_TIMESTAMP = 15  # O
+
+# Statuses the bot sets -- only overwrite if current status is empty or one of these
+BOT_MANAGED_STATUSES = {'', 'Vessel', 'Vessel Arrived', 'Discharged', 'Returned to Port', 'On Vessel'}
 
 # ShipmentLink status keyword → sheet dropdown value mapping
 SHIPMENTLINK_STATUS_MAP = {
@@ -1243,7 +1391,7 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
     # Route to carrier-specific scraper or API (legacy hyperlink-based routing)
     elif "maersk.com" in url_lower:
         ssl = "MAERSK"
-        print(f"    Using JsonCargo API (ssl_line={ssl})")
+        print(f"    Using Container API (ssl_line={ssl})")
         eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
         if status == "_fallback":
             if proxy_ok:
@@ -1255,7 +1403,7 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                 eta, pickup, ret, status = None, None, None, None
     elif "hmm21.com" in url_lower:
         ssl = "HMM"
-        print(f"    Using JsonCargo API (ssl_line={ssl})")
+        print(f"    Using Container API (ssl_line={ssl})")
         eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
         if status == "_fallback":
             if proxy_ok:
@@ -1283,7 +1431,7 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
         eta, pickup, ret, status = None, None, None, None
     elif "shipmentlink.com" in url_lower:
         ssl = "EVERGREEN"
-        print(f"    Using JsonCargo API (ssl_line={ssl})")
+        print(f"    Using Container API (ssl_line={ssl})")
         eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
         if status == "_fallback":
             if proxy_ok:
@@ -1295,7 +1443,7 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                 eta, pickup, ret, status = None, None, None, None
     elif "hapag-lloyd.com" in url_lower:
         ssl = "HAPAG_LLOYD"
-        print(f"    Using JsonCargo API (ssl_line={ssl})")
+        print(f"    Using Container API (ssl_line={ssl})")
         eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
         if status == "_fallback":
             if proxy_ok:
@@ -1307,7 +1455,7 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                 eta, pickup, ret, status = None, None, None, None
     elif "one-line.com" in url_lower:
         ssl = "ONE"
-        print(f"    Using JsonCargo API (ssl_line={ssl})")
+        print(f"    Using Container API (ssl_line={ssl})")
         eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
         if status == "_fallback":
             if proxy_ok:
@@ -1319,7 +1467,7 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                 eta, pickup, ret, status = None, None, None, None
     elif "cma-cgm.com" in url_lower:
         ssl = "CMA_CGM"
-        print(f"    Using JsonCargo API (ssl_line={ssl})")
+        print(f"    Using Container API (ssl_line={ssl})")
         eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
         if status == "_fallback":
             if proxy_ok:
@@ -1382,7 +1530,11 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
         elif ret and ex_return:
             print(f"    P{sheet_row} already has {ex_return!r} — not overwriting with {ret!r}")
         if status:
-            pending_updates.append({"range": f"{col_letter(COL_STATUS)}{sheet_row}", "values": [[status]]})
+            ex_status = (existing_row[COL_STATUS - 1].strip() if existing_row and len(existing_row) > COL_STATUS - 1 else '')
+            if ex_status in BOT_MANAGED_STATUSES:
+                pending_updates.append({"range": f"{col_letter(COL_STATUS)}{sheet_row}", "values": [[status]]})
+            else:
+                print(f'    M{sheet_row} has manual status {ex_status!r} -- not overwriting with {status!r}')
         pending_updates.append({"range": f"{col_letter(COL_TIMESTAMP)}{sheet_row}", "values": [[ts]]})
     else:
         write_tracking_results(ws, sheet_row, eta, pickup, ret, status)
@@ -1748,6 +1900,9 @@ def archive_completed_row(sheet, tab_name, sheet_row, row_data, url, eta, pickup
 # ─────────────────────────────────────────────
 
 def run_once(args):
+    from zoneinfo import ZoneInfo as _ZI
+    now_str = _time.strftime("%Y-%m-%d %H:%M ET", _time.localtime())
+    print(f"\n[{now_str}] Dray Import cycle...")
     creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
     gc    = gspread.authorize(creds)
     try:
