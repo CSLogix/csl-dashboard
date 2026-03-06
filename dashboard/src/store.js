@@ -25,6 +25,10 @@ export const useAppStore = create((set) => ({
   loaded: false,
   apiError: null,
 
+  // ── Inbox Command Center ──
+  inboxThreads: [],
+  inboxStats: { total_threads: 0, needs_reply: 0, unmatched: 0, high_priority: 0 },
+
   // ── Navigation ──
   activeView: "dashboard",
   selectedRep: null,
@@ -59,6 +63,8 @@ export const useAppStore = create((set) => ({
   setLastSyncTime: (v) => set({ lastSyncTime: v }),
   setLoaded: (v) => set({ loaded: v }),
   setApiError: (v) => set({ apiError: v }),
+  setInboxThreads: (v) => set({ inboxThreads: Array.isArray(v) ? v : [] }),
+  setInboxStats: (v) => set({ inboxStats: v }),
 
   setActiveView: (v) => set({ activeView: v }),
   setSelectedRep: (v) => set({ selectedRep: v }),
