@@ -562,7 +562,7 @@ def insert_quote(data: dict) -> dict:
                 INSERT INTO quotes
                     (quote_number, status, pod, final_delivery, final_zip,
                      round_trip_miles, one_way_miles, transit_time, duration_hours,
-                     shipment_type, carrier_name, carrier_total, margin_pct,
+                     shipment_type, carrier_name, carrier_total, margin_pct, margin_type,
                      sell_subtotal, accessorial_total, estimated_total,
                      customer_name, customer_email,
                      linehaul_json, accessorials_json, terms_json, route_json)

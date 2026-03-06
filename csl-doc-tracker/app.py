@@ -17,7 +17,7 @@ import time as _time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Form, Request, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, Form, Request, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -193,6 +193,23 @@ def _read_tracking_cache() -> dict:
         return {}
 
 
+
+def _find_tracking_entry(cache: dict, efj: str) -> dict:
+    """Find tracking cache entry, handling EFJ prefix mismatch."""
+    if efj in cache:
+        return cache[efj]
+    stripped = efj.replace("EFJ", "").strip()
+    if stripped in cache:
+        return cache[stripped]
+    prefixed = f"EFJ{efj}" if not efj.startswith("EFJ") else None
+    if prefixed and prefixed in cache:
+        return cache[prefixed]
+    for entry in cache.values():
+        e = entry.get("efj", "")
+        if e == efj or e == stripped or e.replace("EFJ", "").strip() == stripped:
+            return entry
+    return {}
+
 def _get_driver_contact(efj: str) -> dict:
     """Get driver contact info from PostgreSQL."""
     try:
@@ -212,20 +229,25 @@ def _get_driver_contact(efj: str) -> dict:
 
 
 def _upsert_driver_contact(efj: str, name: str = None, phone: str = None,
-                           email: str = None, notes: str = None):
+                           email: str = None, notes: str = None,
+                           carrier_email: str = None, trailer_number: str = None,
+                           macropoint_url: str = None):
     """Insert or update driver contact info."""
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
             cur.execute("""
-                INSERT INTO driver_contacts (efj, driver_name, driver_phone, driver_email, notes)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO driver_contacts (efj, driver_name, driver_phone, driver_email, notes, carrier_email, trailer_number, macropoint_url)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (efj) DO UPDATE SET
-                    driver_name  = COALESCE(EXCLUDED.driver_name,  driver_contacts.driver_name),
-                    driver_phone = COALESCE(EXCLUDED.driver_phone, driver_contacts.driver_phone),
-                    driver_email = COALESCE(EXCLUDED.driver_email, driver_contacts.driver_email),
-                    notes        = COALESCE(EXCLUDED.notes,        driver_contacts.notes),
-                    updated_at   = NOW()
-            """, (efj, name or None, phone or None, email or None, notes or None))
+                    driver_name    = COALESCE(EXCLUDED.driver_name,    driver_contacts.driver_name),
+                    driver_phone   = COALESCE(EXCLUDED.driver_phone,   driver_contacts.driver_phone),
+                    driver_email   = COALESCE(EXCLUDED.driver_email,   driver_contacts.driver_email),
+                    notes          = COALESCE(EXCLUDED.notes,          driver_contacts.notes),
+                    carrier_email  = COALESCE(EXCLUDED.carrier_email,  driver_contacts.carrier_email),
+                    trailer_number = COALESCE(EXCLUDED.trailer_number, driver_contacts.trailer_number),
+                    macropoint_url = COALESCE(EXCLUDED.macropoint_url, driver_contacts.macropoint_url),
+                    updated_at     = NOW()
+            """, (efj, name or None, phone or None, email or None, notes or None, carrier_email or None, trailer_number or None, macropoint_url or None))
 
 
 def _build_macropoint_progress(status_str: str):
@@ -253,7 +275,7 @@ app = FastAPI(title="CSL AI Dispatch")
 # ---------------------------------------------------------------------------
 # Authentication middleware
 # ---------------------------------------------------------------------------
-PUBLIC_PATHS = {"/login", "/setup", "/health", "/logo.svg", "/app", "/assets", "/"}
+PUBLIC_PATHS = {"/login", "/setup", "/health", "/logo.svg", "/app", "/assets", "/", "/macropoint-webhook", "/webhook-test"}
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -477,10 +499,9 @@ BOT_SERVICES = [
     # Import/Export are cron jobs (7:30 AM & 1:30 PM M-F), not systemd services
     # {"unit": "csl-import", "name": "Dray Import Scanner", "poll_min": 180},
     # {"unit": "csl-export", "name": "Dray Export Scanner", "poll_min": 60},
-    {"unit": "csl-ftl", "name": "FTL / MacroPoint Tracker", "poll_min": 30},
+    # {"unit": "csl-ftl", "name": "FTL / MacroPoint Tracker", "poll_min": 30},  # now cron job
     {"unit": "csl-boviet", "name": "Boviet Monitor", "poll_min": 20},
     {"unit": "csl-tolead", "name": "Tolead Monitor", "poll_min": 20},
-    {"unit": "csl-webhook", "name": "Webhook Server", "poll_min": 0},
     {"unit": "csl-upload", "name": "Upload Server", "poll_min": 0},
 ]
 
@@ -2903,12 +2924,12 @@ async def api_unclassified_documents():
     """Return documents with unclassified doc_type for manual review."""
     with db.get_cursor() as cur:
         cur.execute("""
-            SELECT ld.id, ld.efj, ld.doc_type, ld.original_name,
-                   ld.uploaded_at, ld.uploaded_by
-            FROM load_documents ld
-            WHERE ld.doc_type = 'unclassified'
-            ORDER BY ld.uploaded_at DESC
-            LIMIT 50
+        SELECT ld.id, ld.efj, ld.doc_type, ld.original_name,
+               ld.uploaded_at, ld.uploaded_by
+        FROM load_documents ld
+        WHERE ld.doc_type = 'unclassified'
+        ORDER BY ld.uploaded_at DESC
+        LIMIT 50
         """)
         rows = cur.fetchall()
     docs = []
@@ -3123,11 +3144,11 @@ async def api_rate_iq_lane(lane: str):
     lane = unquote(lane)
     with db.get_cursor() as cur:
         cur.execute("""
-            SELECT et.id, et.efj, et.sender, et.subject, et.body_preview,
-                   et.lane, et.email_type, et.sent_at
-            FROM email_threads et
-            WHERE et.lane = %s
-            ORDER BY et.sent_at DESC
+        SELECT et.id, et.efj, et.sender, et.subject, et.body_preview,
+               et.lane, et.email_type, et.sent_at
+        FROM email_threads et
+        WHERE et.lane = %s
+        ORDER BY et.sent_at DESC
         """, (lane,))
         emails = cur.fetchall()
     results = []
@@ -3280,12 +3301,12 @@ async def api_customer_reply_alerts():
     """Get active customer reply alerts (unreplied for 15+ min)."""
     with db.get_cursor() as cur:
         cur.execute("""
-            SELECT cra.id, cra.email_thread_id, cra.efj, cra.sender,
-                   cra.subject, cra.alerted_at, cra.dismissed
-            FROM customer_reply_alerts cra
-            WHERE cra.dismissed = FALSE
-            ORDER BY cra.alerted_at DESC
-            LIMIT 50
+        SELECT cra.id, cra.email_thread_id, cra.efj, cra.sender,
+               cra.subject, cra.alerted_at, cra.dismissed
+        FROM customer_reply_alerts cra
+        WHERE cra.dismissed = FALSE
+        ORDER BY cra.alerted_at DESC
+        LIMIT 50
         """)
         alerts = cur.fetchall()
     return [
@@ -3645,13 +3666,13 @@ def api_unbilled_list():
     """List all non-dismissed unbilled orders."""
     with db.get_cursor() as cur:
         cur.execute(
-            """SELECT id, order_num, container, bill_to, tractor,
-                      entered::text, appt_date::text, dliv_dt::text, act_dt::text,
-                      age_days, upload_batch, created_at::text,
-                      COALESCE(billing_status, 'ready_to_bill') as billing_status
-               FROM unbilled_orders
-               WHERE dismissed = FALSE
-               ORDER BY age_days DESC"""
+        """SELECT id, order_num, container, bill_to, tractor,
+                  entered::text, appt_date::text, dliv_dt::text, act_dt::text,
+                  age_days, upload_batch, created_at::text,
+                  COALESCE(billing_status, 'ready_to_bill') as billing_status
+           FROM unbilled_orders
+           WHERE dismissed = FALSE
+           ORDER BY age_days DESC"""
         )
         rows = cur.fetchall()
     return JSONResponse({"orders": [dict(r) for r in rows]})
@@ -3664,13 +3685,13 @@ def api_unbilled_stats():
         cur.execute("SELECT COUNT(*) as count FROM unbilled_orders WHERE dismissed = FALSE")
         count = cur.fetchone()["count"]
         cur.execute(
-            """SELECT bill_to, COUNT(*) as cnt, MAX(age_days) as max_age
-               FROM unbilled_orders WHERE dismissed = FALSE
-               GROUP BY bill_to ORDER BY cnt DESC"""
+        """SELECT bill_to, COUNT(*) as cnt, MAX(age_days) as max_age
+           FROM unbilled_orders WHERE dismissed = FALSE
+           GROUP BY bill_to ORDER BY cnt DESC"""
         )
         by_customer = [dict(r) for r in cur.fetchall()]
         cur.execute(
-            "SELECT COALESCE(SUM(age_days), 0) as total_age FROM unbilled_orders WHERE dismissed = FALSE"
+        "SELECT COALESCE(SUM(age_days), 0) as total_age FROM unbilled_orders WHERE dismissed = FALSE"
         )
         total_age = cur.fetchone()["total_age"]
         avg_age = round(total_age / count, 1) if count > 0 else 0
@@ -3747,9 +3768,9 @@ async def get_load_documents(efj: str):
     """List all documents for a load."""
     with db.get_cursor() as cur:
         cur.execute(
-            "SELECT id, doc_type, original_name, size_bytes, uploaded_at "
-            "FROM load_documents WHERE efj = %s ORDER BY uploaded_at DESC",
-            (efj,)
+        "SELECT id, doc_type, original_name, size_bytes, uploaded_at "
+        "FROM load_documents WHERE efj = %s ORDER BY uploaded_at DESC",
+        (efj,)
         )
         rows = cur.fetchall()
     docs = [
@@ -3808,8 +3829,8 @@ async def download_load_document(efj: str, doc_id: int, inline: bool = False):
     """Download or inline-preview a specific document."""
     with db.get_cursor() as cur:
         cur.execute(
-            "SELECT filename, original_name FROM load_documents WHERE id = %s AND efj = %s",
-            (doc_id, efj)
+        "SELECT filename, original_name FROM load_documents WHERE id = %s AND efj = %s",
+        (doc_id, efj)
         )
         row = cur.fetchone()
     if not row:
@@ -3862,6 +3883,26 @@ async def update_load_document(efj: str, doc_id: int, request: Request):
 async def api_get_driver(efj: str):
     """Return driver contact info for a load."""
     contact = _get_driver_contact(efj)
+
+    # Fall back to shipments table for driver/phone/container_url
+    # (Tolead sync + PG-native loads populate these but not driver_contacts)
+    pg_driver = ""
+    pg_phone = ""
+    pg_mp_url = ""
+    try:
+        with db.get_cursor() as cur:
+            cur.execute(
+                "SELECT driver, driver_phone, container_url FROM shipments WHERE efj = %s",
+                (efj,),
+            )
+            pg_row = cur.fetchone()
+            if pg_row:
+                pg_driver = (pg_row["driver"] or "").strip()
+                pg_phone = (pg_row["driver_phone"] or "").strip()
+                pg_mp_url = (pg_row["container_url"] or "").strip()
+    except Exception:
+        pass
+
     # Also check Column N (driver/truck) from sheet cache as fallback for name
     sheet_driver = ""
     for s in sheet_cache.shipments:
@@ -3871,8 +3912,9 @@ async def api_get_driver(efj: str):
 
     # Fall back to tracking cache for driver_phone (scraped from MP portal)
     cached_phone = ""
+    cached_mp_url = ""
     tracking_cache = _read_tracking_cache()
-    cached = tracking_cache.get(efj, {})
+    cached = _find_tracking_entry(tracking_cache, efj)
     if cached.get("driver_phone"):
         cached_phone = cached["driver_phone"]
         # Auto-save scraped phone to DB if DB doesn't have one yet
@@ -3881,17 +3923,25 @@ async def api_get_driver(efj: str):
                 _upsert_driver_contact(efj, phone=cached_phone)
             except Exception:
                 pass
+    if cached.get("macropoint_url"):
+        cached_mp_url = cached["macropoint_url"]
+
+    # Priority: driver_contacts > shipments table > sheet cache > tracking cache
+    final_name = contact.get("driver_name") or pg_driver or sheet_driver or ""
+    final_phone = contact.get("driver_phone") or pg_phone or cached_phone or ""
+    final_mp_url = contact.get("macropoint_url") or pg_mp_url or cached_mp_url or ""
+    phone_source = "db" if contact.get("driver_phone") else ("pg" if pg_phone else ("macropoint" if cached_phone else ""))
 
     return {
         "efj": efj,
-        "driverName": contact.get("driver_name") or sheet_driver or "",
-        "driverPhone": contact.get("driver_phone") or cached_phone or "",
+        "driverName": final_name,
+        "driverPhone": final_phone,
         "driverEmail": contact.get("driver_email") or "",
         "carrierEmail": contact.get("carrier_email") or "",
         "trailerNumber": contact.get("trailer_number") or "",
-        "macropointUrl": contact.get("macropoint_url") or "",
+        "macropointUrl": final_mp_url,
         "notes": contact.get("notes") or "",
-        "phoneSource": "db" if contact.get("driver_phone") else ("macropoint" if cached_phone else ""),
+        "phoneSource": phone_source,
     }
 
 
@@ -3905,6 +3955,9 @@ async def api_update_driver(efj: str, request: Request):
         phone=body.get("driverPhone"),
         email=body.get("driverEmail"),
         notes=body.get("notes"),
+        carrier_email=body.get("carrierEmail"),
+        trailer_number=body.get("trailerNumber"),
+        macropoint_url=body.get("macropointUrl"),
     )
     log.info("Driver contact updated for %s", efj)
     return {"status": "ok", "efj": efj}
@@ -3917,11 +3970,11 @@ def api_load_notes_list(efj: str):
     """List all timestamped notes for a load, newest first."""
     with db.get_cursor() as cur:
         cur.execute(
-            """SELECT id, efj, note_text, created_by, created_at::text
-               FROM load_notes
-               WHERE efj = %s
-               ORDER BY created_at DESC""",
-            (efj,)
+        """SELECT id, efj, note_text, created_by, created_at::text
+           FROM load_notes
+           WHERE efj = %s
+           ORDER BY created_at DESC""",
+        (efj,)
         )
         rows = cur.fetchall()
     return JSONResponse({"notes": [dict(r) for r in rows]})
@@ -3983,19 +4036,46 @@ async def react_spa(path: str = ""):
 async def api_macropoint(efj: str):
     """Return Macropoint tracking data for an FTL load."""
     sheet_cache.refresh_if_needed()
-    # Find the shipment
+    # Find the shipment — check sheet cache first, then Postgres
     shipment = None
     for s in sheet_cache.shipments:
         if s["efj"] == efj:
             shipment = s
             break
     if not shipment:
+        # Fall back to Postgres (PG-migrated loads aren't in sheet cache)
+        try:
+            with db.get_cursor() as cur:
+                cur.execute(
+                    "SELECT efj, container, status, origin, destination, pickup_date, "
+                    "delivery_date, eta, account, move_type, container_url, carrier "
+                    "FROM shipments WHERE efj = %s",
+                    (efj,),
+                )
+                pg_row = cur.fetchone()
+                if pg_row:
+                    shipment = {
+                        "efj": pg_row["efj"],
+                        "container": pg_row["container"] or "",
+                        "status": pg_row["status"] or "",
+                        "origin": pg_row["origin"] or "",
+                        "destination": pg_row["destination"] or "",
+                        "pickup": pg_row["pickup_date"] or "",
+                        "delivery": pg_row["delivery_date"] or "",
+                        "eta": pg_row["eta"] or "",
+                        "account": pg_row["account"] or "",
+                        "move_type": pg_row["move_type"] or "",
+                        "container_url": pg_row["container_url"] or "",
+                        "carrier": pg_row["carrier"] or "",
+                    }
+        except Exception:
+            pass
+    if not shipment:
         raise HTTPException(404, f"Load {efj} not found")
-    # Also check tracking cache for macropoint_url (FTL loads may not have sheet hyperlinks)
+    # Also check tracking cache
     _tracking_cache = _read_tracking_cache()
-    _cached_url = _tracking_cache.get(efj, {}).get("macropoint_url", "")
-    if not shipment.get("container_url") and not _cached_url:
-        raise HTTPException(404, f"No Macropoint tracking for {efj}")
+    _cached_entry = _find_tracking_entry(_tracking_cache, efj)
+    _cached_url = _cached_entry.get("macropoint_url", "")
 
     status = shipment.get("status", "")
     progress = _build_macropoint_progress(status)
@@ -4009,7 +4089,7 @@ async def api_macropoint(efj: str):
 
     # ── Tracking cache (stop timeline from ftl_monitor) ──
     tracking_cache = _read_tracking_cache()
-    cached = tracking_cache.get(efj, {})
+    cached = _find_tracking_entry(tracking_cache, efj)
 
     # ── Driver contact info (from DB, with cache fallback) ──
     contact = _get_driver_contact(efj)
@@ -4067,6 +4147,7 @@ async def api_macropoint(efj: str):
         "behindSchedule": behind_schedule,
         "cantMakeIt": cant_make_it,
         "lastScraped": last_scraped,
+        "lastLocation": cached.get("last_location") or None,
     }
 
 
@@ -4604,13 +4685,13 @@ async def get_load_emails(efj: str):
     """Return indexed emails for a load, newest first."""
     with db.get_cursor() as cur:
         cur.execute(
-            """SELECT id, gmail_message_id, gmail_thread_id, subject, sender,
-                      recipients, body_preview, has_attachments, attachment_names,
-                      sent_at, indexed_at, email_type, lane, priority, ai_summary
-               FROM email_threads
-               WHERE efj = %s
-               ORDER BY sent_at DESC NULLS LAST""",
-            (efj,)
+        """SELECT id, gmail_message_id, gmail_thread_id, subject, sender,
+                  recipients, body_preview, has_attachments, attachment_names,
+                  sent_at, indexed_at, email_type, lane, priority, ai_summary
+           FROM email_threads
+           WHERE efj = %s
+           ORDER BY sent_at DESC NULLS LAST""",
+        (efj,)
         )
         rows = cur.fetchall()
     emails = [
@@ -4777,14 +4858,14 @@ async def get_unmatched_emails():
     """List unmatched inbox emails pending review."""
     with db.get_cursor() as cur:
         cur.execute(
-            """SELECT id, gmail_message_id, subject, sender, recipients,
-                      body_preview, has_attachments, attachment_names,
-                      sent_at, indexed_at, review_status,
-                      email_type, lane, priority, ai_summary, suggested_rep
-               FROM unmatched_inbox_emails
-               WHERE review_status = 'pending'
-               ORDER BY COALESCE(priority, 0) DESC, sent_at DESC NULLS LAST
-               LIMIT 100""",
+        """SELECT id, gmail_message_id, subject, sender, recipients,
+                  body_preview, has_attachments, attachment_names,
+                  sent_at, indexed_at, review_status,
+                  email_type, lane, priority, ai_summary, suggested_rep
+           FROM unmatched_inbox_emails
+           WHERE review_status = 'pending'
+           ORDER BY COALESCE(priority, 0) DESC, sent_at DESC NULLS LAST
+           LIMIT 100""",
         )
         rows = cur.fetchall()
     emails = [
@@ -6056,6 +6137,287 @@ async def api_import_excel(file: UploadFile = File(...)):
     return JSONResponse(summary)
 
 
+
+
+# ── Inbox Command Center Endpoints ──────────────────────────────────
+
+@app.get("/api/inbox")
+async def get_inbox(request: Request):
+    """Unified inbox: thread-grouped emails with sent-reply detection."""
+    from urllib.parse import parse_qs
+    params = dict(request.query_params)
+    days = int(params.get("days", "7"))
+    tab = params.get("tab", "all")
+    email_type_filter = params.get("type", "")
+    priority_min = int(params.get("priority_min", "0"))
+    rep_filter = params.get("rep", "")
+    limit = min(int(params.get("limit", "200")), 500)
+
+    with db.get_cursor() as cur:
+        # Fetch all inbound emails (matched + unmatched) from the lookback window
+        cur.execute("""
+            SELECT
+                e.id, e.gmail_thread_id, e.gmail_message_id, e.subject, e.sender,
+                e.body_preview, e.has_attachments, e.attachment_names,
+                e.sent_at, e.email_type, e.lane, e.priority, e.ai_summary,
+                e.classification_feedback, e.corrected_type,
+                e.efj, NULL as review_status, NULL as suggested_rep,
+                'matched' as source
+            FROM email_threads e
+            WHERE e.sent_at >= NOW() - INTERVAL '%s days'
+            UNION ALL
+            SELECT
+                u.id, u.gmail_thread_id, u.gmail_message_id, u.subject, u.sender,
+                u.body_preview, u.has_attachments, u.attachment_names,
+                u.sent_at, u.email_type, u.lane, u.priority, u.ai_summary,
+                u.classification_feedback, u.corrected_type,
+                NULL as efj, u.review_status, u.suggested_rep,
+                'unmatched' as source
+            FROM unmatched_inbox_emails u
+            WHERE u.sent_at >= NOW() - INTERVAL '%s days'
+              AND u.review_status = 'pending'
+            ORDER BY sent_at DESC
+        """ % (days, days))
+        inbound_rows = cur.fetchall()
+
+        # Fetch all sent messages from the lookback window
+        cur.execute("""
+            SELECT gmail_thread_id, gmail_message_id, recipient, subject, sent_at
+            FROM sent_messages
+            WHERE sent_at >= NOW() - INTERVAL '%s days'
+            ORDER BY sent_at ASC
+        """ % days)
+        sent_rows = cur.fetchall()
+
+    # Build sent lookup: thread_id -> list of sent timestamps
+    sent_by_thread = {}
+    sent_msgs_by_thread = {}
+    for s in sent_rows:
+        tid = s["gmail_thread_id"]
+        if tid not in sent_by_thread:
+            sent_by_thread[tid] = []
+            sent_msgs_by_thread[tid] = []
+        sent_by_thread[tid].append(s["sent_at"])
+        sent_msgs_by_thread[tid].append({
+            "id": None,
+            "sender": "You",
+            "subject": s["subject"],
+            "sent_at": s["sent_at"].isoformat() if s["sent_at"] else None,
+            "body_preview": None,
+            "direction": "sent",
+        })
+
+    # Group inbound by thread_id
+    threads_map = {}
+    for row in inbound_rows:
+        tid = row["gmail_thread_id"] or row["gmail_message_id"]  # fallback if no thread
+        if tid not in threads_map:
+            threads_map[tid] = {
+                "thread_id": tid,
+                "efj": row["efj"],
+                "messages": [],
+                "max_priority": 0,
+                "email_type": None,
+                "ai_summary": None,
+                "lane": None,
+                "has_attachments": False,
+                "source": row["source"],
+                "review_status": row["review_status"],
+                "suggested_rep": row["suggested_rep"],
+                "classification_feedback": row["classification_feedback"],
+            }
+
+        thread = threads_map[tid]
+        thread["messages"].append({
+            "id": row["id"],
+            "sender": row["sender"],
+            "subject": row["subject"],
+            "sent_at": row["sent_at"].isoformat() if row["sent_at"] else None,
+            "body_preview": row["body_preview"],
+            "direction": "inbound",
+            "has_attachments": row["has_attachments"],
+            "attachment_names": row["attachment_names"],
+            "email_type": row["email_type"],
+            "priority": row["priority"],
+            "ai_summary": row["ai_summary"],
+        })
+
+        # Track thread-level aggregates
+        p = row["priority"] or 0
+        if p > thread["max_priority"]:
+            thread["max_priority"] = p
+            thread["email_type"] = row["email_type"]
+            thread["ai_summary"] = row["ai_summary"]
+        if row["lane"]:
+            thread["lane"] = row["lane"]
+        if row["has_attachments"]:
+            thread["has_attachments"] = True
+        if row["efj"]:
+            thread["efj"] = row["efj"]
+        if row["source"] == "matched":
+            thread["source"] = "matched"
+        if row["suggested_rep"]:
+            thread["suggested_rep"] = row["suggested_rep"]
+
+    # Build final thread list with reply detection
+    threads = []
+    for tid, thread in threads_map.items():
+        # Sort messages chronologically
+        all_msgs = thread["messages"][:]
+        # Add sent messages for this thread
+        if tid in sent_msgs_by_thread:
+            all_msgs.extend(sent_msgs_by_thread[tid])
+        all_msgs.sort(key=lambda m: m["sent_at"] or "")
+
+        # Determine latest message and reply status
+        latest_msg = all_msgs[-1] if all_msgs else None
+        latest_inbound = [m for m in thread["messages"]]
+        latest_inbound.sort(key=lambda m: m["sent_at"] or "")
+        latest_inbound_msg = latest_inbound[-1] if latest_inbound else None
+
+        # has_csl_reply: any sent message AFTER the latest inbound
+        has_csl_reply = False
+        if latest_inbound_msg and tid in sent_by_thread:
+            latest_inbound_time = latest_inbound_msg["sent_at"]
+            for st in sent_by_thread[tid]:
+                if st and latest_inbound_time and st.isoformat() > latest_inbound_time:
+                    has_csl_reply = True
+                    break
+
+        # needs_reply: latest message is inbound + no CSL reply after it
+        needs_reply = (
+            latest_msg is not None
+            and latest_msg.get("direction") == "inbound"
+            and not has_csl_reply
+        )
+
+        thread_start = thread["messages"][0]["sent_at"] if thread["messages"] else None
+
+        threads.append({
+            "thread_id": tid,
+            "efj": thread["efj"],
+            "message_count": len(all_msgs),
+            "latest_subject": latest_msg["subject"] if latest_msg else None,
+            "latest_sender": latest_msg["sender"] if latest_msg else None,
+            "latest_sent_at": latest_msg["sent_at"] if latest_msg else None,
+            "thread_start": thread_start,
+            "max_priority": thread["max_priority"],
+            "email_type": thread["email_type"],
+            "ai_summary": thread["ai_summary"],
+            "lane": thread["lane"],
+            "has_attachments": thread["has_attachments"],
+            "has_csl_reply": has_csl_reply,
+            "needs_reply": needs_reply,
+            "suggested_rep": thread["suggested_rep"],
+            "source": thread["source"],
+            "review_status": thread["review_status"],
+            "classification_feedback": thread["classification_feedback"],
+            "messages": all_msgs,
+        })
+
+    # Sort by priority DESC, then latest_sent_at DESC
+    threads.sort(key=lambda t: (-(t["max_priority"] or 0), t["latest_sent_at"] or ""), reverse=False)
+    threads.sort(key=lambda t: -(t["max_priority"] or 0))
+
+    # Apply tab filter
+    if tab == "needs_reply":
+        threads = [t for t in threads if t["needs_reply"]]
+    elif tab == "unmatched":
+        threads = [t for t in threads if t["source"] == "unmatched"]
+    elif tab == "rates":
+        threads = [t for t in threads if t["email_type"] in ("carrier_rate", "customer_rate")]
+
+    # Apply additional filters
+    if email_type_filter:
+        types = set(email_type_filter.split(","))
+        threads = [t for t in threads if t["email_type"] in types]
+    if priority_min > 0:
+        threads = [t for t in threads if (t["max_priority"] or 0) >= priority_min]
+    if rep_filter:
+        threads = [t for t in threads if t.get("suggested_rep") == rep_filter]
+
+    # Stats
+    all_threads = list(threads_map.values())
+    stats = {
+        "total_threads": len(threads_map),
+        "needs_reply": sum(1 for t in threads if t["needs_reply"]),
+        "unmatched": sum(1 for t in threads_map.values() if t["source"] == "unmatched"),
+        "high_priority": sum(1 for t in threads_map.values() if t["max_priority"] >= 4),
+    }
+
+    return JSONResponse({
+        "threads": threads[:limit],
+        "stats": stats,
+    })
+
+
+@app.post("/api/inbox/{email_id}/feedback")
+async def inbox_classification_feedback(email_id: int, request: Request):
+    """Store classification feedback (correct/incorrect) for an email."""
+    body = await request.json()
+    feedback = body.get("feedback")  # "correct" or "incorrect"
+    corrected_type = body.get("corrected_type")  # only if incorrect
+
+    if feedback not in ("correct", "incorrect"):
+        raise HTTPException(400, "feedback must be 'correct' or 'incorrect'")
+
+    # Try email_threads first, then unmatched
+    updated = False
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute(
+                """UPDATE email_threads
+                   SET classification_feedback = %s, corrected_type = %s
+                   WHERE id = %s""",
+                (feedback, corrected_type if feedback == "incorrect" else None, email_id),
+            )
+            if cur.rowcount > 0:
+                updated = True
+            else:
+                cur.execute(
+                    """UPDATE unmatched_inbox_emails
+                       SET classification_feedback = %s, corrected_type = %s
+                       WHERE id = %s""",
+                    (feedback, corrected_type if feedback == "incorrect" else None, email_id),
+                )
+                if cur.rowcount > 0:
+                    updated = True
+
+    if not updated:
+        raise HTTPException(404, "Email not found")
+
+    return JSONResponse({"status": "ok", "feedback": feedback})
+
+
+@app.get("/api/inbox/reply-alerts")
+async def get_inbox_reply_alerts():
+    """Return unreplied customer quote emails (threads needing reply)."""
+    with db.get_cursor() as cur:
+        cur.execute("""
+        SELECT ca.id, ca.email_thread_id, ca.efj, ca.sender, ca.subject,
+               ca.alerted_at, ca.dismissed
+        FROM customer_reply_alerts ca
+        WHERE ca.dismissed = false
+        ORDER BY ca.alerted_at DESC
+        LIMIT 50
+        """)
+        rows = cur.fetchall()
+
+    alerts = []
+    for r in rows:
+        alerts.append({
+            "id": r["id"],
+            "email_thread_id": r["email_thread_id"],
+            "efj": r["efj"],
+            "sender": r["sender"],
+            "subject": r["subject"],
+            "alerted_at": r["alerted_at"].isoformat() if r["alerted_at"] else None,
+        })
+
+    return JSONResponse({"alerts": alerts, "count": len(alerts)})
+
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -6649,6 +7011,96 @@ def api_bot_health():
     return {"services": services, "summary": summary, "generated_at": __import__("datetime").datetime.now().isoformat()}
 
 
+
+
+@app.get("/api/health")
+async def api_health():
+    """Comprehensive health check: PG, sheets, services, crons."""
+    import subprocess, datetime
+    checks = {}
+    overall = "healthy"
+
+    # 1. Postgres check
+    try:
+        with db.get_cursor() as cur:
+            cur.execute("SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE archived=false) as active FROM shipments")
+            row = cur.fetchone()
+            pg_total = row["total"] if isinstance(row, dict) else row[0]
+            pg_active = row["active"] if isinstance(row, dict) else row[1]
+        checks["postgres"] = {"status": "ok", "total_shipments": pg_total, "active_shipments": pg_active}
+    except Exception as e:
+        checks["postgres"] = {"status": "error", "error": str(e)}
+        overall = "degraded"
+
+    # 2. Google Sheets cache check
+    try:
+        age = _time.time() - sheet_cache._last
+        sheet_count = len(sheet_cache.shipments)
+        checks["sheets_cache"] = {
+            "status": "ok" if age < 900 else "stale",
+            "shipment_count": sheet_count,
+            "cache_age_seconds": round(age, 1),
+        }
+        if age > 900:
+            overall = "degraded"
+    except Exception as e:
+        checks["sheets_cache"] = {"status": "error", "error": str(e)}
+        overall = "degraded"
+
+    # 3. Systemd services check
+    svc_names = ["csl-dashboard", "csl-boviet", "csl-tolead", "csl-inbox"]
+    svc_status = {}
+    for svc in svc_names:
+        try:
+            r = subprocess.run(["systemctl", "is-active", svc], capture_output=True, text=True, timeout=5)
+            st = r.stdout.strip()
+            svc_status[svc] = st
+            if st != "active":
+                overall = "degraded"
+        except Exception:
+            svc_status[svc] = "unknown"
+    checks["services"] = svc_status
+
+    # 4. Cron check (most recent logs)
+    cron_status = {}
+    cron_files = {
+        "dray_import": "/tmp/csl_import.log",
+        "dray_export": "/tmp/export_monitor.log",
+        "ftl_monitor": "/tmp/ftl_monitor.log",
+        "sheet_sync": "/tmp/sheet_sync.log",
+    }
+    for name, logfile in cron_files.items():
+        try:
+            r = subprocess.run(["tail", "-3", logfile], capture_output=True, text=True, timeout=5)
+            lines = r.stdout.strip().split("\n")
+            has_error = any("error" in l.lower() or "traceback" in l.lower() for l in lines)
+            cron_status[name] = "error" if has_error else "ok"
+            if has_error:
+                overall = "degraded"
+        except Exception:
+            cron_status[name] = "unknown"
+    checks["cron_jobs"] = cron_status
+
+    # 5. Disk check
+    try:
+        r = subprocess.run(["df", "-h", "/"], capture_output=True, text=True, timeout=5)
+        lines = r.stdout.strip().split("\n")
+        if len(lines) >= 2:
+            parts = lines[1].split()
+            checks["disk"] = {"status": "ok", "used": parts[2], "available": parts[3], "use_pct": parts[4]}
+            pct = int(parts[4].replace("%", ""))
+            if pct > 90:
+                overall = "critical"
+                checks["disk"]["status"] = "critical"
+    except Exception:
+        checks["disk"] = {"status": "unknown"}
+
+    return {
+        "overall": overall,
+        "checks": checks,
+        "timestamp": datetime.datetime.now().isoformat(),
+    }
+
 @app.get("/api/cron-status")
 def api_cron_status():
     """Status of cron-based monitors (dray import/export)."""
@@ -6745,8 +7197,8 @@ async def api_v2_shipments(request: Request, account: str = None, status: str = 
 
     with db.get_cursor() as cur:
         cur.execute(
-            f"SELECT * FROM shipments WHERE {where} ORDER BY created_at DESC",
-            params,
+        f"SELECT * FROM shipments WHERE {where} ORDER BY created_at DESC",
+        params,
         )
         rows = cur.fetchall()
 
@@ -6759,6 +7211,24 @@ async def api_v2_shipments(request: Request, account: str = None, status: str = 
         invoiced_map = {}
     for s in shipments:
         s["_invoiced"] = invoiced_map.get(s["efj"], False)
+
+    # Enrich with email thread stats (count + max priority)
+    try:
+        with db.get_cursor() as cur:
+            cur.execute("""
+                SELECT efj, COUNT(*) as email_count, COALESCE(MAX(priority), 0) as email_max_priority
+                FROM email_threads
+                GROUP BY efj
+            """)
+            email_stats = {r["efj"]: r for r in cur.fetchall()}
+        for s in shipments:
+            es = email_stats.get(s["efj"])
+            s["email_count"] = es["email_count"] if es else 0
+            s["email_max_priority"] = es["email_max_priority"] if es else 0
+    except Exception:
+        for s in shipments:
+            s["email_count"] = 0
+            s["email_max_priority"] = 0
 
     return {"shipments": shipments, "total": len(shipments)}
 
@@ -6834,20 +7304,20 @@ async def api_v2_accounts(request: Request):
     """Account list with counts from Postgres."""
     with db.get_cursor() as cur:
         cur.execute("""
-            SELECT
-                account,
-                COUNT(*) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as active,
-                COUNT(*) FILTER (WHERE LOWER(status) IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as done,
-                COUNT(*) FILTER (
-                    WHERE archived = FALSE
-                      AND LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed')
-                      AND lfd != '' AND lfd IS NOT NULL
-                      AND LEFT(lfd, 10) <= %s
-                ) as alerts
-            FROM shipments
-            WHERE archived = FALSE
-            GROUP BY account
-            ORDER BY active DESC
+        SELECT
+            account,
+            COUNT(*) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as active,
+            COUNT(*) FILTER (WHERE LOWER(status) IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as done,
+            COUNT(*) FILTER (
+                WHERE archived = FALSE
+                  AND LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed')
+                  AND lfd != '' AND lfd IS NOT NULL
+                  AND LEFT(lfd, 10) <= %s
+            ) as alerts
+        FROM shipments
+        WHERE archived = FALSE
+        GROUP BY account
+        ORDER BY active DESC
         """, ((_dt.now() + _td(days=1)).strftime("%Y-%m-%d"),))
         rows = cur.fetchall()
 
@@ -6860,18 +7330,18 @@ async def api_v2_team(request: Request):
     """Team member summaries from Postgres."""
     with db.get_cursor() as cur:
         cur.execute("""
-            SELECT rep,
-                   COUNT(*) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as loads,
-                   array_agg(DISTINCT account) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as accounts,
-                   COUNT(*) FILTER (
-                       WHERE archived = FALSE
-                         AND LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed')
-                         AND lfd != '' AND lfd IS NOT NULL
-                         AND LEFT(lfd, 10) <= to_char(NOW() + interval '1 day', 'YYYY-MM-DD')
-                   ) as at_risk
-            FROM shipments
-            WHERE archived = FALSE AND rep IS NOT NULL AND rep != ''
-            GROUP BY rep
+        SELECT rep,
+               COUNT(*) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as loads,
+               array_agg(DISTINCT account) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as accounts,
+               COUNT(*) FILTER (
+                   WHERE archived = FALSE
+                     AND LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed')
+                     AND lfd != '' AND lfd IS NOT NULL
+                     AND LEFT(lfd, 10) <= to_char(NOW() + interval '1 day', 'YYYY-MM-DD')
+               ) as at_risk
+        FROM shipments
+        WHERE archived = FALSE AND rep IS NOT NULL AND rep != ''
+        GROUP BY rep
         """)
         rows = cur.fetchall()
     team = {}
@@ -7040,6 +7510,556 @@ async def api_v2_add_shipment(request: Request):
         raise HTTPException(409, f"Shipment {efj} already exists")
 
     return {"ok": True, "shipment": _shipment_row_to_dict(row)}
+
+
+# ═══ Macropoint Webhook (migrated from standalone webhook.py) ═══════════
+
+import hmac as _hmac
+
+# ── Webhook → Postgres direct write ──────────────────────────────────────
+_WEBHOOK_STATUS_TO_DROPDOWN = {
+    "Driver Arrived at Pickup": "At Pickup",
+    "Departed Pickup - En Route": "In Transit",
+    "Arrived at Delivery": "At Delivery",
+    "Departed Delivery": "Departed Delivery",
+    "Running Late": "Running Behind",
+    "Delivered": "Delivered",
+    "Driver Phone Unresponsive": "Driver Phone Unresponsive",
+}
+
+def _webhook_pg_write(load_ref: str, mapped_status: str, payload: dict):
+    """Write FTL status update directly to Postgres from webhook."""
+    try:
+        dropdown = _WEBHOOK_STATUS_TO_DROPDOWN.get(mapped_status)
+        if not dropdown:
+            return  # Status not mappable to dropdown — skip PG write
+
+        efj_clean = load_ref.replace("EFJ", "").strip()
+        # Try both formats: "EFJ107230" and "107230"
+        efj_key = f"EFJ{efj_clean}" if not load_ref.startswith("EFJ") else load_ref
+
+        # Extract stop times from payload
+        event_upper = (payload.get("eventType") or payload.get("event_type") or "").upper()
+        event_time = payload.get("eventTime") or payload.get("timestamp") or ""
+
+        kwargs = {"status": dropdown}
+        if "ARRIVED" in event_upper and "PICKUP" in event_upper and event_time:
+            kwargs["pickup_date"] = event_time
+        elif "ARRIVED" in event_upper and "DELIVERY" in event_upper and event_time:
+            kwargs["delivery_date"] = event_time
+
+        # Use pg_update_shipment from csl_pg_writer
+        import sys
+        if "/root/csl-bot" not in sys.path:
+            sys.path.insert(0, "/root/csl-bot")
+        from csl_pg_writer import pg_update_shipment
+
+
+        pg_update_shipment(efj_key, **kwargs)
+        log.info(f"Webhook PG write: {efj_key} -> {dropdown}")
+    except Exception as exc:
+        log.warning(f"Webhook PG write failed (non-fatal): {exc}")
+
+
+
+# Real-time webhook email alerts
+import sys as _sys
+if "/root/csl-bot" not in _sys.path:
+    _sys.path.insert(0, "/root/csl-bot")
+from csl_ftl_alerts import send_webhook_alert, STATUS_TO_DROPDOWN as _ALERT_STATUS_MAP
+
+# ── Status hierarchy: higher number = further along in lifecycle ──
+_STATUS_RANK = {
+    "Tracking Started": 1,
+    "Tracking Waiting for Update": 2,
+    "Driver Phone Unresponsive": 2,
+    "Driver Arrived at Pickup": 3,
+    "At Pickup": 3,
+    "Departed Pickup - En Route": 4,
+    "In Transit": 4,
+    "Running Late": 4,
+    "Tracking Behind Schedule": 4,
+    "Arrived at Delivery": 5,
+    "At Delivery": 5,
+    "Departed Delivery": 6,
+    "Delivered": 7,
+    "Tracking Completed Successfully": 8,
+}
+
+def _status_is_regression(old_status, new_status):
+    """Return True if new_status is a regression from old_status."""
+    old_rank = _STATUS_RANK.get(old_status, 0)
+    new_rank = _STATUS_RANK.get(new_status, 0)
+    return new_rank > 0 and old_rank > 0 and new_rank < old_rank
+
+
+_WEBHOOK_STATUS_MAP = {
+    "ARRIVED_PICKUP": "Driver Arrived at Pickup",
+    "DEPARTED_PICKUP": "Departed Pickup - En Route",
+    "IN_TRANSIT": "Departed Pickup - En Route",
+    "ARRIVED_DELIVERY": "Arrived at Delivery",
+    "DEPARTED_DELIVERY": "Departed Delivery",
+    "DELIVERED": "Delivered",
+    "TRACKING_STARTED": "Tracking Started",
+    "DRIVER_UNRESPONSIVE": "Driver Phone Unresponsive",
+    "RUNNING_LATE": "Running Late",
+    "CANT_MAKE_IT": "Can\'t Make It",
+}
+
+_WEBHOOK_LOG = "/root/csl-bot/webhook_payloads.log"
+_WEBHOOK_EVENTS_LOG = "/root/csl-bot/webhook_events.log"
+_WH_USER = os.getenv("WEBHOOK_AUTH_USERNAME", "")
+_WH_PASS = os.getenv("WEBHOOK_AUTH_PASSWORD", "")
+
+
+def _webhook_basic_auth(request: Request) -> bool:
+    """Validate HTTP Basic Auth for Macropoint webhook."""
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Basic "):
+        return False
+    import base64 as _b64
+    try:
+        decoded = _b64.b64decode(auth_header[6:]).decode()
+        user, passwd = decoded.split(":", 1)
+    except Exception:
+        return False
+    return (_hmac.compare_digest(user, _WH_USER)
+            and _hmac.compare_digest(passwd, _WH_PASS))
+
+
+def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload: dict):
+    """Update ftl_tracking_cache.json when a webhook event arrives."""
+    try:
+        with open(TRACKING_CACHE_FILE, "r") as f:
+            cache = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return False, None
+    efj_clean = load_ref.replace("EFJ", "").strip()
+    matched_key = None
+    for key, entry in cache.items():
+        efj = entry.get("efj", "")
+        load_num = entry.get("load_num", "")
+        mp_load_id = entry.get("mp_load_id", "")
+        if (efj == load_ref or efj == efj_clean or
+                load_num == load_ref or mp_load_id == load_ref or
+                key == efj_clean):
+            matched_key = key
+            break
+
+    # Fallback: look up by container field in Postgres
+    if not matched_key:
+        try:
+            with db.get_cursor() as cur:
+                # Try exact match, then LIKE for partial (PO # 336840 vs PO336840)
+                cur.execute(
+                    "SELECT efj FROM shipments WHERE container = %s OR container LIKE %s LIMIT 1",
+                    (load_ref, f"%{load_ref}%"),
+                )
+                row = cur.fetchone()
+                if row:
+                    pg_efj = row["efj"]
+                    efj_num = pg_efj.replace("EFJ", "").strip()
+                    # Check if this EFJ is in cache
+                    if efj_num in cache:
+                        matched_key = efj_num
+                    elif pg_efj in cache:
+                        matched_key = pg_efj
+                    else:
+                        # Create a new cache entry for this load
+                        cache[efj_num] = {
+                            "efj": pg_efj,
+                            "load_num": load_ref,
+                            "status": "",
+                            "mp_load_id": load_ref,
+                            "cant_make_it": None,
+                            "stop_times": {},
+                            "macropoint_url": "",
+                            "last_scraped": "",
+                            "driver_phone": "",
+                        }
+                        matched_key = efj_num
+                        log.info(f"Webhook: created cache entry {efj_num} for container {load_ref}")
+        except Exception as exc:
+            log.debug(f"Webhook PG container lookup failed: {exc}")
+
+    if not matched_key:
+        return False, None
+    entry = cache[matched_key]
+    old_status = entry.get("status", "")
+    # ── Status hierarchy guard: block regressions ──
+    if _status_is_regression(old_status, status):
+        import logging
+        logging.getLogger("uvicorn.error").info(
+            f"Webhook: BLOCKED status regression {matched_key} [{old_status}] -> [{status}]"
+        )
+        return False, None
+    entry["status"] = status
+    entry["last_scraped"] = now
+    entry["webhook_updated"] = True
+
+    stop_times = entry.get("stop_times", {})
+    event_upper = (payload.get("eventType") or payload.get("event_type") or "").upper()
+    event_time = payload.get("eventTime") or payload.get("timestamp") or now
+
+    if "ARRIVED" in event_upper and "PICKUP" in event_upper:
+        stop_times["stop1_arrived"] = event_time
+    elif "DEPARTED" in event_upper and "PICKUP" in event_upper:
+        stop_times["stop1_departed"] = event_time
+    elif "ARRIVED" in event_upper and "DELIVERY" in event_upper:
+        stop_times["stop2_arrived"] = event_time
+    elif "DEPARTED" in event_upper and "DELIVERY" in event_upper:
+        stop_times["stop2_departed"] = event_time
+    elif "DELIVERED" in event_upper:
+        stop_times["stop2_departed"] = event_time
+
+    entry["stop_times"] = stop_times
+
+    tmp_path = TRACKING_CACHE_FILE + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(cache, f, indent=2)
+    os.replace(tmp_path, TRACKING_CACHE_FILE)
+
+    log.info(f"Webhook cache updated: {matched_key} [{old_status}] -> [{status}]")
+    _match_info = {
+        "efj": entry.get("efj", ""),
+        "load_num": entry.get("load_num", ""),
+        "stop_times": entry.get("stop_times", {}),
+        "mp_load_id": entry.get("mp_load_id", ""),
+        "matched_key": matched_key,
+    }
+    return True, _match_info
+
+
+@app.get("/webhook-test")
+async def webhook_health():
+    now = datetime.now(tz=__import__("zoneinfo").ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S ET")
+    return {"status": "ok", "service": "csl-webhook (integrated)", "time": now}
+
+
+
+
+def _webhook_send_alert_background(efj: str, load_num: str, status: str,
+                                    stop_times: dict, mp_load_id: str,
+                                    matched_key: str):
+    """Background task: resolve account from PG, write PG status, send email."""
+    try:
+        # Resolve account from Postgres
+        account = ""
+        dest = ""
+        existing_status = ""
+        try:
+            with db.get_cursor() as cur:
+                cur.execute(
+                    "SELECT account, destination, status FROM shipments WHERE efj = %s",
+                    (efj,)
+                )
+                row = cur.fetchone()
+                if row:
+                    account = row.get("account", "") or ""
+                    dest = row.get("destination", "") or ""
+                    existing_status = row.get("status", "") or ""
+        except Exception as exc:
+            log.warning(f"Webhook bg: PG lookup failed for {efj}: {exc}")
+
+        if not account:
+            log.warning(f"Webhook bg: no account found for {efj} — skipping email")
+            return
+
+        # Map webhook status to dropdown value for PG write
+        dropdown = _ALERT_STATUS_MAP.get(status)
+
+        # Write PG status update
+        # ── Block status regression in PG ──
+        if dropdown and _status_is_regression(existing_status, status):
+            log.info(f"Webhook BG: BLOCKED PG regression {efj} [{existing_status}] -> [{dropdown}]")
+            dropdown = None  # skip PG write but still allow email for info
+        if dropdown and dropdown != existing_status:
+            try:
+                from csl_pg_writer import pg_update_shipment as _pg_up
+                kwargs = {"status": dropdown}
+                # Extract dates from stop_times
+                if stop_times.get("stop1_arrived"):
+                    kwargs["pickup_date"] = stop_times["stop1_arrived"]
+                if stop_times.get("stop2_arrived") or stop_times.get("stop2_departed"):
+                    kwargs["delivery_date"] = stop_times.get("stop2_departed") or stop_times.get("stop2_arrived")
+                _pg_up(efj, **kwargs)
+                log.info(f"Webhook bg: PG updated {efj} -> {dropdown}")
+            except Exception as exc:
+                log.warning(f"Webhook bg: PG write failed for {efj}: {exc}")
+
+        # Send real-time email alert (with dedup)
+        sent = send_webhook_alert(
+            efj=efj,
+            load_num=load_num,
+            status=status,
+            account=account,
+            stop_times=stop_times,
+            mp_load_id=mp_load_id,
+        )
+        log.info(f"Webhook bg: alert {'sent' if sent else 'skipped (dedup)'} for {efj} [{status}]")
+
+    except Exception as exc:
+        log.error(f"Webhook bg: unhandled error for {efj}: {exc}")
+
+@app.get("/macropoint-webhook")
+async def macropoint_webhook_get(request: Request, background_tasks: BackgroundTasks):
+    """Handle Macropoint native protocol callbacks (GET with query params)."""
+    from urllib.parse import unquote
+    params = dict(request.query_params)
+    now = datetime.now(tz=__import__("zoneinfo").ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S ET")
+
+    load_ref = params.get("ID", "").strip()
+    data_source = params.get("DataSource", "").strip()
+    mp_order_id = params.get("MPOrderID", "")
+    lat = params.get("Latitude", "")
+    lon = params.get("Longitude", "")
+    city = params.get("City", "")
+    state = params.get("State", "")
+    street = params.get("Street1", "")
+    timestamp = params.get("LocationDateTimeUTC", "") or params.get("ApproxLocationDateTimeInLocalTime", "")
+
+    # Log all incoming events
+    event_record = {
+        "time": now,
+        "load_ref": load_ref,
+        "data_source": data_source,
+        "mp_order_id": mp_order_id,
+        "params": {k: v for k, v in params.items() if k not in ("MPOrderID",)},
+    }
+    try:
+        with open(_WEBHOOK_EVENTS_LOG, "a") as f:
+            f.write(json.dumps(event_record) + "\n")
+    except Exception:
+        pass
+
+    if not load_ref:
+        return {"status": "ok", "processed": False, "reason": "no load ID"}
+
+    # ── Location Pings ────────────────────────────────────────────────
+    if data_source == "Ping" and lat and lon:
+        # Update tracking cache with latest location
+        try:
+            with open(TRACKING_CACHE_FILE, "r") as f:
+                cache = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            cache = {}
+
+        # Find matching cache entry by load_ref (could be ORD1260305010 format)
+        matched_key = None
+        for key, entry in cache.items():
+            efj = entry.get("efj", "")
+            load_num = entry.get("load_num", "")
+            mp_load_id = entry.get("mp_load_id", "")
+            if (load_ref == efj or load_ref == load_num or
+                    load_ref == mp_load_id or load_ref == key):
+                matched_key = key
+                break
+
+        if matched_key:
+            entry = cache[matched_key]
+            entry["last_location"] = {
+                "lat": lat, "lon": lon,
+                "city": city, "state": state, "street": street,
+                "timestamp": timestamp,
+            }
+            entry["last_scraped"] = now
+            tmp_path = TRACKING_CACHE_FILE + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(cache, f, indent=2)
+            os.replace(tmp_path, TRACKING_CACHE_FILE)
+
+        log.debug(f"Webhook ping: {load_ref} @ {city}, {state}")
+        return {"status": "ok", "type": "location_ping", "load": load_ref}
+
+    # ── Trip Events (Event field: X1, X2, X3, X6, AG, AF, etc.) ─────
+    event_code = params.get("Event", "").strip()
+    stop_name = params.get("Stop", "").strip()
+    stop_type = params.get("StopType", "").strip()  # Pickup / DropOff
+
+    # Macropoint event code → internal status mapping
+    
+    _MP_EVENT_MAP = {
+        "AF": "Tracking Started",
+        "X1": None,   # Arrived — need stop context
+        "X2": None,   # Departed — need stop context
+        "X3": None,   # Position near stop — skip (too noisy)
+        "X4": "Departed Pickup - En Route",
+        "X6": "Delivered",
+        "AG": "Driver Phone Unresponsive",
+    }
+
+    if event_code:
+        mapped = _MP_EVENT_MAP.get(event_code)
+
+        # X1 (Arrived) / X2 (Departed) — need to infer pickup vs delivery
+        if event_code == "X1":
+            # If it's the first stop (pickup) or stop_type=Pickup
+            if stop_type.lower() == "pickup" or "pickup" in stop_name.lower():
+                mapped = "Driver Arrived at Pickup"
+            else:
+                mapped = "Arrived at Delivery"
+        elif event_code == "X2":
+            if stop_type.lower() == "pickup" or "pickup" in stop_name.lower():
+                mapped = "Departed Pickup - En Route"
+            else:
+                mapped = "Departed Delivery"
+        elif event_code == "X3":
+            # Position update near stop — don't treat as status change
+            log.debug(f"Webhook X3 (position near stop): {load_ref} @ {stop_name}")
+            return {"status": "ok", "type": "position_near_stop", "load": load_ref}
+
+        if mapped:
+            cache_updated, _match_info = _update_tracking_cache_webhook(load_ref, mapped, now, {
+                "loadNumber": load_ref,
+                "eventType": event_code,
+                "event": event_code,
+                "stop": stop_name,
+                "timestamp": timestamp,
+            })
+            if cache_updated and _match_info:
+                background_tasks.add_task(
+                    _webhook_send_alert_background,
+                    efj=_match_info["efj"],
+                    load_num=_match_info["load_num"],
+                    status=mapped,
+                    stop_times=_match_info["stop_times"],
+                    mp_load_id=_match_info["mp_load_id"],
+                    matched_key=_match_info["matched_key"],
+                )
+            log.info(f"Webhook trip event: {load_ref} [{event_code}] -> {mapped} (cache={cache_updated})")
+            return {"status": "ok", "type": "trip_event", "load": load_ref, "event": event_code, "status_mapped": mapped}
+
+    # ── Schedule Alerts (ScheduleAlertText field) ─────────────────────
+    schedule_alert = params.get("ScheduleAlertText", "").strip()
+    if schedule_alert:
+        log.info(f"Webhook schedule alert: {load_ref} [{stop_type}] {schedule_alert} (dist={params.get('DistanceToStopInMiles', '?')} mi)")
+        return {"status": "ok", "type": "schedule_alert", "load": load_ref, "alert": schedule_alert}
+
+    # ── Fallback: check other event fields ────────────────────────────
+    event_type = (
+        params.get("EventType", "") or params.get("Status", "") or
+        params.get("OrderStatus", "") or data_source
+    ).strip()
+
+    if event_type and event_type != "Ping":
+        mapped_status = _WEBHOOK_STATUS_MAP.get(event_type.upper().replace(" ", "_"), "")
+        if not mapped_status:
+            mapped_status = event_type
+        if mapped_status:
+            cache_updated, _match_info = _update_tracking_cache_webhook(load_ref, mapped_status, now, {
+                "loadNumber": load_ref,
+                "eventType": event_type,
+                "timestamp": timestamp,
+            })
+            if cache_updated and _match_info:
+                background_tasks.add_task(
+                    _webhook_send_alert_background,
+                    efj=_match_info["efj"],
+                    load_num=_match_info["load_num"],
+                    status=mapped_status,
+                    stop_times=_match_info["stop_times"],
+                    mp_load_id=_match_info["mp_load_id"],
+                    matched_key=_match_info["matched_key"],
+                )
+            log.info(f"Webhook GET event: {load_ref} -> {mapped_status} (cache={cache_updated})")
+            return {"status": "ok", "type": "status_event", "load": load_ref, "status_mapped": mapped_status}
+
+    return {"status": "ok", "type": data_source or "unknown", "load": load_ref}
+
+
+@app.post("/macropoint-webhook")
+async def macropoint_webhook(request: Request, background_tasks: BackgroundTasks):
+    # Basic Auth check
+    if not _webhook_basic_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized",
+                            headers={"WWW-Authenticate": 'Basic realm="csl-bot"'})
+
+    payload = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    now = datetime.now(tz=__import__("zoneinfo").ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S ET")
+
+    # Raw payload log
+    log_entry = f"\n{'=' * 60}\n[{now}]\n{json.dumps(payload, indent=2)}\n"
+    try:
+        with open(_WEBHOOK_LOG, "a") as f:
+            f.write(log_entry)
+    except Exception:
+        pass
+
+    log.info(f"Webhook received: {json.dumps(payload)[:200]}")
+
+    # Skip test payloads
+    if payload.get("test"):
+        log.info("Test payload — skipping processing")
+        return {"status": "ok", "processed": False, "reason": "test payload"}
+
+    # Extract load identifier
+    load_ref = (
+        payload.get("loadNumber")
+        or payload.get("pro")
+        or payload.get("referenceNumber")
+        or payload.get("load_number")
+        or payload.get("shipmentId")
+        or payload.get("reference_number")
+        or ""
+    ).strip()
+
+    event_type = (
+        payload.get("eventType")
+        or payload.get("status")
+        or payload.get("event_type")
+        or payload.get("event")
+        or ""
+    ).strip()
+
+    # Map event to internal status
+    mapped_status = _WEBHOOK_STATUS_MAP.get(event_type.upper().replace(" ", "_"), "")
+    if not mapped_status and event_type:
+        mapped_status = event_type
+
+    # Structured event log
+    event_record = {
+        "time": now,
+        "load_ref": load_ref,
+        "raw_event": event_type,
+        "mapped_status": mapped_status,
+        "payload_keys": list(payload.keys()),
+    }
+    try:
+        with open(_WEBHOOK_EVENTS_LOG, "a") as f:
+            f.write(json.dumps(event_record) + "\n")
+    except Exception:
+        pass
+
+    # Update tracking cache
+    cache_updated = False
+    if load_ref and mapped_status:
+        cache_updated, _match_info = _update_tracking_cache_webhook(load_ref, mapped_status, now, payload)
+
+        # Real-time: write PG + send email in background task
+        if cache_updated and _match_info:
+            background_tasks.add_task(
+                _webhook_send_alert_background,
+                efj=_match_info["efj"],
+                load_num=_match_info["load_num"],
+                status=mapped_status,
+                stop_times=_match_info["stop_times"],
+                mp_load_id=_match_info["mp_load_id"],
+                matched_key=_match_info["matched_key"],
+            )
+
+    if not load_ref:
+        log.warning(f"Webhook: unknown payload format — keys: {list(payload.keys())}")
+        return {"status": "ok", "processed": False, "reason": "unknown format"}
+
+    log.info(f"Webhook processed: {load_ref} -> {mapped_status or '(no status)'} (cache_updated={cache_updated})")
+    return {
+        "status": "ok",
+        "processed": True,
+        "load_ref": load_ref,
+        "mapped_status": mapped_status,
+        "cache_updated": cache_updated,
+    }
+
 
 # ═══ End of v2 endpoints ═══
 
