@@ -20,6 +20,7 @@ const STATUS_MAP = {
   "delivered": "delivered",
   "returned to port": "empty_return", "empty return": "empty_return",
   "hold": "pending",
+  "scheduled": "scheduled",
   // FTL statuses
   "unassigned": "unassigned",
   "assigned": "assigned",
@@ -103,6 +104,7 @@ const STATUSES = [
   { key: "delivered", label: "Delivered", icon: "✦", grad: "linear-gradient(135deg, #22C55E, #4ADE80)" },
   { key: "empty_return", label: "Empty Return", icon: "↩", grad: "linear-gradient(135deg, #06B6D4, #22D3EE)" },
   { key: "pending", label: "Pending", icon: "◆", grad: "linear-gradient(135deg, #4B5563, #6B7280)" },
+  { key: "scheduled", label: "Scheduled", icon: "📅", grad: "linear-gradient(135deg, #8B5CF6, #A78BFA)" },
   { key: "issue", label: "Exception", icon: "⚠", grad: "linear-gradient(135deg, #EF4444, #F87171)" },
   { key: "cancelled", label: "Cancelled", icon: "✕", grad: "linear-gradient(135deg, #6B7280, #9CA3AF)" },
   { key: "cancelled_tonu", label: "TONU", icon: "⚠", grad: "linear-gradient(135deg, #EF4444, #F87171)" },
@@ -145,6 +147,7 @@ const STATUS_COLORS = {
   delivered: { main: "#22C55E", glow: "#22C55E33" },
   empty_return: { main: "#06B6D4", glow: "#06B6D433" },
   pending: { main: "#4B5563", glow: "#4B556333" },
+  scheduled: { main: "#8B5CF6", glow: "#8B5CF633" },
   issue: { main: "#F87171", glow: "#EF444433" },
   cancelled: { main: "#6B7280", glow: "#6B728033" },
   cancelled_tonu: { main: "#EF4444", glow: "#EF444433" },
@@ -156,6 +159,7 @@ const FTL_STATUSES = [
   { key: "all", label: "All", icon: "◎", grad: "linear-gradient(135deg, #4B5563, #6B7280)" },
   { key: "unassigned", label: "Unassigned", icon: "○", grad: "linear-gradient(135deg, #6B7280, #9CA3AF)" },
   { key: "assigned", label: "Assigned", icon: "●", grad: "linear-gradient(135deg, #F59E0B, #FBBF24)" },
+  { key: "scheduled", label: "Scheduled", icon: "📅", grad: "linear-gradient(135deg, #8B5CF6, #A78BFA)" },
   { key: "picking_up", label: "Picking Up", icon: "🚛", grad: "linear-gradient(135deg, #A855F7, #C084FC)" },
   { key: "in_transit", label: "In Transit", icon: "◈", grad: "linear-gradient(135deg, #3B82F6, #60A5FA)" },
   { key: "on_site", label: "On-Site", icon: "📍", grad: "linear-gradient(135deg, #F97316, #FB923C)" },
@@ -170,6 +174,7 @@ const FTL_STATUSES = [
 const FTL_STATUS_COLORS = {
   unassigned: { main: "#6B7280", glow: "#6B728033" },
   assigned: { main: "#F59E0B", glow: "#F59E0B33" },
+  scheduled: { main: "#8B5CF6", glow: "#8B5CF633" },
   picking_up: { main: "#A855F7", glow: "#A855F733" },
   in_transit: { main: "#3B82F6", glow: "#3B82F633" },
   on_site: { main: "#F97316", glow: "#F9731633" },
@@ -653,6 +658,7 @@ export default function DispatchDashboard() {
     moveTypeFilter, setMoveTypeFilter, dateFilter, setDateFilter,
     dateRangeField, setDateRangeField, dateRangeStart, setDateRangeStart,
     dateRangeEnd, setDateRangeEnd,
+    dataSource, setDataSource, systemHealth, setSystemHealth,
   } = useAppStore();
 
   // Clean up stale localStorage keys from old builds
@@ -682,12 +688,14 @@ export default function DispatchDashboard() {
   }, []);
 
   const fetchData = useCallback(async () => {
+    const src = useAppStore.getState().dataSource;
+    const isSheets = src === "sheets";
     try {
       const [shipmentsRes, statsRes, botRes, accountsRes, trackRes, docRes] = await Promise.allSettled([
-        apiFetch(`${API_BASE}/api/v2/shipments`).then(r => r.json()),
-        apiFetch(`${API_BASE}/api/v2/stats`).then(r => r.json()),
+        apiFetch(`${API_BASE}/api/${isSheets ? "shipments" : "v2/shipments"}`).then(r => r.json()),
+        apiFetch(`${API_BASE}/api/${isSheets ? "stats" : "v2/stats"}`).then(r => r.json()),
         apiFetch(`${API_BASE}/api/bot-status`).then(r => r.json()),
-        apiFetch(`${API_BASE}/api/v2/accounts`).then(r => r.json()),
+        apiFetch(`${API_BASE}/api/${isSheets ? "accounts" : "v2/accounts"}`).then(r => r.json()),
         apiFetch(`${API_BASE}/api/shipments/tracking-summary`).then(r => r.json()),
         apiFetch(`${API_BASE}/api/shipments/document-summary`).then(r => r.json()),
       ]);
@@ -1206,6 +1214,11 @@ export default function DispatchDashboard() {
             <span style={{ fontSize: 10, color: "#8B95A8", fontWeight: 400, letterSpacing: "2px", textTransform: "uppercase" }}>Logistics</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {dataSource === "sheets" && (
+              <div className="glass" style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 100, fontSize: 10, color: "#f59e0b", fontWeight: 600, border: "1px solid rgba(245,158,11,0.3)", background: "rgba(245,158,11,0.08)" }}>
+                SHEETS MODE
+              </div>
+            )}
             <ClockDisplay lastSyncTime={lastSyncTime} apiError={apiError} />
           </div>
         </div>
@@ -1701,33 +1714,50 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
   // Apply master rep table filter
   const displayShipsFiltered = isMaster && masterTableFilter !== "all" ? displayShipsBase.filter(s => {
     if (masterTableFilter === "incoming") return ["at_port", "on_vessel", "pending"].includes(s.status);
-    if (masterTableFilter === "active") return ["in_transit", "out_for_delivery"].includes(s.status);
+    if (masterTableFilter === "active") return !["delivered", "empty_return"].includes(s.status);
     if (masterTableFilter === "on_schedule") return !["delivered", "empty_return"].includes(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)));
     if (masterTableFilter === "behind") return (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !["delivered", "empty_return"].includes(s.status);
     if (masterTableFilter === "delivered") return s.status === "delivered";
     if (masterTableFilter === "invoiced") return s._invoiced;
+    if (masterTableFilter === "pu_today") return isDateToday(s.pickupDate) && s.status !== "delivered";
+    if (masterTableFilter === "pu_tomorrow") return isDateTomorrow(s.pickupDate) && s.status !== "delivered";
+    if (masterTableFilter === "del_today") return isDateToday(s.deliveryDate);
+    if (masterTableFilter === "del_tomorrow") return isDateTomorrow(s.deliveryDate) && s.status !== "delivered";
+    if (masterTableFilter === "needs_driver") return s.rawStatus?.toLowerCase() === "unassigned" && !["delivered", "empty_return"].includes(s.status);
+    if (masterTableFilter === "awaiting_pod") { if (s.status !== "delivered") return false; const eb = (s.efj || "").replace(/^EFJ\s*/i, ""); return !(docSummary?.[eb] || docSummary?.[s.efj])?.pod; }
+    // Status key filter (from dropdown)
+    if ([...STATUSES, ...FTL_STATUSES].some(st => st.key === masterTableFilter && st.key !== "all")) return s.status === masterTableFilter;
     return true;
   }) : displayShipsBase;
 
   // Both views show the same data — only the grid layout changes
   const displayShips = displayShipsFiltered;
 
-  // Operations data for Boviet/Tolead (uses displayShipsFiltered for counts, opsTableShips for table)
+  // Action summary data (shared across all rep views)
   const isOps = isBoviet || isTolead;
-  const opsBase = isOps ? displayShipsFiltered : [];
-  const opsPickupsToday = isOps ? opsBase.filter(s => isDateToday(s.pickupDate) && s.status !== "delivered") : [];
-  const opsPickupsTomorrow = isOps ? opsBase.filter(s => isDateTomorrow(s.pickupDate) && s.status !== "delivered") : [];
-  const opsDeliveriesToday = isOps ? opsBase.filter(s => isDateToday(s.deliveryDate)) : [];
-  const opsDeliveriesTomorrow = isOps ? opsBase.filter(s => isDateTomorrow(s.deliveryDate) && s.status !== "delivered") : [];
-  const needsDriver = isOps ? opsBase.filter(s => s.rawStatus?.toLowerCase() === "unassigned" && !["delivered", "empty_return"].includes(s.status)) : [];
-  const opsBehind = isOps ? opsBase.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !["delivered", "empty_return"].includes(s.status)) : [];
-  const awaitingPod = isOps ? opsBase.filter(s => {
+  const actionBase = displayShipsBase; // unfiltered for pill counts
+  const actionPuToday = actionBase.filter(s => isDateToday(s.pickupDate) && s.status !== "delivered");
+  const actionPuTmrw = actionBase.filter(s => isDateTomorrow(s.pickupDate) && s.status !== "delivered");
+  const actionDelToday = actionBase.filter(s => isDateToday(s.deliveryDate));
+  const actionDelTmrw = actionBase.filter(s => isDateTomorrow(s.deliveryDate) && s.status !== "delivered");
+  const actionNoDriver = actionBase.filter(s => s.rawStatus?.toLowerCase() === "unassigned" && !["delivered", "empty_return"].includes(s.status));
+  const actionBehind = actionBase.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !["delivered", "empty_return"].includes(s.status));
+  const actionNoPod = actionBase.filter(s => { if (s.status !== "delivered") return false; const eb = (s.efj || "").replace(/^EFJ\s*/i, ""); return !(docSummary?.[eb] || docSummary?.[s.efj])?.pod; });
+  const actionActive = actionBase.filter(s => !["delivered", "empty_return"].includes(s.status));
+  const opsBase = displayShipsFiltered;
+  const opsPickupsToday = opsBase.filter(s => isDateToday(s.pickupDate) && s.status !== "delivered");
+  const opsPickupsTomorrow = opsBase.filter(s => isDateTomorrow(s.pickupDate) && s.status !== "delivered");
+  const opsDeliveriesToday = opsBase.filter(s => isDateToday(s.deliveryDate));
+  const opsDeliveriesTomorrow = opsBase.filter(s => isDateTomorrow(s.deliveryDate) && s.status !== "delivered");
+  const needsDriver = opsBase.filter(s => s.rawStatus?.toLowerCase() === "unassigned" && !["delivered", "empty_return"].includes(s.status));
+  const opsBehind = opsBase.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !["delivered", "empty_return"].includes(s.status));
+  const awaitingPod = opsBase.filter(s => {
     if (s.status !== "delivered") return false;
     const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
     const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
     return !docs?.pod;
-  }) : [];
-  const opsActive = isOps ? opsBase.filter(s => !["delivered", "empty_return"].includes(s.status)) : [];
+  });
+  const opsActive = opsBase.filter(s => !["delivered", "empty_return"].includes(s.status));
   const opsTableShips = !isOps ? [] :
     opsTableFilter === "behind" ? opsBehind :
     opsTableFilter === "on_schedule" ? opsBase.filter(s => !["delivered", "empty_return"].includes(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))) :
@@ -1738,6 +1768,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
     opsTableFilter === "del_tomorrow" ? opsDeliveriesTomorrow :
     opsTableFilter === "needs_driver" ? needsDriver :
     opsTableFilter === "awaiting_pod" ? awaitingPod :
+    [...STATUSES, ...FTL_STATUSES].some(st => st.key === opsTableFilter && st.key !== "all") ? opsBase.filter(s => s.status === opsTableFilter) :
     opsActive;
 
   // Inline edit styles (reuse dispatch pattern)
@@ -1995,51 +2026,65 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
         </div>
       </div>
 
-      {/* Summary stats — master reps (clickable) */}
-      {isMaster && (
-      <div style={{ display: "flex", gap: 6, marginBottom: 14, marginTop: 8, flexWrap: "wrap" }}>
-        {[
-          { label: "Incoming", value: incoming, c: "#F59E0B", filter: "incoming" },
-          { label: "Active", value: activeCount, c: "#3B82F6", filter: "active" },
-          { label: "On Sched", value: onSchedule, c: "#00D4AA", filter: "on_schedule" },
-          { label: "Behind", value: behindSchedule, c: "#EF4444", filter: "behind" },
-          { label: "Delivered", value: delivered, c: "#22C55E", filter: "delivered" },
-          { label: "Invoiced", value: invoiced, c: "#A855F7", filter: "invoiced" },
-        ].map((s, i) => (
-          <button key={i} onClick={() => setMasterTableFilter(masterTableFilter === s.filter ? "all" : s.filter)}
-            style={{ flex: 1, minWidth: 80, padding: "8px 12px", borderRadius: 10, textAlign: "center", cursor: "pointer", fontFamily: "inherit",
-              border: `1px solid ${masterTableFilter === s.filter ? `${s.c}44` : "rgba(255,255,255,0.06)"}`,
-              background: masterTableFilter === s.filter ? `${s.c}15` : "rgba(255,255,255,0.03)" }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: s.value > 0 ? s.c : "#334155", fontFamily: "'JetBrains Mono', monospace" }}>{s.value}</div>
-            <div style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>{s.label}</div>
-          </button>
-        ))}
-      </div>
-      )}
+      {/* Action Summary — unified pills for all views (Active first) */}
+      {(() => {
+        const filterState = isOps ? opsTableFilter : masterTableFilter;
+        const setFilter = isOps ? setOpsTableFilter : (f) => setMasterTableFilter(masterTableFilter === f ? "all" : f);
+        const pills = [
+          { label: "Active", value: actionActive.length, c: "#3B82F6", filter: isOps ? "all" : "active" },
+          { label: "PU Today", value: actionPuToday.length, c: "#F59E0B", filter: "pu_today" },
+          { label: "PU Tmrw", value: actionPuTmrw.length, c: "#00A8CC", filter: "pu_tomorrow" },
+          { label: "DEL Today", value: actionDelToday.length, c: "#22C55E", filter: "del_today" },
+          { label: "DEL Tmrw", value: actionDelTmrw.length, c: "#10B981", filter: "del_tomorrow" },
+          { label: "No Driver", value: actionNoDriver.length, c: "#EF4444", filter: "needs_driver" },
+          { label: "Behind", value: actionBehind.length, c: "#F97316", filter: "behind" },
+          { label: "No POD", value: actionNoPod.length, c: "#A855F7", filter: "awaiting_pod" },
+        ];
+        return (
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, marginTop: 8, flexWrap: "wrap" }}>
+          {pills.map((s, i) => (
+            <button key={i} onClick={() => setFilter(s.filter)}
+              style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${filterState === s.filter ? `${s.c}44` : "rgba(255,255,255,0.06)"}`,
+                background: filterState === s.filter ? `${s.c}15` : "rgba(255,255,255,0.03)",
+                cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
+              <span style={{ fontSize: 16, fontWeight: 800, color: s.value > 0 ? s.c : "#334155", fontFamily: "'JetBrains Mono', monospace" }}>{s.value}</span>
+              <span style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, textTransform: "uppercase" }}>{s.label}</span>
+            </button>
+          ))}
+        </div>
+        );
+      })()}
 
-      {/* Action Summary — Boviet/Tolead (compact clickable pills) */}
-      {isOps && (
-      <div style={{ display: "flex", gap: 6, marginBottom: 14, marginTop: 8, flexWrap: "wrap" }}>
-        {[
-          { label: "PU Today", value: opsPickupsToday.length, c: "#F59E0B", filter: "pu_today" },
-          { label: "PU Tmrw", value: opsPickupsTomorrow.length, c: "#00A8CC", filter: "pu_tomorrow" },
-          { label: "DEL Today", value: opsDeliveriesToday.length, c: "#22C55E", filter: "del_today" },
-          { label: "DEL Tmrw", value: opsDeliveriesTomorrow.length, c: "#10B981", filter: "del_tomorrow" },
-          { label: "No Driver", value: needsDriver.length, c: "#EF4444", filter: "needs_driver" },
-          { label: "Behind", value: opsBehind.length, c: "#F97316", filter: "behind" },
-          { label: "No POD", value: awaitingPod.length, c: "#A855F7", filter: "awaiting_pod" },
-          { label: "Active", value: opsActive.length, c: "#3B82F6", filter: "all" },
-        ].map((s, i) => (
-          <button key={i} onClick={() => setOpsTableFilter(s.filter)}
-            style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${opsTableFilter === s.filter ? `${s.c}44` : "rgba(255,255,255,0.06)"}`,
-              background: opsTableFilter === s.filter ? `${s.c}15` : "rgba(255,255,255,0.03)",
-              cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
-            <span style={{ fontSize: 16, fontWeight: 800, color: s.value > 0 ? s.c : "#334155", fontFamily: "'JetBrains Mono', monospace" }}>{s.value}</span>
-            <span style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, textTransform: "uppercase" }}>{s.label}</span>
-          </button>
-        ))}
+      {/* Status Filter Dropdown */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+        {(() => {
+          const filterState = isOps ? opsTableFilter : masterTableFilter;
+          const setFilter = isOps ? setOpsTableFilter : setMasterTableFilter;
+          const statusList = repViewMode === "ftl" ? FTL_STATUSES : (isOps ? FTL_STATUSES : STATUSES);
+          const isStatusFilter = [...STATUSES, ...FTL_STATUSES].some(st => st.key === filterState && st.key !== "all");
+          return (
+            <select value={isStatusFilter ? filterState : ""} onChange={e => setFilter(e.target.value || "all")}
+              style={{ padding: "7px 12px", background: isStatusFilter ? "rgba(59,130,246,0.08)" : "rgba(255,255,255,0.03)", border: `1px solid ${isStatusFilter ? "rgba(59,130,246,0.25)" : "rgba(255,255,255,0.06)"}`, borderRadius: 10, color: isStatusFilter ? "#60A5FA" : "#8B95A8", fontSize: 11, outline: "none", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600 }}>
+              <option value="" style={{ background: "#0D1119" }}>Filter by Status</option>
+              {statusList.filter(s => s.key !== "all").map(s => <option key={s.key} value={s.key} style={{ background: "#0D1119" }}>{s.label}</option>)}
+            </select>
+          );
+        })()}
+        {(() => {
+          const filterState = isOps ? opsTableFilter : masterTableFilter;
+          const setFilter = isOps ? setOpsTableFilter : setMasterTableFilter;
+          if (filterState === "all") return null;
+          return (
+            <button onClick={() => setFilter("all")}
+              style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.15)", background: "rgba(239,68,68,0.08)", color: "#f87171", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              ✕ Clear
+            </button>
+          );
+        })()}
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "#8B95A8", fontWeight: 600 }}>
+          {(isOps ? opsTableShips : displayShipsFiltered).length} {(isOps ? opsTableShips : displayShipsFiltered).length === 1 ? "load" : "loads"}
+        </span>
       </div>
-      )}
 
       {/* Boviet project tabs */}
       {isBoviet && (
@@ -2121,7 +2166,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
-                  {["EFJ #", "Container/Load #", "Carrier", "Origin \u2192 Dest", "PU", "DEL", "Driver", "Status"].map(h => (
+                  {["EFJ #", "Container/Load #", "Type", "Carrier", "Origin \u2192 Dest", "ETA/ERD", "PU", "DEL", "Driver", "Status"].map(h => (
                     <th key={h} style={thStyle}>{h}</th>
                   ))}
                 </tr>
@@ -2131,6 +2176,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                   const sc = STATUS_COLORS[s.status] || { main: "#94a3b8" };
                   const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
                   const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
+                  const isFTL = s.moveType === "FTL";
                   const pu = splitDateTime(s.pickupDate);
                   const del = splitDateTime(s.deliveryDate);
                   const isEditing = inlineEditId === s.id;
@@ -2144,38 +2190,72 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                         </div>
                       </td>
                       <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
+                      {/* Move Type */}
+                      <td style={{ padding: "8px 14px" }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                          color: isFTL ? "#60A5FA" : "#F59E0B", background: isFTL ? "#60A5FA12" : "#F59E0B12",
+                          border: `1px solid ${isFTL ? "#60A5FA22" : "#F59E0B22"}`, textTransform: "uppercase" }}>
+                          {s.moveType || "Dray"}
+                        </span>
+                      </td>
                       <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5" }}>{s.carrier}</td>
                       <td style={{ padding: "8px 14px", fontSize: 10 }}>
                         <span style={{ color: "#F0F2F5" }}>{s.origin}</span>
                         <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
                         <span style={{ color: "#F0F2F5" }}>{s.destination}</span>
                       </td>
-                      {/* PU Date (inline-editable, DD-MM) */}
+                      {/* ETA/ERD */}
+                      <td style={{ padding: "8px 14px" }}>
+                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>
+                          {formatDDMM(s.eta || s.lfd) || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}
+                        </span>
+                      </td>
+                      {/* PU Date + Time (inline-editable, DD-MM + time) */}
                       <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
                         {isEditing && inlineEditField === "pickup" ? (
-                          <div onClick={e => e.stopPropagation()}>
+                          <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
                             <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
                               onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
                               onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (pu.time ? " " + pu.time : ""); handleFieldUpdate(s, "pickup", v); } setInlineEditId(null); }}
                               onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                               style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                           </div>
+                        ) : isEditing && inlineEditField === "pickupTime" ? (
+                          <div onClick={e => e.stopPropagation()}>
+                            <input type="time" autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                              onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", pu.date || ""); setInlineEditId(null); return; } const v = (pu.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "pickup", v); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 70 }} />
+                          </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{formatDDMM(s.pickupDate) || "\u2014"}</span>
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                            <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>{formatDDMM(s.pickupDate) || "\u2014"}</span>
+                            {pu.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickupTime"); setInlineEditValue(pu.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{pu.time}</span> : null}
+                          </span>
                         )}
                       </td>
-                      {/* DEL Date (inline-editable, DD-MM) */}
+                      {/* DEL Date + Time (inline-editable, DD-MM + time) */}
                       <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                         {isEditing && inlineEditField === "delivery" ? (
-                          <div onClick={e => e.stopPropagation()}>
+                          <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
                             <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
                               onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
                               onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (del.time ? " " + del.time : ""); handleFieldUpdate(s, "delivery", v); } setInlineEditId(null); }}
                               onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                               style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                           </div>
+                        ) : isEditing && inlineEditField === "deliveryTime" ? (
+                          <div onClick={e => e.stopPropagation()}>
+                            <input type="time" autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                              onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", del.date || ""); setInlineEditId(null); return; } const v = (del.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "delivery", v); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 70 }} />
+                          </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{formatDDMM(s.deliveryDate) || "\u2014"}</span>
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                            <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>{formatDDMM(s.deliveryDate) || "\u2014"}</span>
+                            {del.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("deliveryTime"); setInlineEditValue(del.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{del.time}</span> : null}
+                          </span>
                         )}
                       </td>
                       <td style={{ padding: "8px 14px", fontSize: 10, color: "#8B95A8", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.driver || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</td>
@@ -2216,8 +2296,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
         </div>
         <div style={{ overflow: "auto", maxHeight: "calc(100vh - 340px)", minHeight: 400 }}>
           {(() => {
-            const repHasFTL = displayShips.some(s => s.moveType === "FTL");
-            const repCols = ["Account", "EFJ #", "Container/Load #", ...(repHasFTL ? ["Tracking"] : []), "Origin \u2192 Dest", "PU", "DEL", "Status"];
+            const repCols = ["Account", "EFJ #", "Container/Load #", "Type", "Carrier", "Origin \u2192 Dest", "ETA/ERD", "PU", "DEL", "Status"];
             return (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
@@ -2230,10 +2309,9 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
               <tbody>
                 {displayShips.map((s) => {
                   const sc = STATUS_COLORS[s.status] || { main: "#94a3b8" };
-                  const isFTL = s.moveType === "FTL";
                   const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
-                  const tracking = trackingSummary?.[efjBare] || trackingSummary?.[s.container];
                   const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
+                  const isFTL = s.moveType === "FTL";
                   const pu = splitDateTime(s.pickupDate);
                   const del = splitDateTime(s.deliveryDate);
                   const isEditing = inlineEditId === s.id;
@@ -2248,40 +2326,73 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                         </div>
                       </td>
                       <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
-                      {repHasFTL && <td style={{ padding: "8px 14px" }}>
-                        {(isFTL || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} /> : <span style={{ color: "#3D4557", fontSize: 10 }}>--</span>}
-                      </td>}
+                      {/* Move Type */}
+                      <td style={{ padding: "8px 14px" }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                          color: isFTL ? "#60A5FA" : "#F59E0B", background: isFTL ? "#60A5FA12" : "#F59E0B12",
+                          border: `1px solid ${isFTL ? "#60A5FA22" : "#F59E0B22"}`, textTransform: "uppercase" }}>
+                          {s.moveType || "Dray"}
+                        </span>
+                      </td>
+                      {/* Carrier */}
+                      <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.carrier || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</td>
                       <td style={{ padding: "8px 14px", fontSize: 10 }}>
                         <span style={{ color: "#F0F2F5" }}>{s.origin}</span>
                         <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
                         <span style={{ color: "#F0F2F5" }}>{s.destination}</span>
                       </td>
-                      {/* PU Date (inline-editable, DD-MM) */}
+                      {/* ETA/ERD */}
+                      <td style={{ padding: "8px 14px" }}>
+                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>
+                          {formatDDMM(s.eta || s.lfd) || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}
+                        </span>
+                      </td>
+                      {/* PU Date + Time (inline-editable, DD-MM + time) */}
                       <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
                         {isEditing && inlineEditField === "pickup" ? (
-                          <div onClick={e => e.stopPropagation()}>
+                          <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
                             <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
                               onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
                               onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (pu.time ? " " + pu.time : ""); handleFieldUpdate(s, "pickup", v); } setInlineEditId(null); }}
                               onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                               style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                           </div>
+                        ) : isEditing && inlineEditField === "pickupTime" ? (
+                          <div onClick={e => e.stopPropagation()}>
+                            <input type="time" autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                              onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", pu.date || ""); setInlineEditId(null); return; } const v = (pu.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "pickup", v); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 70 }} />
+                          </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{formatDDMM(s.pickupDate) || "\u2014"}</span>
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                            <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>{formatDDMM(s.pickupDate) || "\u2014"}</span>
+                            {pu.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickupTime"); setInlineEditValue(pu.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{pu.time}</span> : null}
+                          </span>
                         )}
                       </td>
-                      {/* DEL Date (inline-editable, DD-MM) */}
+                      {/* DEL Date + Time (inline-editable, DD-MM + time) */}
                       <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                         {isEditing && inlineEditField === "delivery" ? (
-                          <div onClick={e => e.stopPropagation()}>
+                          <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
                             <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
                               onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
                               onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (del.time ? " " + del.time : ""); handleFieldUpdate(s, "delivery", v); } setInlineEditId(null); }}
                               onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                               style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                           </div>
+                        ) : isEditing && inlineEditField === "deliveryTime" ? (
+                          <div onClick={e => e.stopPropagation()}>
+                            <input type="time" autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                              onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", del.date || ""); setInlineEditId(null); return; } const v = (del.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "delivery", v); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 70 }} />
+                          </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{formatDDMM(s.deliveryDate) || "\u2014"}</span>
+                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                            <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>{formatDDMM(s.deliveryDate) || "\u2014"}</span>
+                            {del.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("deliveryTime"); setInlineEditValue(del.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{del.time}</span> : null}
+                          </span>
                         )}
                       </td>
                       <td style={{ padding: "8px 14px" }}>
@@ -2813,6 +2924,66 @@ function InboxView({ handleLoadClick }) {
 // ═══════════════════════════════════════════════════════════════
 // ANALYTICS VIEW
 // ═══════════════════════════════════════════════════════════════
+function DataSourceToggle() {
+  const { dataSource, setDataSource, systemHealth, setSystemHealth } = useAppStore();
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    apiFetch(`${API_BASE}/api/health`).then(r => r.json()).then(setSystemHealth).catch(() => {});
+    const t = setInterval(() => {
+      apiFetch(`${API_BASE}/api/health`).then(r => r.json()).then(setSystemHealth).catch(() => {});
+    }, 60000);
+    return () => clearInterval(t);
+  }, []);
+
+  const toggle = () => {
+    const next = dataSource === "postgres" ? "sheets" : "postgres";
+    setDataSource(next);
+    setLoading(true);
+    setTimeout(() => setLoading(false), 2000);
+  };
+
+  const h = systemHealth;
+  const pgOk = h?.checks?.postgres?.status === "ok";
+  const sheetOk = h?.checks?.sheets_cache?.status === "ok";
+  const overall = h?.overall || "unknown";
+  const overallColor = { healthy: "#10b981", degraded: "#f59e0b", critical: "#ef4444" }[overall] || "#6b7280";
+
+  return (
+    <div style={{ background: "#141A28", border: "1px solid rgba(255,255,255,0.10)", borderRadius: 14, padding: "14px 18px", marginBottom: 14, position: "relative", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }}>
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: overallColor }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5", marginBottom: 4 }}>Data Source</div>
+          <div style={{ display: "flex", gap: 16, fontSize: 11 }}>
+            <span style={{ color: pgOk ? "#10b981" : "#ef4444" }}>
+              PG: {pgOk ? `${h?.checks?.postgres?.active_shipments || "?"} active` : "DOWN"}
+            </span>
+            <span style={{ color: sheetOk ? "#10b981" : "#f59e0b" }}>
+              Sheets: {sheetOk ? `${h?.checks?.sheets_cache?.shipment_count || "?"} cached` : h?.checks?.sheets_cache?.status || "?"}
+            </span>
+            {h?.checks?.disk && <span style={{ color: "#5A6478" }}>Disk: {h.checks.disk.use_pct}</span>}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 10, fontWeight: 600, color: dataSource === "postgres" ? "#00D4AA" : "#f59e0b", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            {loading ? "Switching..." : dataSource === "postgres" ? "Postgres" : "Google Sheets"}
+          </span>
+          <button onClick={toggle} style={{
+            background: dataSource === "postgres" ? "rgba(0,212,170,0.15)" : "rgba(245,158,11,0.15)",
+            border: `1px solid ${dataSource === "postgres" ? "rgba(0,212,170,0.3)" : "rgba(245,158,11,0.3)"}`,
+            borderRadius: 8, padding: "6px 14px", cursor: "pointer",
+            color: dataSource === "postgres" ? "#00D4AA" : "#f59e0b",
+            fontSize: 11, fontWeight: 700, transition: "all 0.2s"
+          }}>
+            Switch to {dataSource === "postgres" ? "Sheets" : "Postgres"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AnalyticsView({ loaded, botStatus, botHealth, cronStatus, sheetLog }) {
   const HEALTH_CONFIG = {
     healthy:    { color: "#10b981", bg: "rgba(16,185,129,0.08)", border: "rgba(16,185,129,0.20)", label: "HEALTHY", icon: "\u25CF" },
@@ -2887,6 +3058,9 @@ function AnalyticsView({ loaded, botStatus, botHealth, cronStatus, sheetLog }) {
           </div>
         ))}
       </div>
+
+      {/* Data Source Toggle */}
+      <DataSourceToggle />
 
       {/* Service Health Cards — 2 column grid */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
@@ -3276,6 +3450,49 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                 <span style={{ width: 5, height: 5, borderRadius: "50%", background: selectedShipment.synced ? "#34d399" : "#fbbf24" }} />
                 <span style={{ fontSize: 9, color: selectedShipment.synced ? "#34d399" : "#fbbf24", fontWeight: 600 }}>{selectedShipment.synced ? "Synced" : "Syncing..."}</span>
               </div>
+              {/* Trip Progress Bar */}
+              {(selectedShipment.moveType === "FTL") && (() => {
+                const steps = trackingData?.progress || [];
+                const done = steps.filter(s => s.done).length;
+                const pct = steps.length > 0 ? Math.round((done / steps.length) * 100) : 0;
+                const statusColor = pct >= 100 ? "#34d399" : pct > 50 ? "#60a5fa" : pct > 0 ? "#fbbf24" : "#3D4557";
+                const loc = trackingData?.lastLocation;
+                const locLabel = loc ? `${loc.city}, ${loc.state}` : null;
+                return (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <span style={{ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: statusColor }}>
+                        {trackingData?.trackingStatus || selectedShipment.status || "Pending"}
+                      </span>
+                      {(trackingData?.eta || selectedShipment.eta) && (
+                        <span style={{ fontSize: 8, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>
+                          ETA {trackingData?.eta || selectedShipment.eta}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 7, color: pct > 0 ? "#8B95A8" : "#5A6478", fontWeight: 600, flexShrink: 0, maxWidth: 70, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {selectedShipment.origin || "Origin"}
+                      </span>
+                      <div style={{ flex: 1, position: "relative", height: 5 }}>
+                        <div style={{ position: "absolute", inset: 0, borderRadius: 3, background: "rgba(255,255,255,0.06)" }} />
+                        <div style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: `${Math.max(pct, 2)}%`, borderRadius: 3, background: `linear-gradient(90deg, ${statusColor}88, ${statusColor})`, transition: "width 0.5s ease" }} />
+                        {pct > 0 && pct < 100 && (
+                          <div title={locLabel || ""} style={{ position: "absolute", top: "50%", left: `${pct}%`, transform: "translate(-50%, -50%)", width: 9, height: 9, borderRadius: "50%", background: statusColor, border: "2px solid #141A28", boxShadow: `0 0 6px ${statusColor}66` }} />
+                        )}
+                      </div>
+                      <span style={{ fontSize: 7, color: pct >= 100 ? "#34d399" : "#5A6478", fontWeight: 600, flexShrink: 0, maxWidth: 70, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {selectedShipment.destination || "Dest"}
+                      </span>
+                    </div>
+                    {locLabel && pct > 0 && pct < 100 && (
+                      <div style={{ textAlign: "center", marginTop: 2 }}>
+                        <span style={{ fontSize: 7, color: "#5A6478", fontStyle: "italic" }}>{locLabel}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
             <button onClick={() => setSelectedShipment(null)} style={{ background: "rgba(255,255,255,0.05)", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 14, width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
           </div>
@@ -3292,8 +3509,8 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                 onClick: () => { if (driverInfo.driverPhone) window.open(`tel:${driverInfo.driverPhone.replace(/\D/g, "")}`); },
                 enabled: !!driverInfo.driverPhone },
               { icon: "📍", label: "Tracking", color: "#3B82F6",
-                onClick: () => { const url = driverInfo.macropointUrl || selectedShipment.macropointUrl; if (url) window.open(url, '_blank'); },
-                enabled: !!(driverInfo.macropointUrl || selectedShipment.macropointUrl) },
+                onClick: () => { const url = trackingData?.macropointUrl || driverInfo.macropointUrl || selectedShipment.macropointUrl; if (url) window.open(url, '_blank'); },
+                enabled: !!(trackingData?.macropointUrl || driverInfo.macropointUrl || selectedShipment.macropointUrl) },
               { icon: "📄", label: "BOL", color: "rgba(255,255,255,0.5)",
                 onClick: () => { const bol = loadDocs.find(d => d.doc_type === 'bol'); if (bol) setPreviewDoc(bol); },
                 enabled: loadDocs.some(d => d.doc_type === 'bol') },
@@ -3331,79 +3548,19 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
             </div>
           )}
 
-          {/* Route Progress — compact clickable route marker */}
-          {(selectedShipment.macropointUrl || selectedShipment.moveType === "FTL") && (
-            <div style={{ padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-              {trackingLoading ? (
-                <div style={{ padding: "4px 0", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                  <div style={{ width: 12, height: 12, border: "2px solid #1e293b", borderTop: "2px solid #14b8a6", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
-                  <span style={{ fontSize: 10, color: "#8B95A8" }}>Loading...</span>
-                </div>
-              ) : (
-                <>
-                  {/* Behind schedule / Can't make it warnings */}
-                  {trackingData?.cantMakeIt && (
-                    <div style={{ marginBottom: 6, padding: "4px 10px", borderRadius: 6, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#f87171", fontWeight: 600 }}>
-                      ⚠ {trackingData.cantMakeIt}
-                    </div>
-                  )}
-                  {trackingData?.behindSchedule && !trackingData?.cantMakeIt && (
-                    <div style={{ marginBottom: 6, padding: "4px 10px", borderRadius: 6, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#fb923c", fontWeight: 600 }}>
-                      ⏱ Behind Schedule
-                    </div>
-                  )}
-
-                  {/* Clickable route bar: Origin ——●—— Destination */}
-                  {(() => {
-                    // Calculate progress from Macropoint steps
-                    const steps = trackingData?.progress || [];
-                    const done = steps.filter(s => s.done).length;
-                    const pct = steps.length > 0 ? Math.round((done / steps.length) * 100) : 0;
-                    const statusColor = pct >= 100 ? "#34d399" : pct > 50 ? "#60a5fa" : pct > 0 ? "#fbbf24" : "#3D4557";
-                    const mpUrl = driverInfo.macropointUrl || selectedShipment.macropointUrl;
-                    return (
-                      <div onClick={() => mpUrl && window.open(mpUrl, '_blank')}
-                        style={{ cursor: mpUrl ? "pointer" : "default", padding: "6px 0" }} title={mpUrl ? "Open Macropoint" : "No tracking URL"}>
-                        {/* Status label + ETA */}
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                          <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: statusColor }}>
-                            {trackingData?.trackingStatus || selectedShipment.status || "Pending"}
-                          </span>
-                          {(trackingData?.eta || selectedShipment.eta) && (
-                            <span style={{ fontSize: 9, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>
-                              ETA {trackingData?.eta || selectedShipment.eta}
-                            </span>
-                          )}
-                        </div>
-                        {/* Route bar */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 8, color: pct > 0 ? "#8B95A8" : "#5A6478", fontWeight: 600, flexShrink: 0, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {selectedShipment.origin || "Origin"}
-                          </span>
-                          <div style={{ flex: 1, position: "relative", height: 6 }}>
-                            {/* Track */}
-                            <div style={{ position: "absolute", inset: 0, borderRadius: 3, background: "rgba(255,255,255,0.06)" }} />
-                            {/* Filled */}
-                            <div style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: `${Math.max(pct, 2)}%`, borderRadius: 3, background: `linear-gradient(90deg, ${statusColor}88, ${statusColor})`, transition: "width 0.5s ease" }} />
-                            {/* Marker dot */}
-                            {pct > 0 && pct < 100 && (
-                              <div style={{ position: "absolute", top: "50%", left: `${pct}%`, transform: "translate(-50%, -50%)", width: 10, height: 10, borderRadius: "50%", background: statusColor, border: "2px solid #141A28", boxShadow: `0 0 8px ${statusColor}66` }} />
-                            )}
-                          </div>
-                          <span style={{ fontSize: 8, color: pct >= 100 ? "#34d399" : "#5A6478", fontWeight: 600, flexShrink: 0, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {selectedShipment.destination || "Dest"}
-                          </span>
-                        </div>
-                        {/* Footer: Open Macropoint + last updated */}
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 5 }}>
-                          <span style={{ fontSize: 8, color: "#14b8a6", fontWeight: 600 }}>Open Macropoint →</span>
-                          {trackingData?.lastScraped && <span style={{ fontSize: 7, color: "#3D4557" }}>{trackingData.lastScraped}</span>}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </>
-              )}
+          {/* Behind schedule / Can't make it warnings — FTL only */}
+          {selectedShipment.moveType === "FTL" && trackingData?.cantMakeIt && (
+            <div style={{ padding: "0 20px 8px" }}>
+              <div style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#f87171", fontWeight: 600 }}>
+                ⚠ {trackingData.cantMakeIt}
+              </div>
+            </div>
+          )}
+          {selectedShipment.moveType === "FTL" && trackingData?.behindSchedule && !trackingData?.cantMakeIt && (
+            <div style={{ padding: "0 20px 8px" }}>
+              <div style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#fb923c", fontWeight: 600 }}>
+                ⏱ Behind Schedule
+              </div>
             </div>
           )}
 
@@ -3900,6 +4057,12 @@ function DispatchView({
   const [showDatePopover, setShowDatePopover] = useState(false);
   const [zebraStripe, setZebraStripe] = useState(true);
 
+  const activeStatusList = useMemo(() => {
+    if (moveTypeFilter === "ftl") return FTL_STATUSES;
+    if (moveTypeFilter === "dray") return STATUSES;
+    return ALL_STATUSES_COMBINED;
+  }, [moveTypeFilter]);
+
   // FTL tracking preview state
   const [trackingData, setTrackingData] = useState(null);
   const [trackingScreenshot, setTrackingScreenshot] = useState(null);
@@ -4193,6 +4356,10 @@ function DispatchView({
         <select value={activeRep} onChange={e => setActiveRep(e.target.value)}
           style={{ padding: "9px 12px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "#F0F2F5", fontSize: 12, outline: "none", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
           {["All Reps", ...ALL_REP_NAMES].map(r => <option key={r} value={r} style={{ background: "#0D1119" }}>{r}</option>)}
+        </select>
+        <select value={activeStatus} onChange={e => setActiveStatus(e.target.value)}
+          style={{ padding: "9px 12px", background: activeStatus !== "all" ? "rgba(59,130,246,0.08)" : "rgba(255,255,255,0.03)", border: `1px solid ${activeStatus !== "all" ? "rgba(59,130,246,0.25)" : "rgba(255,255,255,0.06)"}`, borderRadius: 10, color: activeStatus !== "all" ? "#60A5FA" : "#F0F2F5", fontSize: 12, outline: "none", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          {activeStatusList.map(s => <option key={s.key} value={s.key} style={{ background: "#0D1119" }}>{s.key === "all" ? "All Statuses" : s.label}</option>)}
         </select>
         {/* Date Range Popover */}
         <div style={{ position: "relative" }}>
@@ -4571,8 +4738,8 @@ function DispatchView({
                         <span style={{ fontSize: 10, color: "#5A6478" }}>{selectedShipment.origin} → {selectedShipment.destination}</span>
                       </div>
                       <div style={{ padding: "0 14px 12px", display: "flex", gap: 6 }}>
-                        {(driverInfo?.macropointUrl || selectedShipment.macropointUrl) && (
-                          <button onClick={() => window.open(driverInfo?.macropointUrl || selectedShipment.macropointUrl, '_blank')}
+                        {(trackingData?.macropointUrl || driverInfo?.macropointUrl || selectedShipment.macropointUrl) && (
+                          <button onClick={() => window.open(trackingData?.macropointUrl || driverInfo?.macropointUrl || selectedShipment.macropointUrl, '_blank')}
                             style={{ flex: 1, padding: "7px 10px", borderRadius: 8, background: "linear-gradient(135deg, #0f766e22, #14b8a622)", border: "1px solid #14b8a633", color: "#14b8a6", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                             Open Macropoint ↗
                           </button>
@@ -6496,15 +6663,16 @@ function AddForm({ onSubmit, onCancel, accounts }) {
   const isFTL = form.moveType === "FTL";
   const equipOpts = isFTL ? FTL_EQUIPMENT : DRAY_EQUIPMENT;
 
-  // Auto-resolve rep from account
+  // Auto-resolve rep from account (skip if adding a brand-new account)
   useEffect(() => {
-    if (!form.account) return;
+    if (!form.account || addingAccount) return;
     for (const [rep, acctList] of Object.entries(REP_ACCOUNTS)) {
       if (acctList.some(a => a.toLowerCase() === form.account.toLowerCase())) {
         set("rep", rep);
         return;
       }
     }
+    // Unknown account from dropdown — clear rep so user can pick manually
     set("rep", "");
   }, [form.account]);
 
@@ -6622,7 +6790,7 @@ function AddForm({ onSubmit, onCancel, accounts }) {
           {addingAccount ? (
             <div style={{ display: "flex", gap: 6 }}>
               <input value={newAccountName} onChange={e => setNewAccountName(e.target.value)} placeholder="New account name" style={{ ...inputStyle, flex: 1 }} autoFocus />
-              <button onClick={() => { if (newAccountName.trim()) { set("account", newAccountName.trim()); setAddingAccount(false); } }} style={{ padding: "8px 12px", background: "rgba(0,212,170,0.15)", border: "1px solid rgba(0,212,170,0.3)", borderRadius: 8, color: "#00D4AA", fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>Add</button>
+              <button onClick={() => { if (newAccountName.trim()) { set("account", newAccountName.trim()); set("rep", newAccountRep); setAddingAccount(false); } }} style={{ padding: "8px 12px", background: "rgba(0,212,170,0.15)", border: "1px solid rgba(0,212,170,0.3)", borderRadius: 8, color: "#00D4AA", fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>Add</button>
               <button onClick={() => { setAddingAccount(false); set("account", accts[0] || ""); }} style={{ padding: "8px 10px", background: "transparent", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8, color: "#8B95A8", fontSize: 10, cursor: "pointer" }}>&#10005;</button>
             </div>
           ) : (
@@ -6633,11 +6801,17 @@ function AddForm({ onSubmit, onCancel, accounts }) {
           )}
         </div>
         <div>
-          <label style={labelStyle}>Assigned Rep</label>
-          <select value={form.rep} onChange={e => set("rep", e.target.value)} style={inputStyle}>
-            <option value="" style={{ background: "#0D1119" }}>Auto (from account)</option>
-            {MASTER_REPS.map(r => <option key={r} value={r} style={{ background: "#0D1119" }}>{r}</option>)}
-          </select>
+          <label style={labelStyle}>{addingAccount ? "Assign Rep" : "Assigned Rep"}</label>
+          {addingAccount ? (
+            <select value={newAccountRep} onChange={e => setNewAccountRep(e.target.value)} style={inputStyle}>
+              {MASTER_REPS.map(r => <option key={r} value={r} style={{ background: "#0D1119" }}>{r}</option>)}
+            </select>
+          ) : (
+            <select value={form.rep} onChange={e => set("rep", e.target.value)} style={inputStyle}>
+              <option value="" style={{ background: "#0D1119" }}>Auto (from account)</option>
+              {MASTER_REPS.map(r => <option key={r} value={r} style={{ background: "#0D1119" }}>{r}</option>)}
+            </select>
+          )}
         </div>
       </div>
 
@@ -6763,12 +6937,27 @@ function AddForm({ onSubmit, onCancel, accounts }) {
           if (!form.carrier || !form.origin || !form.destination) { setError("Carrier, Origin, and Destination are required"); return; }
           setSubmitting(true);
           onSubmit({
-            ...form, efj: form.efj.trim(),
-            pickupDate: form.pickupDate || "", deliveryDate: form.deliveryDate || "", eta: form.eta || "", lfd: form.lfd || "",
-            bol: form.bol || "", customerRef: form.customerRef || "", equipmentType: form.equipmentType || "",
+            efj: form.efj.trim(),
+            move_type: form.moveType,
+            status: form.status,
+            account: form.account,
+            carrier: form.carrier,
+            origin: form.origin,
+            destination: form.destination,
+            container: form.container,
+            pickup_date: form.pickupDate || "",
+            delivery_date: form.deliveryDate || "",
+            eta: form.eta || "",
+            lfd: form.lfd || "",
+            bol: form.bol || "",
+            customer_ref: form.customerRef || "",
+            equipment_type: form.equipmentType || "",
+            notes: form.notes,
             rep: form.rep || "",
-            macropointUrl: isFTL ? (form.macropointUrl || null) : null,
-            driverPhone: form.driverPhone || null, trailerNumber: form.trailerNumber || null, carrierEmail: form.carrierEmail || null,
+            macropoint_url: isFTL ? (form.macropointUrl || null) : null,
+            driver_phone: form.driverPhone || null,
+            trailer_number: form.trailerNumber || null,
+            carrier_email: form.carrierEmail || null,
             pendingDocs,
           });
         }} className="btn-primary" style={{ flex: 1.5, padding: "11px", border: "none", borderRadius: 10, color: "#fff", fontSize: 12, fontWeight: 700, cursor: submitting ? "wait" : "pointer", opacity: submitting ? 0.6 : 1, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>

@@ -29,6 +29,10 @@ export const useAppStore = create((set) => ({
   inboxThreads: [],
   inboxStats: { total_threads: 0, needs_reply: 0, unmatched: 0, high_priority: 0 },
 
+  // ── Data Source Fallback ──
+  dataSource: "postgres",  // "postgres" or "sheets"
+  systemHealth: null,
+
   // ── Navigation ──
   activeView: "dashboard",
   selectedRep: null,
@@ -65,6 +69,8 @@ export const useAppStore = create((set) => ({
   setApiError: (v) => set({ apiError: v }),
   setInboxThreads: (v) => set({ inboxThreads: Array.isArray(v) ? v : [] }),
   setInboxStats: (v) => set({ inboxStats: v }),
+  setDataSource: (v) => set({ dataSource: v }),
+  setSystemHealth: (v) => set({ systemHealth: v }),
 
   setActiveView: (v) => set({ activeView: v }),
   setSelectedRep: (v) => set({ selectedRep: v }),
