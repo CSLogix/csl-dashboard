@@ -6962,7 +6962,7 @@ async def api_v2_update_field(efj: str, request: Request):
         "origin", "destination", "eta", "lfd", "pickup_date", "delivery_date",
         "status", "notes", "driver", "bot_notes", "return_date",
         "rep", "customer_ref", "equipment_type", "container_url",
-        "driver_phone", "hub", "archived",
+        "driver_phone", "hub", "archived", "customer_rate",
     }
     updates = {k: v for k, v in body.items() if k in ALLOWED}
     if not updates:

@@ -40,6 +40,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from csl_pg_writer import pg_update_shipment, pg_archive_shipment
+
 
 def _retry_on_quota(func, *args, max_retries=3, **kwargs):
     """Retry a function call on Google Sheets 429 quota errors."""
@@ -1094,6 +1096,7 @@ def archive_ftl_row(gc, tab_name: str, sheet_row: int, row_data: list,
     # ── Append to completed tab ───────────────────────────────────────────────
     try:
         dest_ws.append_row(row, value_input_option="USER_ENTERED")
+        pg_archive_shipment(efj)
         print(f"  Archived FTL row {sheet_row} ({efj}|{load_num}) → '{dest_tab}'")
     except Exception as exc:
         print(f"  WARNING: Archive append failed for row {sheet_row}: {exc}")
@@ -1389,6 +1392,17 @@ def run_once(account_lookup: dict):
                     try:
                         ws.batch_update(sheet_updates, value_input_option="RAW")
                         print(f"    Sheet updated — note → O{row['sheet_row']}")
+                        # ── PG dual-write ──
+                        if row.get("efj"):
+                            pg_update_shipment(
+                                row["efj"],
+                                pickup_date=final_pickup or None,
+                                delivery_date=final_delivery or None,
+                                status=dropdown_val or None,
+                                bot_notes=final_notes or None,
+                                account=tab_name,
+                                move_type="FTL",
+                            )
                     except Exception as exc:
                         print(f"    WARNING: sheet write failed: {exc}")
 

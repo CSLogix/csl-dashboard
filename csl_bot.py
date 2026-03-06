@@ -433,6 +433,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from csl_pg_writer import pg_update_shipment, pg_archive_shipment
+
 SHEET_ID         = os.environ["SHEET_ID"]
 CREDENTIALS_FILE = os.environ.get("GOOGLE_CREDENTIALS_FILE", "/root/csl-credentials.json")
 STATUS_FILTER    = "Tracking Waiting for Update"
@@ -1854,6 +1856,7 @@ def archive_completed_row(sheet, tab_name, sheet_row, row_data, url, eta, pickup
     # ── Append to completed tab ───────────────────────────────────────────────
     try:
         dest_ws.append_row(row, value_input_option="USER_ENTERED")
+        pg_archive_shipment(efj_num)
         print(f"  Archived row {sheet_row} → '{dest_tab}'")
     except Exception as exc:
         print(f"  WARNING: Archive append failed for row {sheet_row}: {exc}")
@@ -2067,6 +2070,19 @@ def run_once(args):
                     "status":      status or "",
                 }
                 new_check[container_key] = current
+
+                # ── PG dual-write ──
+                _efj = (job["row_data"][0].strip() if job.get("row_data") else "")
+                if _efj and not args.dry_run:
+                    pg_update_shipment(
+                        _efj,
+                        eta=current["eta"] or None,
+                        pickup_date=current["lfd"] or None,
+                        return_date=current["return_date"] or None,
+                        status=current["status"] or None,
+                        account=tab_name,
+                        move_type="Dray Import",
+                    )
 
                 prev           = last_check.get(container_key, {})
                 changed_fields = [

@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from csl_pg_writer import pg_update_shipment, pg_archive_shipment
+
 SHEET_ID=os.environ["SHEET_ID"]
 CREDENTIALS_FILE=os.environ.get("GOOGLE_CREDENTIALS_FILE","/root/csl-credentials.json")
 STATE_FILE="/root/csl-bot/export_state.json"
@@ -352,6 +354,7 @@ def archive_export_row(sheet,tab_name,sheet_row,row_data,job,lookup):
         if job["efj"] in existing:
             print(f"    SKIP: {job['efj']} already in {dest_tab}"); return False
         dest_ws.append_row(row_data,value_input_option="RAW")
+        pg_archive_shipment(job["efj"])
         print(f"    Archived to {dest_tab}")
         send_archive_email(tab_name,lookup,job)
         src_ws=sheet.worksheet(tab_name)
@@ -379,13 +382,14 @@ def run_once(account_lookup,ssl_links):
         except Exception as e: print(f"  ERROR: {e}"); continue
         exp=[(i+1,r) for i,r in enumerate(rows) if len(r)>COL_MOVE_TYPE and r[COL_MOVE_TYPE].strip().lower()=="dray export"]
         print(f"  Found {len(exp)} export row(s)")
-        tab_alerts=[];note_updates=[];sheet_updates=[];archive_jobs=[]
+        tab_alerts=[];note_updates=[];sheet_updates=[];archive_jobs=[];_row_efj={}
 
         for sheet_row,row in exp:
             def g(col,r=row): return r[col].strip() if len(r)>col else ""
             efj=g(COL_EFJ);container=g(COL_CONTAINER);booking=g(COL_BOOKING)
             vessel=g(COL_VESSEL);carrier=g(COL_CARRIER);origin=g(COL_ORIGIN)
             dest=g(COL_DEST);erd=g(COL_ERD);cutoff=g(COL_CUTOFF);notes=g(COL_NOTES)
+            if efj: _row_efj[sheet_row]=efj
             key=f"{tab_name}:{efj}:{container}"
             print(f"\n  -> {efj}|{container} booking={booking} ERD={erd!r} Cutoff={cutoff!r}")
             prev=state.get(key,{})
@@ -448,6 +452,10 @@ def run_once(account_lookup,ssl_links):
         if note_updates:
             try: ws.batch_update([{"range":f"O{sr}","values":[[n]]} for sr,n in note_updates],value_input_option="RAW"); print(f"  Wrote {len(note_updates)} note(s)")
             except Exception as e: print(f"  WARNING: {e}")
+        # ── PG dual-write for notes ──
+        for _sr, _n in note_updates:
+            _e = _row_efj.get(_sr)
+            if _e: pg_update_shipment(_e, bot_notes=_n, account=tab_name, move_type="Dray Export")
         if archive_jobs:
             print(f"\n  Archiving {len(archive_jobs)} gate-in row(s)...")
             for job in sorted(archive_jobs,key=lambda j:j["sheet_row"],reverse=True):
