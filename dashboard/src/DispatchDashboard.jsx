@@ -977,38 +977,41 @@ export default function DispatchDashboard() {
     setEditField(null);
   };
 
-  // Inline field update — writes to backend via PATCH /api/load/{efj}/field
+  // Inline field update — writes to Postgres via POST /api/v2/load/{efj}/update
+  const FIELD_TO_PG = { pickup: "pickup_date", delivery: "delivery_date", eta: "eta", lfd: "lfd", carrier: "carrier", driver: "driver", origin: "origin", destination: "destination", status: "status", vessel: "vessel", bol: "bol", return_date: "return_date" };
   const handleFieldUpdate = async (shipment, field, value) => {
     const stateKey = field === "pickup" ? "pickupDate" : field === "delivery" ? "deliveryDate" : field;
     setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, [stateKey]: value, synced: false } : s));
     setSelectedShipment(prev => prev && prev.id === shipment.id ? { ...prev, [stateKey]: value, synced: false } : prev);
     if (shipment.efj) {
+      const pgField = FIELD_TO_PG[field] || field;
       try {
-        const r = await apiFetch(`${API_BASE}/api/load/${shipment.efj}/field`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ field, value }),
+        const r = await apiFetch(`${API_BASE}/api/v2/load/${shipment.efj}/update`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ [pgField]: value }),
         });
         if (r.ok) {
           setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, synced: true } : s));
-          addSheetLog(`${field} → Sheet | ${shipment.loadNumber}`);
-        } else { addSheetLog(`Sync failed (${r.status}) | ${shipment.loadNumber}`); }
-      } catch { addSheetLog(`Sync error | ${shipment.loadNumber}`); }
+          addSheetLog(`${field} saved | ${shipment.loadNumber}`);
+        } else { addSheetLog(`Save failed (${r.status}) | ${shipment.loadNumber}`); }
+      } catch { addSheetLog(`Save error | ${shipment.loadNumber}`); }
     } else {
       setTimeout(() => setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, synced: true } : s)), 800);
     }
   };
 
-  // Inline metadata update — writes to backend via PATCH /api/load/{efj}/metadata
+  // Inline metadata update — writes to Postgres via POST /api/v2/load/{efj}/update
+  const META_TO_PG = { truckType: "equipment_type", customerRate: "customer_rate", notes: "notes" };
   const handleMetadataUpdate = async (shipment, field, value) => {
     const stateKey = field;
     setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, [stateKey]: value, synced: false } : s));
     setSelectedShipment(prev => prev && prev.id === shipment.id ? { ...prev, [stateKey]: value, synced: false } : prev);
     if (shipment.efj) {
-      const apiField = field === "truckType" ? "truck_type" : field === "customerRate" ? "customer_rate" : field;
+      const pgField = META_TO_PG[field] || field;
       try {
-        const r = await apiFetch(`${API_BASE}/api/load/${shipment.efj}/metadata`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ field: apiField, value }),
+        const r = await apiFetch(`${API_BASE}/api/v2/load/${shipment.efj}/update`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ [pgField]: value }),
         });
         if (r.ok) {
           setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, synced: true } : s));
