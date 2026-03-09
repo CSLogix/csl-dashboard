@@ -366,6 +366,135 @@ CACHE_TTL = 600  # 10 minutes
 BOVIET_SHEET_ID = "1OP-ZDaMCOsPxcxezHSPfN5ftUXlUcOjFgsfCQgDp3wI"
 import re as _re
 
+
+def _classify_mp_display_status(cache_entry, shipment=None):
+    """Compute a user-friendly MP display status from tracking data.
+
+    Returns (display_status: str, detail: str).
+    display_status is the short badge label, detail is optional context.
+    """
+    import re as _re
+    from datetime import datetime as _dt, timezone as _tz
+    from zoneinfo import ZoneInfo as _ZI
+
+    if not cache_entry:
+        return ("No MP", "")
+
+    status = (cache_entry.get("status") or "").strip()
+    schedule_alert = (cache_entry.get("schedule_alert") or "").strip()
+    last_loc = cache_entry.get("last_location") or {}
+    last_loc_ts = (last_loc.get("timestamp") or "").strip()
+
+    status_lower = status.lower()
+    alert_upper = schedule_alert.upper()
+
+    # ── No status at all ──
+    if not status:
+        return ("No MP", "")
+
+    if status_lower == "unassigned":
+        return ("Unassigned", "")
+
+    # ── Terminal: Delivered / Completed ──
+    if "delivered" in status_lower or "completed" in status_lower:
+        return ("Delivered", "")
+
+    # ── Driver phone unresponsive ──
+    if "unresponsive" in status_lower:
+        return ("No Signal", "Driver phone unresponsive")
+
+    # ── Parse hours from schedule alert ──
+    hours_offset = None  # positive = ahead, negative = behind
+    _m = _re.search(r'([\d.]+)\s*Hours?\s*(BEHIND|AHEAD)', alert_upper)
+    if _m:
+        hours_offset = float(_m.group(1))
+        if _m.group(2) == "BEHIND":
+            hours_offset = -hours_offset
+
+    is_behind = hours_offset is not None and hours_offset < 0
+    is_ahead = hours_offset is not None and hours_offset >= 0
+
+    detail = ""
+    if hours_offset is not None:
+        abs_h = abs(hours_offset)
+        if abs_h >= 1:
+            detail = f"{abs_h:.1f}h {'behind' if is_behind else 'ahead'}"
+        else:
+            mins = int(abs_h * 60)
+            detail = f"{mins}m {'behind' if is_behind else 'ahead'}"
+
+    # ── GPS staleness ──
+    gps_stale = True  # assume stale unless proven otherwise
+    if last_loc_ts:
+        try:
+            now = _dt.now(_ZI("America/New_York"))
+            ts = last_loc_ts.replace(" ET", "").replace(" EST", "").replace(" EDT", "")
+            for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S",
+                        "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S"):
+                try:
+                    loc_dt = _dt.strptime(ts, fmt)
+                    if fmt.endswith("Z"):
+                        loc_dt = loc_dt.replace(tzinfo=_tz.utc).astimezone(_ZI("America/New_York"))
+                    else:
+                        loc_dt = loc_dt.replace(tzinfo=_ZI("America/New_York"))
+                    age_hours = (now - loc_dt).total_seconds() / 3600
+                    gps_stale = age_hours > 2.0
+                    break
+                except ValueError:
+                    continue
+        except Exception:
+            pass
+
+    # ── At specific stops ──
+    if "arrived" in status_lower and "pickup" in status_lower:
+        return ("At Pickup", detail)
+    if "at pickup" in status_lower:
+        return ("At Pickup", detail)
+    if "arrived" in status_lower and "delivery" in status_lower:
+        return ("At Delivery", detail)
+    if "at delivery" in status_lower:
+        return ("At Delivery", detail)
+    if "departed delivery" in status_lower:
+        return ("Delivered", "Departed delivery")
+
+    # ── In Transit ──
+    if any(x in status_lower for x in ("transit", "departed pickup", "en route")):
+        if is_behind:
+            return ("Behind Schedule", detail)
+        if is_ahead:
+            return ("On Time", detail)
+        if gps_stale:
+            return ("Awaiting Update", "GPS stale")
+        return ("In Transit", "")
+
+    # ── Running late ──
+    if "behind" in status_lower or "late" in status_lower:
+        return ("Behind Schedule", detail or "Running late")
+
+    # ── Waiting for update ──
+    if "waiting" in status_lower:
+        return ("Awaiting Update", "")
+
+    # ── Tracking Started (the key improvement) ──
+    if "tracking started" in status_lower:
+        if is_behind:
+            return ("Behind Schedule", detail)
+        if is_ahead:
+            return ("On Time", detail)
+        if not last_loc_ts:
+            return ("Assigned", "Awaiting first GPS ping")
+        if gps_stale:
+            return ("Awaiting Update", "GPS stale")
+        return ("On Time", "Tracking active")
+
+    # ── Fallback ──
+    if is_behind:
+        return ("Behind Schedule", detail)
+    if is_ahead:
+        return ("On Time", detail)
+    return (status, "")
+
+
 def _shorten_address(addr):
     """Shorten full address to city/state/zip format.
     '640 N Central Ave, Wood Dale, IL 60191' -> 'Wood Dale, IL 60191'
@@ -2873,6 +3002,7 @@ async def api_tracking_summary():
             val = stop_times.get(k) or ""
             if "BEHIND" in val.upper():
                 behind = True
+        _ts_disp, _ts_detail = _classify_mp_display_status(entry)
         result[efj] = {
             "behindSchedule": behind,
             "cantMakeIt": bool(entry.get("cant_make_it")),
@@ -2885,6 +3015,8 @@ async def api_tracking_summary():
             "stop2Departed": stop_times.get("stop2_departed"),
             "stop1Eta": stop_times.get("stop1_eta"),
             "stop2Eta": stop_times.get("stop2_eta"),
+            "mpDisplayStatus": _ts_disp,
+            "mpDisplayDetail": _ts_detail,
         }
     return {"tracking": result}
 
@@ -4195,22 +4327,29 @@ async def api_macropoint(efj: str):
     last_scraped = cached.get("last_scraped")
     mp_load_id_cached = cached.get("mp_load_id")
 
-    # Build stop timeline from PG tracking_events (durable) + cache fallback
+    # Build stop timeline from PG tracking_events (durable) + cache supplement
     timeline = _build_timeline_from_pg(efj)
-    if not timeline:
-        # Fallback: build from cache stop_times (for loads without PG events)
-        if stop_times.get("stop1_arrived"):
-            timeline.append({"event": "Arrived at Pickup", "time": stop_times["stop1_arrived"], "type": "arrived"})
-        elif stop_times.get("stop1_eta"):
-            timeline.append({"event": "Pickup ETA", "time": stop_times["stop1_eta"], "type": "eta"})
-        if stop_times.get("stop1_departed"):
-            timeline.append({"event": "Departed Pickup", "time": stop_times["stop1_departed"], "type": "departed"})
-        if stop_times.get("stop2_arrived"):
-            timeline.append({"event": "Arrived at Delivery", "time": stop_times["stop2_arrived"], "type": "arrived"})
-        elif stop_times.get("stop2_eta"):
-            timeline.append({"event": "Delivery ETA", "time": stop_times["stop2_eta"], "type": "eta"})
-        if stop_times.get("stop2_departed"):
-            timeline.append({"event": "Departed Delivery", "time": stop_times["stop2_departed"], "type": "departed"})
+
+    # Supplement: merge cache stop_times for any events missing from PG.
+    # PG might only have Tracking Started (AF) while cache has arrival/departure
+    # from GPS inference that failed to persist (e.g. "ET" timestamp bug).
+    _pg_events = {e.get("event", "") for e in timeline}
+    _cache_supplements = []
+    if stop_times.get("stop1_arrived") and "Arrived at Pickup" not in _pg_events:
+        _cache_supplements.append({"event": "Arrived at Pickup", "time": stop_times["stop1_arrived"], "type": "arrived"})
+    if stop_times.get("stop1_departed") and "Departed Pickup" not in _pg_events:
+        _cache_supplements.append({"event": "Departed Pickup", "time": stop_times["stop1_departed"], "type": "departed"})
+    if stop_times.get("stop2_arrived") and "Arrived at Delivery" not in _pg_events:
+        _cache_supplements.append({"event": "Arrived at Delivery", "time": stop_times["stop2_arrived"], "type": "arrived"})
+    if stop_times.get("stop2_departed") and "Departed Delivery" not in _pg_events:
+        _cache_supplements.append({"event": "Departed Delivery", "time": stop_times["stop2_departed"], "type": "departed"})
+    if not timeline and not _cache_supplements:
+        # Pure fallback for ETA-only loads
+        if stop_times.get("stop1_eta"):
+            _cache_supplements.append({"event": "Pickup ETA", "time": stop_times["stop1_eta"], "type": "eta"})
+        if stop_times.get("stop2_eta"):
+            _cache_supplements.append({"event": "Delivery ETA", "time": stop_times["stop2_eta"], "type": "eta"})
+    timeline.extend(_cache_supplements)
 
     # Detect behind schedule from ETA strings
     behind_schedule = False
@@ -4244,6 +4383,10 @@ async def api_macropoint(efj: str):
         "cantMakeIt": cant_make_it,
         "lastScraped": last_scraped,
         "lastLocation": cached.get("last_location") or None,
+        "mpDisplayStatus": _classify_mp_display_status(cached, shipment)[0] if cached else "",
+        "mpDisplayDetail": _classify_mp_display_status(cached, shipment)[1] if cached else "",
+        "scheduleAlert": cached.get("schedule_alert", "") if cached else "",
+        "distanceToStop": cached.get("distance_to_stop", "") if cached else "",
     }
 
 
@@ -7427,15 +7570,21 @@ async def api_v2_shipments(request: Request, account: str = None, status: str = 
             s["email_count"] = 0
             s["email_max_priority"] = 0
 
-    # Enrich with mp_status from tracking cache (for MP STATUS badge)
+    # Enrich with mp_status + mp_display_status from tracking cache
     try:
         _tc = _read_tracking_cache()
         for s in shipments:
             _ce = _find_tracking_entry(_tc, s["efj"])
             if _ce:
                 s["mp_status"] = _ce.get("status", "")
+                _disp, _detail = _classify_mp_display_status(_ce, s)
+                s["mp_display_status"] = _disp
+                s["mp_display_detail"] = _detail
                 if not s.get("container_url") and _ce.get("macropoint_url"):
                     s["container_url"] = _ce["macropoint_url"]
+            else:
+                s["mp_display_status"] = ""
+                s["mp_display_detail"] = ""
     except Exception:
         pass
 
@@ -7743,6 +7892,19 @@ def _persist_tracking_event(efj: str, load_ref: str, event_code: str, stop_name:
     """Persist a webhook event to tracking_events PG table. Fire-and-forget."""
     try:
         import json as _json
+        # Fix "ET" timestamps — PG doesn't recognize "ET" as a timezone.
+        # Convert "2026-03-09 10:33:18 ET" → "2026-03-09 10:33:18-04:00" (or -05:00 for EST)
+        _et = event_time
+        if _et and isinstance(_et, str) and _et.rstrip().endswith(" ET"):
+            from zoneinfo import ZoneInfo
+            from datetime import datetime as _dt
+            try:
+                _naive_str = _et.rstrip()[:-3]  # strip " ET"
+                _naive = _dt.strptime(_naive_str, "%Y-%m-%d %H:%M:%S")
+                _aware = _naive.replace(tzinfo=ZoneInfo("America/New_York"))
+                _et = _aware.isoformat()
+            except Exception:
+                pass  # fall through with original value
         with db.get_conn() as conn:
             with db.get_cursor(conn) as cur:
                 cur.execute("""
@@ -7752,10 +7914,10 @@ def _persist_tracking_event(efj: str, load_ref: str, event_code: str, stop_name:
                         mp_order_id, raw_params
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (efj, load_ref, event_code, event_code, stop_name, stop_type,
-                      status_mapped, lat, lon, city, state, event_time or None,
+                      status_mapped, lat, lon, city, state, _et or None,
                       mp_order_id, _json.dumps(raw_params) if raw_params else None))
     except Exception as e:
-        log.debug(f"Failed to persist tracking event for {efj}: {e}")
+        log.warning(f"Failed to persist tracking event for {efj}: {e}")
 
 
 def _build_timeline_from_pg(efj: str) -> list:
@@ -8488,6 +8650,34 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
                     with open(tmp_path, "w") as f:
                         json.dump(_sc_cache, f, indent=2)
                     os.replace(tmp_path, TRACKING_CACHE_FILE)
+
+        # ── Store schedule alert intelligence in tracking cache ──
+        if schedule_alert:
+            try:
+                with open(TRACKING_CACHE_FILE, "r") as f:
+                    _sa_cache = json.load(f)
+                _sa_key = None
+                for _sak, _sav in _sa_cache.items():
+                    if load_ref in (_sav.get("efj", ""), _sav.get("load_num", ""),
+                                    _sav.get("mp_load_id", ""), _sak):
+                        _sa_key = _sak
+                        break
+                if _sa_key:
+                    _sa_entry = _sa_cache[_sa_key]
+                    _old_alert = _sa_entry.get("schedule_alert", "")
+                    if schedule_alert != _old_alert:
+                        _sa_entry["schedule_alert"] = schedule_alert
+                        _sa_entry["schedule_alert_code"] = params.get("ScheduleAlertCode", "")
+                        _sa_entry["distance_to_stop"] = distance_str
+                        _sa_entry["eta_to_stop"] = params.get("EtaToStop", "")
+                        _sa_entry["schedule_stop_type"] = stop_type
+                        tmp_path = TRACKING_CACHE_FILE + ".tmp"
+                        with open(tmp_path, "w") as f:
+                            json.dump(_sa_cache, f, indent=2)
+                        os.replace(tmp_path, TRACKING_CACHE_FILE)
+                        log.debug(f"Webhook: stored schedule alert for {_sa_key}: {schedule_alert}")
+            except Exception as _sa_exc:
+                log.debug(f"Webhook: schedule alert storage failed: {_sa_exc}")
 
         log.info(f"Webhook schedule alert: {load_ref} [{stop_type}] {schedule_alert} (dist={distance_str} mi)")
         return {"status": "ok", "type": "schedule_alert", "load": load_ref, "alert": schedule_alert}
