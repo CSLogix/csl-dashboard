@@ -434,6 +434,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from csl_pg_writer import pg_update_shipment, pg_archive_shipment
+from csl_sheet_writer import sheet_update_import, sheet_archive_row
 
 SHEET_ID         = os.environ["SHEET_ID"]
 CREDENTIALS_FILE = os.environ.get("GOOGLE_CREDENTIALS_FILE", "/root/csl-credentials.json")
@@ -471,6 +472,88 @@ COL_TIMESTAMP = 15  # O
 
 # Statuses the bot sets -- only overwrite if current status is empty or one of these
 BOT_MANAGED_STATUSES = {'', 'Vessel', 'Vessel Arrived', 'Discharged', 'Returned to Port', 'On Vessel'}
+
+# ── Postgres migration: hardcoded lookups (replaces sheet tabs) ──────────
+import psycopg2
+import psycopg2.extras
+from dotenv import load_dotenv as _pg_load_dotenv
+_pg_load_dotenv("/root/csl-bot/csl-doc-tracker/.env")
+
+def _pg_connect():
+    """Connect to Postgres using dashboard .env credentials."""
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST", "localhost"),
+        port=int(os.getenv("DB_PORT", "5432")),
+        dbname=os.getenv("DB_NAME", "csl_dispatch"),
+        user=os.getenv("DB_USER", "csl_user"),
+        password=os.getenv("DB_PASSWORD", ""),
+    )
+
+SSL_LINKS = {
+    "maersk":    {"code": "MAERSK",      "url": "https://www.maersk.com/tracking"},
+    "hapag":     {"code": "HAPAG_LLOYD",  "url": "https://www.hapag-lloyd.com/en/online-business/track"},
+    "hapag-lloyd": {"code": "HAPAG_LLOYD","url": "https://www.hapag-lloyd.com/en/online-business/track"},
+    "one":       {"code": "ONE",          "url": "https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking"},
+    "evergreen": {"code": "EVERGREEN",    "url": "https://www.shipmentlink.com/tvs2/jsp/TVS2_498.jsp"},
+    "hmm":       {"code": "HMM",          "url": "https://www.hmm21.com/cms/business/ebiz/trackTrace"},
+    "cma cgm":   {"code": "CMA_CGM",      "url": "https://www.cma-cgm.com/ebusiness/tracking"},
+    "cma":       {"code": "CMA_CGM",      "url": "https://www.cma-cgm.com/ebusiness/tracking"},
+    "apl":       {"code": "CMA_CGM",      "url": "https://www.apl.com/tracking"},
+    "msc":       {"code": "MSC",          "url": "https://www.msc.com/en/track-a-shipment"},
+    "cosco":     {"code": "COSCO",        "url": "https://elines.coscoshipping.com/ebusiness/cargoTracking"},
+    "zim":       {"code": "ZIM",          "url": "https://www.zim.com/tools/track-a-shipment"},
+    "yang ming": {"code": "YANG_MING",    "url": "https://www.yangming.com/e-service/Track_Trace/track_trace_cargo_tracking.aspx"},
+    "acl":       {"code": "CMA_CGM",      "url": "https://www.aclcargo.com/track-trace/"},
+    "sm line":   {"code": "SM_LINE",      "url": "https://www.smlines.com/smline/CUP_HOM_3000.do"},
+    "sml":       {"code": "SM_LINE",      "url": "https://www.smlines.com/smline/CUP_HOM_3000.do"},
+    "matson":    {"code": "MATSON",        "url": "https://www.matson.com/tracking"},
+}
+
+ACCOUNT_REPS = {
+    "Allround": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Boviet":   {"rep": "",      "email": "Boviet-efj@evansdelivery.com"},
+    "Cadi":     {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "CNL":      {"rep": "Janice","email": "Janice.Cortes@evansdelivery.com"},
+    "DHL":      {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
+    "DSV":      {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "EShipping":{"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "IWS":      {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Kishco":   {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "Kripke":   {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "MAO":      {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "Mamata":   {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
+    "Meiko":    {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "MGF":      {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Mitchell's Transport": {"rep": "John F", "email": "John.Feltz@evansdelivery.com"},
+    "Rose":     {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "SEI Acquisition": {"rep": "John F", "email": "John.Feltz@evansdelivery.com"},
+    "Sutton":   {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Tanera":   {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "TCR":      {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Texas International": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "USHA":     {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+}
+
+
+def _resolve_ssl_pg(vessel, carrier):
+    """Resolve SSL code + URL from vessel/carrier text using hardcoded SSL_LINKS."""
+    for text in (vessel or "", carrier or ""):
+        val = text.strip().lower()
+        if not val:
+            continue
+        # Exact match
+        if val in SSL_LINKS:
+            return SSL_LINKS[val]
+        # Substring match
+        for key, info in SSL_LINKS.items():
+            if key in val:
+                return info
+        # Word-boundary match
+        for key, info in SSL_LINKS.items():
+            if any(w.startswith(key) for w in val.split()):
+                return info
+    return None
+
 
 # ShipmentLink status keyword → sheet dropdown value mapping
 SHIPMENTLINK_STATUS_MAP = {
@@ -1904,29 +1987,51 @@ def archive_completed_row(sheet, tab_name, sheet_row, row_data, url, eta, pickup
 
 def run_once(args):
     from zoneinfo import ZoneInfo as _ZI
+    from collections import defaultdict
     now_str = _time.strftime("%Y-%m-%d %H:%M ET", _time.localtime())
-    print(f"\n[{now_str}] Dray Import cycle...")
-    creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
-    gc    = gspread.authorize(creds)
+    print(f"\n[{now_str}] Dray Import cycle (Postgres mode)...")
+
+    # ── Read active dray import loads from Postgres ──────────────────────────
     try:
-        sheet = sheets_retry(gc.open_by_key, SHEET_ID)
+        conn = _pg_connect()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT efj, container, bol, vessel, carrier, origin, destination,
+                       CAST(eta AS TEXT) AS eta, CAST(lfd AS TEXT) AS lfd,
+                       CAST(pickup_date AS TEXT) AS pickup_date,
+                       CAST(delivery_date AS TEXT) AS delivery_date,
+                       status, bot_notes,
+                       CAST(return_date AS TEXT) AS return_date,
+                       account, rep
+                FROM shipments
+                WHERE move_type = 'Dray Import' AND archived = FALSE
+                ORDER BY account, efj
+            """)
+            all_loads = cur.fetchall()
+        conn.close()
     except Exception as exc:
-        print(f"FATAL: Could not open Google Sheet: {exc}")
+        print(f"FATAL: Could not read from Postgres: {exc}")
         return
 
-    account_lookup = load_account_lookup(sheet)
-    ssl_links      = load_ssl_links(sheet)
-    account_tabs   = get_account_tabs(sheet, account_lookup)
+    # Group by account
+    by_account = defaultdict(list)
+    for row in all_loads:
+        acct = row["account"] or "Unknown"
+        by_account[acct].append(row)
+
+    account_tabs = sorted(by_account.keys())
+    print(f"  Loaded {len(all_loads)} active Dray Import load(s) across {len(account_tabs)} account(s)")
+    print(f"  Accounts: {account_tabs}")
 
     if args.tab:
-        if args.tab in account_tabs:
+        if args.tab in by_account:
             account_tabs = [args.tab]
         else:
             print(f"Tab '{args.tab}' not found. Available: {account_tabs}")
             return
 
     if not account_tabs:
-        print("No account tabs found to process.")
+        print("No active Dray Import loads found.")
         return
 
     last_check = load_last_check()
@@ -1948,110 +2053,76 @@ def run_once(args):
         if not proxy_ok:
             print()
             print("  WARNING: Proxy is down - browser scrapers will be skipped.")
-            print("  Only API-based routes (Maersk, HMM) will run.")
+            print("  Only API-based routes will run.")
             print()
 
         for tab_name in account_tabs:
+            loads = by_account[tab_name]
             print(f"\n{'='*60}")
-            print(f"Tab: {tab_name}")
-
-            try:
-                ws           = sheets_retry(sheet.worksheet, tab_name)
-                display_rows = sheets_retry(ws.get_all_values)
-            except Exception as exc:
-                print(f"  ERROR reading tab '{tab_name}': {exc}")
-                continue
-            hyperlinks   = sheets_retry(get_sheet_hyperlinks, creds, SHEET_ID, tab_name)
-
-            if len(display_rows) < 2:
-                print(f"  Empty or missing header — skipped.")
-                continue
-
-            # Headers on row 2 (index 1), data from row 3 (index 2)
-            headers = display_rows[1]
-            try:
-                status_col = next(
-                    i for i, h in enumerate(headers) if h.strip().lower() == "status"
-                )
-            except StopIteration:
-                print(f"  ERROR: 'Status' column not found — skipped.")
-                continue
-
-            def _find_col(keyword, _h=headers):
-                for i, h in enumerate(_h):
-                    if keyword in h.strip().lower():
-                        return i
-                return None
-
-            account_col = _find_col("account")
-            rep_col     = _find_col("rep")
-            print(f"  Columns — Account: {account_col}  Rep: {rep_col}  Status: {status_col}")
-            print(f"  Data rows: {len(display_rows) - 2}")
+            print(f"Account: {tab_name}")
+            print(f"  Loads: {len(loads)}")
 
             dray_jobs = []
-            pro_alerts_file = "/root/csl-bot/pro_alerts.json"
-            try:
-                import json as _json
-                with open(pro_alerts_file) as _f: pro_alerts = _json.load(_f)
-            except: pro_alerts = {}
-            for row_idx, row in enumerate(display_rows[2:], start=2):
-                if len(row) <= 1 or row[1].strip().lower() != "dray import":
-                    continue
-                efj_val = row[0].strip() if row else ""
+            for row in loads:
+                efj_val = (row["efj"] or "").strip()
+                container = (row["container"] or "").strip()
+                bol = (row["bol"] or "").strip()
+                vessel = (row["vessel"] or "").strip()
+                carrier = (row["carrier"] or "").strip()
+
                 if not efj_val:
-                    import json as _json
-                    from datetime import datetime as _dt
-                    from zoneinfo import ZoneInfo as _ZI
-                    container_val = row[2].strip() if len(row)>2 else ""
-                    pro_key = f"pro:{tab_name}:{container_val}:{row_idx}"
-                    today = _dt.now(_ZI("America/New_York")).strftime("%Y-%m-%d")
-                    if pro_alerts.get(pro_key) != today:
-                        send_pro_alert(list(row), tab_name, account_lookup)
-                        pro_alerts[pro_key] = today
-                        with open(pro_alerts_file,"w") as _f: _json.dump(pro_alerts,_f)
-                    # Still track the container even without EFJ#
-                sheet_row = row_idx + 1
-                link_row  = hyperlinks[row_idx] if row_idx < len(hyperlinks) else []
-                # Resolve URL: hyperlink first, then SSL Links lookup from Column E
-                hyperlink_url = link_row[2] if len(link_row) > 2 else None
-                col_e_value = row[4] if len(row) > 4 else ""
-                ssl_match = resolve_ssl_from_column_f(col_e_value, ssl_links) if not hyperlink_url else None
-                resolved_url = hyperlink_url or (ssl_match["url"] if ssl_match else None)
-                resolved_ssl_code = (ssl_match["code"] if ssl_match else None)
+                    continue
+
+                # Resolve SSL code from vessel/carrier
+                ssl_match = _resolve_ssl_pg(vessel, carrier)
 
                 dray_jobs.append({
-                    "sheet_row": sheet_row,
-                    "container": row[2] if len(row) > 2 else "",
-                    "url":       resolved_url,
-                    "ssl_code":  resolved_ssl_code,
-                    "bol":       row[3] if len(row) > 3 else "",
-                    "vessel":    row[4] if len(row) > 4 else "",
-                    "carrier":   col_e_value,
-                    "account":   row[account_col] if account_col is not None and len(row) > account_col else "",
-                    "rep":       row[rep_col]     if rep_col     is not None and len(row) > rep_col     else "",
-                    "row_data":  row,
+                    "efj":       efj_val,
+                    "sheet_row": 0,  # Not used in PG mode
+                    "container": container,
+                    "url":       ssl_match["url"] if ssl_match else None,
+                    "ssl_code":  ssl_match["code"] if ssl_match else None,
+                    "bol":       bol,
+                    "vessel":    vessel,
+                    "carrier":   carrier,
+                    "account":   tab_name,
+                    "rep":       (row["rep"] or "").strip(),
+                    "row_data":  [
+                        efj_val, "Dray Import", container, bol, vessel, carrier,
+                        row["origin"] or "", row["destination"] or "",
+                        row["eta"] or "", row["lfd"] or "",
+                        row["pickup_date"] or "", row["delivery_date"] or "",
+                        row["status"] or "", "", row["bot_notes"] or "",
+                        row["return_date"] or "",
+                    ],
+                    # Existing values for overwrite guard
+                    "existing_eta":    row["eta"] or "",
+                    "existing_pickup": row["pickup_date"] or "",
+                    "existing_return": row["return_date"] or "",
+                    "existing_status": row["status"] or "",
                 })
 
             print(f"  Dray Import rows: {len(dray_jobs)}")
 
             tab_changes  = []
             archive_jobs = []
-            pending_updates = []
             for job in dray_jobs:
-                if not job["url"]:
-                    print(f"  Row {job['sheet_row']}: no URL — skipped.")
+                if not job["ssl_code"] and not job["url"]:
+                    print(f"  {job['efj']}: no SSL match for vessel={job['vessel']!r} carrier={job['carrier']!r} — skipped.")
                     continue
-                if not job["bol"]:
-                    print(f"  Row {job['sheet_row']}: no BOL — skipped.")
+                if not job["bol"] and not job["container"]:
+                    print(f"  {job['efj']}: no BOL or container — skipped.")
                     continue
 
+                # Use a throwaway list for pending_updates (sheet writes we discard)
+                _discard = []
                 try:
                     eta, pickup, ret, status = dray_import_workflow(
-                        browser, ws, job["sheet_row"], job["url"], job["bol"],
+                        browser, None, job["sheet_row"], job["url"], job["bol"],
                         job["container"], circuit_breaker=circuit_breaker,
                         vessel=job.get("vessel", ""),
                         carrier_name=job.get("carrier", ""),
-                        pending_updates=pending_updates,
+                        pending_updates=_discard,
                         proxy_ok=proxy_ok,
                         ssl_code=job.get("ssl_code"),
                         existing_row=job.get("row_data"),
@@ -2060,8 +2131,16 @@ def run_once(args):
                     print(f"    ERROR: Workflow crashed for {job['container']}: {_wf_err}")
                     eta, pickup, ret, status = None, None, None, None
 
-                container_id  = job["container"].strip() or f"row_{job['sheet_row']}"
+                container_id  = job["container"].strip() or job["efj"]
                 container_key = f"{tab_name}:{container_id}"
+
+                # If API returned nothing (timeout/error), carry forward previous state
+                # to prevent false "change" alerts from state oscillation
+                if eta is None and pickup is None and ret is None and status is None:
+                    prev = last_check.get(container_key, {})
+                    new_check[container_key] = prev  # keep previous good state
+                    print(f"    ⚠ No data returned for {container_id} — skipping comparison")
+                    continue
 
                 current = {
                     "eta":         eta    or "",
@@ -2071,17 +2150,30 @@ def run_once(args):
                 }
                 new_check[container_key] = current
 
-                # ── PG dual-write ──
-                _efj = (job["row_data"][0].strip() if job.get("row_data") else "")
-                if _efj and not args.dry_run:
+                # ── Write to Postgres (primary) ──────────────────────────────
+                if job["efj"] and not args.dry_run:
+                    # Apply same overwrite guards as sheet mode
+                    write_eta = eta if (eta and not job["existing_eta"]) else None
+                    write_pickup = pickup if (pickup and not job["existing_pickup"]) else None
+                    write_return = ret if (ret and not job["existing_return"]) else None
+                    write_status = status if (status and job["existing_status"] in BOT_MANAGED_STATUSES) else None
+
+                    ts = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
                     pg_update_shipment(
-                        _efj,
-                        eta=current["eta"] or None,
-                        pickup_date=current["lfd"] or None,
-                        return_date=current["return_date"] or None,
-                        status=current["status"] or None,
+                        job["efj"],
+                        eta=write_eta,
+                        pickup_date=write_pickup,
+                        return_date=write_return,
+                        status=write_status,
+                        bot_notes=ts,
                         account=tab_name,
                         move_type="Dray Import",
+                    )
+                    # Dual-write: update Master Sheet (best-effort)
+                    sheet_update_import(
+                        job["efj"], tab_name,
+                        eta=write_eta, pickup=write_pickup,
+                        return_date=write_return, status=write_status,
                     )
 
                 prev           = last_check.get(container_key, {})
@@ -2092,55 +2184,74 @@ def run_once(args):
                 ]
 
                 if changed_fields:
-                    tab_changes.append({
-                        "container":      container_id,
-                        "eta":            current["eta"],
-                        "lfd":            current["lfd"],
-                        "return_date":    current["return_date"],
-                        "status":         current["status"],
-                        "changed_fields": changed_fields,
-                    })
+                    # Skip if all current values are empty (API returned partial garbage)
+                    has_data = any(current[f] for f in ("eta", "lfd", "return_date", "status"))
+                    if has_data:
+                        tab_changes.append({
+                            "container":      container_id,
+                            "eta":            current["eta"],
+                            "lfd":            current["lfd"],
+                            "return_date":    current["return_date"],
+                            "status":         current["status"],
+                            "changed_fields": changed_fields,
+                        })
+                    else:
+                        print(f"    ⚠ Suppressed empty-value alert for {container_id}")
 
                 # Queue for archiving if container has been returned to port
                 if status == "Returned to Port":
                     archive_jobs.append({
-                        "sheet_row":   job["sheet_row"],
-                        "row_data":    job["row_data"],
-                        "url":         job["url"],
+                        "efj":         job["efj"],
+                        "container":   container_id,
                         "eta":         eta,
                         "pickup":      pickup,
                         "return_date": ret,
                         "status":      status,
-                        "container":   container_id,
                     })
 
-            # ── Batch write all scrape results for this tab ─────────────────────
-            if pending_updates and not args.dry_run:
-                try:
-                    sheets_retry(ws.batch_update, pending_updates,
-                                value_input_option="RAW")
-                    print(f"  Batch-wrote {len(pending_updates)} cell(s)")
-                except Exception as exc:
-                    print(f"  WARNING: Batch write failed: {exc}")
+            # ── Archive completed loads (Postgres only) ──────────────────────
+            if archive_jobs and not args.dry_run:
+                print(f"\n  Archiving {len(archive_jobs)} completed load(s)...")
+                for aj in archive_jobs:
+                    pg_archive_shipment(aj["efj"])
+                    sheet_archive_row(aj["efj"], tab_name, rep=ACCOUNT_REPS.get(tab_name, {}).get("rep"))
+                    print(f"  Archived {aj['efj']} (Returned to Port)")
 
-            # ── Archive completed rows (bottom-to-top to keep row numbers valid) ──
-            if archive_jobs:
-                print(f"\n  Archiving {len(archive_jobs)} completed row(s)...")
-                # Sort highest row number first so deletions don't shift lower rows
-                for aj in sorted(archive_jobs, key=lambda j: j["sheet_row"], reverse=True):
-                    ok = archive_completed_row(
-                        sheet, tab_name, aj["sheet_row"], aj["row_data"],
-                        aj["url"], aj["eta"], aj["pickup"], aj["return_date"],
-                        aj["status"], account_lookup,
-                    )
-                    if ok:
-                        # Remove from new_check — row no longer exists in the tab
-                        archived_key = f"{tab_name}:{aj['container']}"
-                        new_check.pop(archived_key, None)
+                    # Remove from new_check
+                    archived_key = f"{tab_name}:{aj['container']}"
+                    new_check.pop(archived_key, None)
+
+                    # Send archive email
+                    rep_info  = ACCOUNT_REPS.get(tab_name, {})
+                    rep_email = rep_info.get("email", "")
+                    rep_name  = rep_info.get("rep", "")
+                    if rep_email:
+                        timestamp = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
+                        subject = f"CSL Archived | {aj['efj']} | {aj['container']} | Returned to Port"
+                        _td = 'style="padding:4px 10px;font-size:13px;"'
+                        _tl = 'style="padding:4px 10px;color:#555;font-size:13px;"'
+                        body = (
+                            f'<div style="font-family:Arial,sans-serif;max-width:700px;">'
+                            f'<div style="background:#1b5e20;color:white;padding:10px 14px;border-radius:6px 6px 0 0;font-size:15px;">'
+                            f'<b>Container Archived &mdash; Returned to Port</b></div>'
+                            f'<div style="border:1px solid #ddd;border-top:none;border-radius:0 0 6px 6px;padding:12px;">'
+                            f'<p style="margin:0 0 8px 0;font-size:12px;color:#888;">Archived: {timestamp}</p>'
+                            f'<table style="border-collapse:collapse;">'
+                            f'<tr><td {_tl}>EFJ#</td><td {_td}><b>{aj["efj"]}</b></td></tr>'
+                            f'<tr><td {_tl}>Container</td><td {_td}><b>{aj["container"]}</b></td></tr>'
+                            f'<tr><td {_tl}>Account</td><td {_td}>{tab_name}</td></tr>'
+                            f'<tr><td {_tl}>Rep</td><td {_td}>{rep_name}</td></tr>'
+                            f'<tr><td {_tl}>ETA</td><td {_td}>{aj["eta"] or "—"}</td></tr>'
+                            f'<tr><td {_tl}>Pickup</td><td {_td}>{aj["pickup"] or "—"}</td></tr>'
+                            f'<tr><td {_tl}>Returned</td><td {_td}>{aj["return_date"] or "—"}</td></tr>'
+                            f'<tr><td {_tl}>Status</td><td {_td}>{aj["status"]}</td></tr>'
+                            f'</table></div></div>'
+                        )
+                        _send_email(rep_email, EMAIL_CC, subject, body)
 
             if tab_changes:
                 print(f"\n  {len(tab_changes)} change(s) detected — sending email...")
-                send_account_notification(tab_name, account_lookup, tab_changes)
+                send_account_notification(tab_name, ACCOUNT_REPS, tab_changes)
             else:
                 print(f"\n  No changes in '{tab_name}'.")
 

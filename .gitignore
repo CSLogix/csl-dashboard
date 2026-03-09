@@ -1,15 +1,38 @@
+# Python
 __pycache__/
 *.pyc
+
+# Logs
 *.log
+
+# Backup files (all variations)
 *.backup
 *.save
 *.save.*
-*.bak
-*.bak.*
+*.bak*
+*.pre-*
+*_backup_*.py
+
+# State files (runtime)
 *.json
 !dashboard/package.json
 !dashboard/package-lock.json
+
+# Build output + old deploys
+dist/
+csl-doc-tracker/static/dist-backup/
+csl-doc-tracker/static/react/
+
+# Uploads + runtime
+csl-doc-tracker/uploads/
+csl-doc-tracker/.pids/
+csl-doc-tracker/.session_secret
+
+# Environment + credentials
 .env
 .env.local
 node_modules/
-dist/
+csl_gmail_token.json
+csl-credentials.json
+credentials.json
+token.json

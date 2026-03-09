@@ -3652,27 +3652,51 @@ async def api_unbilled_upload(request: Request):
             )
             reconciled = cur.rowcount
 
-    log.info("Unbilled upload: %d inserted, %d updated, %d reconciled (batch=%s)",
-             inserted, updated, reconciled, batch_id)
+    # Cross-reference: how many active unbilled orders have delivered shipments?
+    delivered_count = 0
+    try:
+        with db.get_cursor() as _xref_cur:
+            _xref_cur.execute("""
+                SELECT COUNT(*) as cnt
+                FROM unbilled_orders u
+                JOIN shipments s ON REPLACE(u.order_num, ' ', '') = s.efj
+                WHERE u.dismissed = FALSE
+                  AND LOWER(s.status) IN ('delivered','completed','empty returned','billed_closed','returned to port')
+            """)
+            delivered_count = _xref_cur.fetchone()["cnt"]
+    except Exception:
+        pass
+
+    log.info("Unbilled upload: %d inserted, %d updated, %d reconciled, %d delivered (batch=%s)",
+             inserted, updated, reconciled, delivered_count, batch_id)
     return JSONResponse({
         "ok": True, "imported": inserted + updated,
         "inserted": inserted, "updated": updated, "reconciled": reconciled,
+        "delivered_count": delivered_count,
         "batch": batch_id
     })
 
 
 @app.get("/api/unbilled")
 def api_unbilled_list():
-    """List all non-dismissed unbilled orders."""
+    """List all non-dismissed unbilled orders, enriched with shipment status."""
     with db.get_cursor() as cur:
         cur.execute(
-        """SELECT id, order_num, container, bill_to, tractor,
-                  entered::text, appt_date::text, dliv_dt::text, act_dt::text,
-                  age_days, upload_batch, created_at::text,
-                  COALESCE(billing_status, 'ready_to_bill') as billing_status
-           FROM unbilled_orders
-           WHERE dismissed = FALSE
-           ORDER BY age_days DESC"""
+        """SELECT u.id, u.order_num, u.container, u.bill_to, u.tractor,
+                  u.entered::text, u.appt_date::text, u.dliv_dt::text, u.act_dt::text,
+                  u.age_days, u.upload_batch, u.created_at::text,
+                  COALESCE(u.billing_status, 'ready_to_bill') as billing_status,
+                  s.status as shipment_status,
+                  s.account as shipment_account,
+                  s.delivery_date::text as shipment_delivery,
+                  s.archived as shipment_archived,
+                  CASE WHEN LOWER(COALESCE(s.status,'')) IN
+                       ('delivered','completed','empty returned','billed_closed','returned to port')
+                       THEN TRUE ELSE FALSE END as shipment_delivered
+           FROM unbilled_orders u
+           LEFT JOIN shipments s ON REPLACE(u.order_num, ' ', '') = s.efj
+           WHERE u.dismissed = FALSE
+           ORDER BY u.age_days DESC"""
         )
         rows = cur.fetchall()
     return JSONResponse({"orders": [dict(r) for r in rows]})
@@ -3695,7 +3719,21 @@ def api_unbilled_stats():
         )
         total_age = cur.fetchone()["total_age"]
         avg_age = round(total_age / count, 1) if count > 0 else 0
-    return JSONResponse({"count": count, "avg_age": avg_age, "by_customer": by_customer})
+    # Count unbilled orders with delivered shipments
+    delivered_count = 0
+    try:
+        with db.get_cursor() as _dc:
+            _dc.execute("""
+                SELECT COUNT(*) as cnt
+                FROM unbilled_orders u
+                JOIN shipments s ON REPLACE(u.order_num, ' ', '') = s.efj
+                WHERE u.dismissed = FALSE
+                  AND LOWER(s.status) IN ('delivered','completed','empty returned','billed_closed','returned to port')
+            """)
+            delivered_count = _dc.fetchone()["cnt"]
+    except Exception:
+        pass
+    return JSONResponse({"count": count, "avg_age": avg_age, "by_customer": by_customer, "delivered_count": delivered_count})
 
 
 @app.post("/api/unbilled/{order_id}/dismiss")
@@ -3712,7 +3750,7 @@ def api_unbilled_dismiss(order_id: int):
 
 @app.post("/api/unbilled/{order_id}/status")
 async def api_unbilled_update_status(order_id: int, request: Request):
-    """Update billing status of an unbilled order."""
+    """Update billing status of an unbilled order. Auto-archives shipment on 'closed'."""
     body = await request.json()
     new_status = body.get("billing_status", "").strip()
     if not new_status:
@@ -3720,43 +3758,99 @@ async def api_unbilled_update_status(order_id: int, request: Request):
     valid = ("ready_to_bill", "billed_cx", "driver_paid", "closed")
     if new_status not in valid:
         raise HTTPException(400, f"Invalid billing_status: {new_status}")
+
+    # Update billing status + get order_num for cross-reference
+    order_num = None
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
             cur.execute(
-                "UPDATE unbilled_orders SET billing_status = %s WHERE id = %s AND dismissed = FALSE",
+                "UPDATE unbilled_orders SET billing_status = %s WHERE id = %s AND dismissed = FALSE RETURNING order_num",
                 (new_status, order_id)
             )
-            if cur.rowcount == 0:
+            row = cur.fetchone()
+            if not row:
                 raise HTTPException(404, f"Order {order_id} not found or dismissed")
-    # Auto-dismiss when closed
-    if new_status == "closed":
+            order_num = row["order_num"]
+
+    # Auto-dismiss + archive on closed
+    if new_status == "closed" and order_num:
         with db.get_conn() as conn:
             with db.get_cursor(conn) as cur:
                 cur.execute(
                     "UPDATE unbilled_orders SET dismissed = TRUE, dismissed_at = NOW(), dismissed_reason = 'closed' WHERE id = %s",
                     (order_id,)
                 )
+        # Archive matching shipment
+        efj = order_num.replace(" ", "").strip()
+        if efj:
+            _archive_shipment_on_close(efj)
+
     return JSONResponse({"ok": True, "billing_status": new_status})
 
 
 
 
 
-@app.post("/api/unbilled/{order_id}/status")
-async def api_unbilled_update_status(order_id: int, request: Request):
-    """Update billing status of an unbilled order."""
-    data = await request.json()
-    billing_status = data.get("billing_status")
-    allowed = ["ready_to_bill", "billed_cx", "driver_paid", "closed"]
-    if billing_status not in allowed:
-        return JSONResponse({"error": f"Invalid status. Must be one of: {allowed}"}, status_code=400)
+# (duplicate endpoint removed — consolidated into single handler above)
+
+
+# ===================================================================
+# UNBILLED → SHIPMENT ARCHIVE HELPERS
+# ===================================================================
+
+def _archive_shipment_on_close(efj: str):
+    """Archive a shipment in PG + Google Sheet when its unbilled order is closed."""
+    import sys as _sys
+    _csl_bot_dir = "/root/csl-bot"
+    if _csl_bot_dir not in _sys.path:
+        _sys.path.insert(0, _csl_bot_dir)
+    # PG archive
+    try:
+        from csl_pg_writer import pg_archive_shipment
+        pg_archive_shipment(efj)
+        log.info("Unbilled close → PG archived %s", efj)
+    except Exception as e:
+        log.warning("Unbilled close → PG archive failed for %s: %s", efj, e)
+    # Sheet archive (fire-and-forget)
+    try:
+        with db.get_cursor() as cur:
+            cur.execute("SELECT account, rep FROM shipments WHERE efj = %s", (efj,))
+            ship = cur.fetchone()
+        if ship and ship.get("account"):
+            from csl_sheet_writer import sheet_archive_row
+            sheet_archive_row(efj, ship["account"], ship.get("rep"))
+    except Exception as e:
+        log.warning("Unbilled close → sheet archive failed for %s: %s", efj, e)
+    # Invalidate completed cache
+    _completed_cache["ts"] = 0
+
+
+@app.post("/api/unbilled/bulk-close-delivered")
+async def api_unbilled_bulk_close_delivered():
+    """Close all unbilled orders whose matching shipment is delivered/completed."""
+    closed_efjs = []
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
-            cur.execute(
-                "UPDATE unbilled_orders SET billing_status = %s WHERE id = %s",
-                (billing_status, order_id)
-            )
-    return JSONResponse({"ok": True})
+            cur.execute("""
+                UPDATE unbilled_orders u
+                SET billing_status = 'closed',
+                    dismissed = TRUE,
+                    dismissed_at = NOW(),
+                    dismissed_reason = 'auto_delivered'
+                FROM shipments s
+                WHERE REPLACE(u.order_num, ' ', '') = s.efj
+                  AND u.dismissed = FALSE
+                  AND LOWER(s.status) IN ('delivered','completed','empty returned','billed_closed','returned to port')
+                RETURNING s.efj
+            """)
+            closed_efjs = [r["efj"] for r in cur.fetchall()]
+
+    # Archive each in PG + sheet (best-effort)
+    for efj in closed_efjs:
+        _archive_shipment_on_close(efj)
+
+    log.info("Bulk close delivered: %d orders closed + archived", len(closed_efjs))
+    return JSONResponse({"ok": True, "closed_count": len(closed_efjs)})
 
 
 # ===================================================================
@@ -4101,20 +4195,22 @@ async def api_macropoint(efj: str):
     last_scraped = cached.get("last_scraped")
     mp_load_id_cached = cached.get("mp_load_id")
 
-    # Build stop timeline array for frontend
-    timeline = []
-    if stop_times.get("stop1_arrived"):
-        timeline.append({"event": "Arrived at Pickup", "time": stop_times["stop1_arrived"], "type": "arrived"})
-    elif stop_times.get("stop1_eta"):
-        timeline.append({"event": "Pickup ETA", "time": stop_times["stop1_eta"], "type": "eta"})
-    if stop_times.get("stop1_departed"):
-        timeline.append({"event": "Departed Pickup", "time": stop_times["stop1_departed"], "type": "departed"})
-    if stop_times.get("stop2_arrived"):
-        timeline.append({"event": "Arrived at Delivery", "time": stop_times["stop2_arrived"], "type": "arrived"})
-    elif stop_times.get("stop2_eta"):
-        timeline.append({"event": "Delivery ETA", "time": stop_times["stop2_eta"], "type": "eta"})
-    if stop_times.get("stop2_departed"):
-        timeline.append({"event": "Departed Delivery", "time": stop_times["stop2_departed"], "type": "departed"})
+    # Build stop timeline from PG tracking_events (durable) + cache fallback
+    timeline = _build_timeline_from_pg(efj)
+    if not timeline:
+        # Fallback: build from cache stop_times (for loads without PG events)
+        if stop_times.get("stop1_arrived"):
+            timeline.append({"event": "Arrived at Pickup", "time": stop_times["stop1_arrived"], "type": "arrived"})
+        elif stop_times.get("stop1_eta"):
+            timeline.append({"event": "Pickup ETA", "time": stop_times["stop1_eta"], "type": "eta"})
+        if stop_times.get("stop1_departed"):
+            timeline.append({"event": "Departed Pickup", "time": stop_times["stop1_departed"], "type": "departed"})
+        if stop_times.get("stop2_arrived"):
+            timeline.append({"event": "Arrived at Delivery", "time": stop_times["stop2_arrived"], "type": "arrived"})
+        elif stop_times.get("stop2_eta"):
+            timeline.append({"event": "Delivery ETA", "time": stop_times["stop2_eta"], "type": "eta"})
+        if stop_times.get("stop2_departed"):
+            timeline.append({"event": "Departed Delivery", "time": stop_times["stop2_departed"], "type": "departed"})
 
     # Detect behind schedule from ETA strings
     behind_schedule = False
@@ -6618,7 +6714,8 @@ _COMPLETED_TABS = {
 
 
 def _refresh_completed_cache():
-    """Fetch completed loads from all 3 Completed tabs in Master Tracker."""
+    """Fetch completed loads from all 3 Completed tabs in Master Tracker.
+    Enriches account from PG shipments table and sorts newest-first."""
     now = _time.time()
     if now - _completed_cache["ts"] < CACHE_TTL:
         return
@@ -6632,7 +6729,7 @@ def _refresh_completed_cache():
             gc_local = gspread.authorize(creds)
             sh = gc_local.open_by_key(SHEET_ID)
             tab_names = list(_COMPLETED_TABS.keys())
-            ranges = [f"'{t}'!A:P" for t in tab_names]
+            ranges = [f"\'{t}\'!A:P" for t in tab_names]
             batch_result = sh.values_batch_get(ranges)
             value_ranges = batch_result.get("valueRanges", [])
             loads = []
@@ -6674,11 +6771,111 @@ def _refresh_completed_cache():
                         "bot_alert": cell("bot_alert"),
                         "return_port": cell("return_port"),
                         "rep": rep,
-                        "account": tab_name.replace("Completed ", ""),
+                        "account": "",  # enriched below from PG
                     })
+
+            # --- Enrich account from PG shipments table ---
+            efj_list = [l["efj"] for l in loads if l["efj"]]
+            pg_accounts = {}
+            if efj_list:
+                try:
+                    with db.get_cursor() as cursor:
+                        cursor.execute(
+                            "SELECT efj, account FROM shipments WHERE efj = ANY(%s)",
+                            (efj_list,)
+                        )
+                        pg_accounts = {r["efj"]: r["account"] for r in cursor.fetchall() if r.get("account")}
+                except Exception as pg_err:
+                    log.warning("Completed cache PG account lookup failed: %s", pg_err)
+
+            # Fallback: reverse rep_map from sheet_cache (account -> rep)
+            rep_map = getattr(sheet_cache, "rep_map", {})
+            # Build reverse: rep -> list of accounts
+            rev_rep = {}
+            for acct, r in rep_map.items():
+                rev_rep.setdefault(r, []).append(acct)
+
+            for load in loads:
+                efj = load["efj"]
+                if efj in pg_accounts:
+                    load["account"] = pg_accounts[efj]
+                else:
+                    # If only one account for this rep, use it; otherwise leave blank
+                    accts = rev_rep.get(load["rep"], [])
+                    load["account"] = accts[0] if len(accts) == 1 else ""
+
+            # --- Sort by delivery date descending (newest first) ---
+            import re as _re
+            def _delivery_sort_key(load):
+                """Parse delivery date for sorting. Returns sortable string, empty last."""
+                d = load.get("delivery", "") or load.get("pickup", "") or ""
+                # Try to extract date portion (handles "MM-DD HH:MM", "MM/DD", "YYYY-MM-DD", etc.)
+                # Normalize to comparable form
+                d = d.strip().split()[0] if d.strip() else ""  # take date part only
+                if not d:
+                    return "0000-00-00"
+                # Handle MM-DD or MM/DD format
+                m = _re.match(r"(\d{1,2})[/-](\d{1,2})", d)
+                if m:
+                    return f"2026-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+                # Handle YYYY-MM-DD
+                m2 = _re.match(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", d)
+                if m2:
+                    return f"{m2.group(1)}-{int(m2.group(2)):02d}-{int(m2.group(3)):02d}"
+                return d
+
+            loads.sort(key=_delivery_sort_key, reverse=True)
+
+            # --- Merge PG-archived shipments (Tolead, Boviet, and any PG-only archives) ---
+            try:
+                with db.get_cursor() as _pg_cur:
+                    _pg_cur.execute("""
+                        SELECT efj, move_type, container, bol, vessel, carrier,
+                               origin, destination, eta, lfd,
+                               pickup_date::text, delivery_date::text, status,
+                               notes, bot_notes, return_date::text,
+                               rep, account, hub
+                        FROM shipments
+                        WHERE archived = TRUE
+                        ORDER BY archived_at DESC NULLS LAST
+                    """)
+                    pg_archived = _pg_cur.fetchall()
+
+                existing_efjs = {l["efj"] for l in loads}
+                pg_added = 0
+                for row in pg_archived:
+                    if row["efj"] not in existing_efjs:
+                        loads.append({
+                            "efj": row["efj"] or "",
+                            "move_type": row["move_type"] or "",
+                            "container": row["container"] or "",
+                            "bol": row["bol"] or "",
+                            "ssl": row["vessel"] or "",
+                            "carrier": row["carrier"] or "",
+                            "origin": row["origin"] or "",
+                            "destination": row["destination"] or "",
+                            "eta": row["eta"] or "",
+                            "lfd": row["lfd"] or "",
+                            "pickup": row["pickup_date"] or "",
+                            "delivery": row["delivery_date"] or "",
+                            "status": row["status"] or "",
+                            "notes": row["notes"] or "",
+                            "bot_alert": row["bot_notes"] or "",
+                            "return_port": row["return_date"] or "",
+                            "rep": row["rep"] or "",
+                            "account": row["account"] or "",
+                        })
+                        existing_efjs.add(row["efj"])
+                        pg_added += 1
+                if pg_added:
+                    loads.sort(key=_delivery_sort_key, reverse=True)
+                    log.info("Completed cache: merged %d PG-archived shipments", pg_added)
+            except Exception as pg_merge_err:
+                log.warning("Completed cache PG merge failed: %s", pg_merge_err)
+
             _completed_cache["data"] = loads
             _completed_cache["ts"] = _time.time()
-            log.info("Completed cache: %d loads from %d tabs", len(loads), len(tab_names))
+            log.info("Completed cache: %d total loads (sheets + PG)", len(loads))
         except Exception as e:
             log.error("Completed cache refresh failed: %s", e)
 
@@ -7230,6 +7427,18 @@ async def api_v2_shipments(request: Request, account: str = None, status: str = 
             s["email_count"] = 0
             s["email_max_priority"] = 0
 
+    # Enrich with mp_status from tracking cache (for MP STATUS badge)
+    try:
+        _tc = _read_tracking_cache()
+        for s in shipments:
+            _ce = _find_tracking_entry(_tc, s["efj"])
+            if _ce:
+                s["mp_status"] = _ce.get("status", "")
+                if not s.get("container_url") and _ce.get("macropoint_url"):
+                    s["container_url"] = _ce["macropoint_url"]
+    except Exception:
+        pass
+
     return {"shipments": shipments, "total": len(shipments)}
 
 
@@ -7422,8 +7631,8 @@ def _v2_write_status_to_sheet(efj: str, new_status: str, account: str, hub: str 
 
 
 @app.post("/api/v2/load/{efj}/update")
-async def api_v2_update_field(efj: str, request: Request):
-    """Update any field(s) on a shipment in Postgres."""
+async def api_v2_update_field(efj: str, request: Request, background_tasks: BackgroundTasks):
+    """Update any field(s) on a shipment in Postgres + write back to Master Sheet."""
     body = await request.json()
 
     # Allowed fields to update
@@ -7452,12 +7661,19 @@ async def api_v2_update_field(efj: str, request: Request):
             if not row:
                 raise HTTPException(404, f"Shipment {efj} not found")
 
+    # Fire-and-forget: write changed fields back to Master Sheet
+    account = row["account"] or ""
+    if account and account not in _SHARED_SHEET_ACCOUNTS:
+        sheet_fields = {k: v for k, v in body.items() if k in ALLOWED and k != "archived"}
+        if sheet_fields:
+            background_tasks.add_task(_write_fields_to_master_sheet, efj, account, sheet_fields)
+
     return {"ok": True, "shipment": _shipment_row_to_dict(row)}
 
 
 @app.post("/api/v2/load/add")
-async def api_v2_add_shipment(request: Request):
-    """Insert a new shipment into Postgres. Write to Google Sheet if shared account."""
+async def api_v2_add_shipment(request: Request, background_tasks: BackgroundTasks):
+    """Insert a new shipment into Postgres. Write to Google Sheet."""
     body = await request.json()
     efj = body.get("efj", "").strip()
     account = body.get("account", "").strip()
@@ -7509,7 +7725,181 @@ async def api_v2_add_shipment(request: Request):
     if not row:
         raise HTTPException(409, f"Shipment {efj} already exists")
 
+    # Fire-and-forget: add new row to Master Sheet
+    if account and account not in _SHARED_SHEET_ACCOUNTS:
+        background_tasks.add_task(_add_load_to_master_sheet, efj, account, body)
+
     return {"ok": True, "shipment": _shipment_row_to_dict(row)}
+
+
+
+
+# ═══ Tracking Events Persistence ═══════════════════════════════════════════
+
+def _persist_tracking_event(efj: str, load_ref: str, event_code: str, stop_name: str,
+                            stop_type: str, status_mapped: str, lat: str, lon: str,
+                            city: str, state: str, event_time: str, mp_order_id: str,
+                            raw_params: dict = None):
+    """Persist a webhook event to tracking_events PG table. Fire-and-forget."""
+    try:
+        import json as _json
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("""
+                    INSERT INTO tracking_events (
+                        efj, load_ref, event_code, event_type, stop_name, stop_type,
+                        status_mapped, lat, lon, city, state, event_time,
+                        mp_order_id, raw_params
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (efj, load_ref, event_code, event_code, stop_name, stop_type,
+                      status_mapped, lat, lon, city, state, event_time or None,
+                      mp_order_id, _json.dumps(raw_params) if raw_params else None))
+    except Exception as e:
+        log.debug(f"Failed to persist tracking event for {efj}: {e}")
+
+
+def _build_timeline_from_pg(efj: str) -> list:
+    """Build a chronological timeline from tracking_events PG table.
+
+    Uses stop_name + shipment origin/destination to determine pickup vs delivery
+    instead of counting X1 occurrences (which fails when pickup events are missing).
+    """
+    try:
+        with db.get_cursor() as cur:
+            cur.execute("""
+                SELECT event_code, status_mapped, stop_name, stop_type,
+                       event_time, city, state
+                FROM tracking_events
+                WHERE efj = %s AND event_code IN ('AF', 'X1', 'X2', 'X4', 'X6', 'D1')
+                ORDER BY event_time ASC
+            """, (efj,))
+            rows = cur.fetchall()
+    except Exception:
+        return []
+
+    if not rows:
+        return []
+
+    # Get shipment origin/destination for stop matching
+    origin = ""
+    destination = ""
+    try:
+        with db.get_cursor() as cur:
+            cur.execute("SELECT origin, destination FROM shipments WHERE efj = %s", (efj,))
+            ship = cur.fetchone()
+            if ship:
+                origin = (ship["origin"] or "").upper()
+                destination = (ship["destination"] or "").upper()
+    except Exception:
+        pass
+
+    def _is_pickup_stop(stop_name, stop_type, city, state):
+        """Determine if an event is at the pickup stop."""
+        sn = (stop_name or "").upper()
+        st = (stop_type or "").upper()
+        c = (city or "").upper()
+        s = (state or "").upper()
+        # Explicit stop type from Macropoint
+        if st in ("PICKUP", "ORIGIN"):
+            return True
+        if st in ("DROPOFF", "DELIVERY", "DESTINATION"):
+            return False
+        # Match against shipment origin/destination
+        if origin and (origin in sn or c in origin or sn in origin):
+            return True
+        if destination and (destination in sn or c in destination or sn in destination):
+            return False
+        # Fallback: if city matches destination, it's delivery
+        if destination and c and c in destination:
+            return False
+        if origin and c and c in origin:
+            return True
+        return None  # Unknown
+
+    timeline = []
+    for row in rows:
+        code = row["event_code"]
+        stop = row["stop_name"] or ""
+        stop_type = row["stop_type"] or ""
+        city = row["city"] or ""
+        state = row["state"] or ""
+        location = f"{city}, {state}".strip(", ") if city or state else stop
+        event_time = row["event_time"].isoformat() if row["event_time"] else ""
+
+        if code == "AF":
+            timeline.append({
+                "event": "Tracking Started",
+                "time": event_time,
+                "type": "info",
+                "location": location,
+            })
+        elif code == "X1":
+            is_pickup = _is_pickup_stop(stop, stop_type, city, state)
+            if is_pickup:
+                timeline.append({
+                    "event": "Arrived at Pickup",
+                    "time": event_time,
+                    "type": "arrived",
+                    "location": location,
+                })
+            else:
+                timeline.append({
+                    "event": "Arrived at Delivery",
+                    "time": event_time,
+                    "type": "arrived",
+                    "location": location,
+                })
+        elif code == "X2":
+            is_pickup = _is_pickup_stop(stop, stop_type, city, state)
+            if is_pickup:
+                timeline.append({
+                    "event": "Departed Pickup",
+                    "time": event_time,
+                    "type": "departed",
+                    "location": location,
+                })
+            else:
+                timeline.append({
+                    "event": "Departed Delivery",
+                    "time": event_time,
+                    "type": "departed",
+                    "location": location,
+                })
+        elif code == "X4":
+            timeline.append({
+                "event": "Departed Pickup - En Route",
+                "time": event_time,
+                "type": "departed",
+                "location": location,
+            })
+        elif code in ("X6", "D1"):
+            timeline.append({
+                "event": "Delivered",
+                "time": event_time,
+                "type": "delivered",
+                "location": location,
+            })
+
+    return timeline
+
+# ═══ Sheet Write-Back Helpers (fire-and-forget) ═══════════════════════════
+
+def _write_fields_to_master_sheet(efj: str, account: str, fields: dict):
+    """Background task: write dashboard field edits back to Master Sheet."""
+    try:
+        from csl_sheet_writer import sheet_update_field
+        sheet_update_field(efj, account, fields)
+    except Exception as e:
+        log.warning("Sheet write-back failed for %s [%s]: %s (PG update succeeded)", efj, account, e)
+
+
+def _add_load_to_master_sheet(efj: str, account: str, body: dict):
+    """Background task: append new dashboard-created load to Master Sheet."""
+    try:
+        from csl_sheet_writer import sheet_add_row
+        sheet_add_row(efj, account, body)
+    except Exception as e:
+        log.warning("Sheet add-row failed for %s [%s]: %s (PG insert succeeded)", efj, account, e)
 
 
 # ═══ Macropoint Webhook (migrated from standalone webhook.py) ═══════════
@@ -7586,6 +7976,10 @@ _STATUS_RANK = {
     "Tracking Completed Successfully": 8,
 }
 
+
+# Statuses that are "done" — ignore all further webhook/monitor events
+_TERMINAL_STATUSES = {"Delivered", "Tracking Completed Successfully", "Billed/Closed", "billed_closed"}
+
 def _status_is_regression(old_status, new_status):
     """Return True if new_status is a regression from old_status."""
     old_rank = _STATUS_RANK.get(old_status, 0)
@@ -7604,6 +7998,9 @@ _WEBHOOK_STATUS_MAP = {
     "DRIVER_UNRESPONSIVE": "Driver Phone Unresponsive",
     "RUNNING_LATE": "Running Late",
     "CANT_MAKE_IT": "Can\'t Make It",
+    "TRACKING_COMPLETED_SUCCESSFULLY": "Delivered",
+    "TRACKING_COMPLETED": "Delivered",
+    "COMPLETED": "Delivered",
 }
 
 _WEBHOOK_LOG = "/root/csl-bot/webhook_payloads.log"
@@ -7697,6 +8094,11 @@ def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload
     entry["last_scraped"] = now
     entry["webhook_updated"] = True
 
+    # Auto-populate macropoint_url from MPOrderID if available
+    mp_order_id = payload.get("mp_order_id") or payload.get("MPOrderID") or ""
+    if mp_order_id and not entry.get("macropoint_url"):
+        entry["macropoint_url"] = f"https://visibility.macropoint.com/shipments?l={mp_order_id}"
+
     stop_times = entry.get("stop_times", {})
     event_upper = (payload.get("eventType") or payload.get("event_type") or "").upper()
     event_time = payload.get("eventTime") or payload.get("timestamp") or now
@@ -7769,10 +8171,14 @@ def _webhook_send_alert_background(efj: str, load_num: str, status: str,
         dropdown = _ALERT_STATUS_MAP.get(status)
 
         # Write PG status update
-        # ── Block status regression in PG ──
-        if dropdown and _status_is_regression(existing_status, status):
-            log.info(f"Webhook BG: BLOCKED PG regression {efj} [{existing_status}] -> [{dropdown}]")
-            dropdown = None  # skip PG write but still allow email for info
+        # ── Block status regression (skip PG write AND email) ──
+        if _status_is_regression(existing_status, status):
+            log.info(f"Webhook BG: BLOCKED regression {efj} [{existing_status}] -> [{status}] — skipping entirely")
+            return
+        # ── Skip if load is already in terminal status ──
+        if existing_status in _TERMINAL_STATUSES:
+            log.info(f"Webhook BG: SKIP {efj} — already in terminal status [{existing_status}]")
+            return
         if dropdown and dropdown != existing_status:
             try:
                 from csl_pg_writer import pg_update_shipment as _pg_up
@@ -7786,6 +8192,22 @@ def _webhook_send_alert_background(efj: str, load_num: str, status: str,
                 log.info(f"Webhook bg: PG updated {efj} -> {dropdown}")
             except Exception as exc:
                 log.warning(f"Webhook bg: PG write failed for {efj}: {exc}")
+
+        # Write container_url to PG if available from cache
+        try:
+            with open(TRACKING_CACHE_FILE, "r") as _cf:
+                _cache_tmp = json.load(_cf)
+            _entry_tmp = _cache_tmp.get(matched_key, {})
+            _mp_url = _entry_tmp.get("macropoint_url", "")
+            if _mp_url:
+                with db.get_cursor() as cur:
+                    cur.execute(
+                        "UPDATE shipments SET container_url = %s WHERE efj = %s AND (container_url IS NULL OR container_url = '')",
+                        (_mp_url, efj)
+                    )
+                    log.info(f"Webhook bg: wrote container_url for {efj}")
+        except Exception as _url_exc:
+            log.debug(f"Webhook bg: container_url write skipped for {efj}: {_url_exc}")
 
         # Send real-time email alert (with dedup)
         sent = send_webhook_alert(
@@ -7885,6 +8307,7 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
         "X3": None,   # Position near stop — skip (too noisy)
         "X4": "Departed Pickup - En Route",
         "X6": "Delivered",
+        "D1": "Delivered",   # Delivery confirmation
         "AG": "Driver Phone Unresponsive",
     }
 
@@ -7909,12 +8332,23 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
             return {"status": "ok", "type": "position_near_stop", "load": load_ref}
 
         if mapped:
+            # Map human-readable status back to structured event type for stop_times parsing
+            _MAPPED_TO_EVENT_TYPE = {
+                "Driver Arrived at Pickup": "ARRIVED_PICKUP",
+                "Departed Pickup - En Route": "DEPARTED_PICKUP",
+                "Arrived at Delivery": "ARRIVED_DELIVERY",
+                "Departed Delivery": "DEPARTED_DELIVERY",
+                "Delivered": "DELIVERED",
+            }
+            structured_event = _MAPPED_TO_EVENT_TYPE.get(mapped, event_code)
+
             cache_updated, _match_info = _update_tracking_cache_webhook(load_ref, mapped, now, {
                 "loadNumber": load_ref,
-                "eventType": event_code,
+                "eventType": structured_event,
                 "event": event_code,
                 "stop": stop_name,
                 "timestamp": timestamp,
+                "mp_order_id": mp_order_id,
             })
             if cache_updated and _match_info:
                 background_tasks.add_task(
@@ -7926,13 +8360,136 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
                     mp_load_id=_match_info["mp_load_id"],
                     matched_key=_match_info["matched_key"],
                 )
+            # Persist event to PG for historical timeline
+            _persist_efj = _match_info["efj"] if cache_updated and _match_info else None
+            if _persist_efj:
+                _persist_tracking_event(
+                    efj=_persist_efj,
+                    load_ref=load_ref,
+                    event_code=event_code,
+                    stop_name=stop_name,
+                    stop_type=stop_type,
+                    status_mapped=mapped,
+                    lat=params.get("Latitude", ""),
+                    lon=params.get("Longitude", ""),
+                    city=params.get("City", ""),
+                    state=params.get("State", ""),
+                    event_time=timestamp,
+                    mp_order_id=mp_order_id,
+                    raw_params=dict(params),
+                )
             log.info(f"Webhook trip event: {load_ref} [{event_code}] -> {mapped} (cache={cache_updated})")
             return {"status": "ok", "type": "trip_event", "load": load_ref, "event": event_code, "status_mapped": mapped}
 
     # ── Schedule Alerts (ScheduleAlertText field) ─────────────────────
     schedule_alert = params.get("ScheduleAlertText", "").strip()
-    if schedule_alert:
-        log.info(f"Webhook schedule alert: {load_ref} [{stop_type}] {schedule_alert} (dist={params.get('DistanceToStopInMiles', '?')} mi)")
+    distance_str = params.get("DistanceToStopInMiles", "").strip()
+    if schedule_alert or (stop_type and distance_str):
+        # ── Infer stop arrival/departure from GPS proximity ──
+        # Macropoint only sends X1 for delivery stops.  For pickup stops,
+        # we infer arrival when DistanceToStopInMiles < 0.5 and departure
+        # when distance increases after a recorded arrival.
+        ARRIVAL_THRESHOLD = 0.5   # miles — "at the stop"
+        DEPARTURE_THRESHOLD = 2.0  # miles — "left the stop"
+        try:
+            distance_mi = float(distance_str) if distance_str else None
+        except (ValueError, TypeError):
+            distance_mi = None
+
+        if distance_mi is not None and stop_type:
+            stop_key = "stop1" if stop_type.lower() in ("pickup", "origin") else "stop2"
+            arrived_key = f"{stop_key}_arrived"
+            departed_key = f"{stop_key}_departed"
+
+            # Read current cache to check existing stop_times
+            try:
+                with open(TRACKING_CACHE_FILE, "r") as f:
+                    _sc_cache = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                _sc_cache = {}
+
+            _sc_matched = None
+            for _sk, _sv in _sc_cache.items():
+                _efj = _sv.get("efj", "")
+                _ln = _sv.get("load_num", "")
+                _ml = _sv.get("mp_load_id", "")
+                if load_ref in (_efj, _ln, _ml, _sk):
+                    _sc_matched = _sk
+                    break
+
+            if _sc_matched:
+                _sc_entry = _sc_cache[_sc_matched]
+                _sc_stops = _sc_entry.get("stop_times", {})
+                _changed = False
+
+                # Use the handler's 'now' timestamp (ET) — schedule alerts
+                # don't carry ApproxLocationDateTimeInLocalTime (that's on Pings).
+                # EtaToStop is the predicted arrival, not the current time.
+                event_local_time = now
+
+                # Arrival detection: close to stop and not yet recorded
+                if distance_mi < ARRIVAL_THRESHOLD and not _sc_stops.get(arrived_key):
+                    _sc_stops[arrived_key] = event_local_time
+                    _changed = True
+                    _inferred_event = "Arrived at Pickup" if stop_key == "stop1" else "Arrived at Delivery"
+                    _inferred_code = "X1"
+                    log.info(f"Webhook INFERRED {_inferred_event}: {load_ref} dist={distance_mi:.2f}mi at {stop_type}")
+
+                    # Persist to PG tracking_events
+                    _persist_efj = _sc_entry.get("efj")
+                    if _persist_efj:
+                        _persist_tracking_event(
+                            efj=_persist_efj,
+                            load_ref=load_ref,
+                            event_code="X1",
+                            stop_name=params.get("StopName", ""),
+                            stop_type=stop_type,
+                            status_mapped=_inferred_event,
+                            lat=params.get("Latitude", ""),
+                            lon=params.get("Longitude", ""),
+                            city=params.get("City", ""),
+                            state=params.get("State", ""),
+                            event_time=event_local_time,
+                            mp_order_id=mp_order_id,
+                            raw_params=dict(params),
+                        )
+
+                # Departure detection: was at stop, now moved away
+                if (distance_mi > DEPARTURE_THRESHOLD and
+                        _sc_stops.get(arrived_key) and
+                        not _sc_stops.get(departed_key)):
+                    _sc_stops[departed_key] = event_local_time
+                    _changed = True
+                    _inferred_event = "Departed Pickup" if stop_key == "stop1" else "Departed Delivery"
+                    log.info(f"Webhook INFERRED {_inferred_event}: {load_ref} dist={distance_mi:.2f}mi from {stop_type}")
+
+                    # Persist to PG tracking_events
+                    _persist_efj = _sc_entry.get("efj")
+                    if _persist_efj:
+                        _persist_tracking_event(
+                            efj=_persist_efj,
+                            load_ref=load_ref,
+                            event_code="X2",
+                            stop_name=params.get("StopName", ""),
+                            stop_type=stop_type,
+                            status_mapped=_inferred_event,
+                            lat=params.get("Latitude", ""),
+                            lon=params.get("Longitude", ""),
+                            city=params.get("City", ""),
+                            state=params.get("State", ""),
+                            event_time=event_local_time,
+                            mp_order_id=mp_order_id,
+                            raw_params=dict(params),
+                        )
+
+                if _changed:
+                    _sc_entry["stop_times"] = _sc_stops
+                    tmp_path = TRACKING_CACHE_FILE + ".tmp"
+                    with open(tmp_path, "w") as f:
+                        json.dump(_sc_cache, f, indent=2)
+                    os.replace(tmp_path, TRACKING_CACHE_FILE)
+
+        log.info(f"Webhook schedule alert: {load_ref} [{stop_type}] {schedule_alert} (dist={distance_str} mi)")
         return {"status": "ok", "type": "schedule_alert", "load": load_ref, "alert": schedule_alert}
 
     # ── Fallback: check other event fields ────────────────────────────
@@ -7948,8 +8505,9 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
         if mapped_status:
             cache_updated, _match_info = _update_tracking_cache_webhook(load_ref, mapped_status, now, {
                 "loadNumber": load_ref,
-                "eventType": event_type,
+                "eventType": event_type.upper().replace(" ", "_"),
                 "timestamp": timestamp,
+                "mp_order_id": mp_order_id,
             })
             if cache_updated and _match_info:
                 background_tasks.add_task(
@@ -8034,6 +8592,24 @@ async def macropoint_webhook(request: Request, background_tasks: BackgroundTasks
     cache_updated = False
     if load_ref and mapped_status:
         cache_updated, _match_info = _update_tracking_cache_webhook(load_ref, mapped_status, now, payload)
+
+        # Persist event to PG for historical timeline
+        if cache_updated and _match_info:
+            _persist_tracking_event(
+                efj=_match_info["efj"],
+                load_ref=load_ref,
+                event_code=payload.get("event", payload.get("eventCode", "")),
+                stop_name=payload.get("stop", ""),
+                stop_type=payload.get("stopType", ""),
+                status_mapped=mapped_status,
+                lat=payload.get("latitude", ""),
+                lon=payload.get("longitude", ""),
+                city=payload.get("city", ""),
+                state=payload.get("state", ""),
+                event_time=payload.get("eventTime", payload.get("timestamp", "")),
+                mp_order_id=payload.get("MPOrderID", payload.get("mp_order_id", "")),
+                raw_params=payload,
+            )
 
         # Real-time: write PG + send email in background task
         if cache_updated and _match_info:

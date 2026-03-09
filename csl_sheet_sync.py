@@ -145,13 +145,14 @@ def _upsert_shipment(data: dict):
                     %(sheet_row_index)s
                 )
                 ON CONFLICT (efj) DO UPDATE SET
-                    status = EXCLUDED.status,
-                    pickup_date = EXCLUDED.pickup_date,
-                    delivery_date = EXCLUDED.delivery_date,
-                    driver = EXCLUDED.driver,
-                    driver_phone = EXCLUDED.driver_phone,
-                    origin = EXCLUDED.origin,
-                    destination = EXCLUDED.destination,
+                    status = COALESCE(NULLIF(EXCLUDED.status, ''), shipments.status),
+                    pickup_date = COALESCE(NULLIF(EXCLUDED.pickup_date, ''), shipments.pickup_date),
+                    delivery_date = COALESCE(NULLIF(EXCLUDED.delivery_date, ''), shipments.delivery_date),
+                    driver = COALESCE(NULLIF(EXCLUDED.driver, ''), shipments.driver),
+                    driver_phone = COALESCE(NULLIF(EXCLUDED.driver_phone, ''), shipments.driver_phone),
+                    carrier = COALESCE(NULLIF(EXCLUDED.carrier, ''), shipments.carrier),
+                    origin = COALESCE(NULLIF(EXCLUDED.origin, ''), shipments.origin),
+                    destination = COALESCE(NULLIF(EXCLUDED.destination, ''), shipments.destination),
                     container = EXCLUDED.container,
                     sheet_row_index = EXCLUDED.sheet_row_index,
                     updated_at = NOW()
@@ -194,6 +195,17 @@ def sync_tolead(gc, creds):
                     continue
 
                 key = efj or load_id
+
+                # If EFJ was assigned, clean up old load_id-keyed row to prevent duplicates
+                if efj and load_id and efj != load_id:
+                    try:
+                        cur = conn.cursor()
+                        cur.execute("DELETE FROM shipments WHERE efj = %s AND efj != %s", (load_id, efj))
+                        if cur.rowcount > 0:
+                            log.info("Tolead %s: cleaned up old row keyed by %s (now %s)", hub_name, load_id, efj)
+                    except Exception as de:
+                        log.warning("Tolead %s: failed to clean up old row %s: %s", hub_name, load_id, de)
+
                 origin = _shorten_address(_cell(cols["origin"]) or hub_cfg["default_origin"])
                 pickup_date = _cell(cols["pickup_date"])
                 pickup_time = _cell(cols["pickup_time"])
@@ -348,6 +360,236 @@ def sync_boviet(gc, creds):
     return synced_from_sheet, synced_to_sheet
 
 
+
+
+# ---------------------------------------------------------------------------
+# Master Sheet → PG Sync
+# ---------------------------------------------------------------------------
+MASTER_SHEET_ID = "19MB5HmmWwsVXY_nADCYYLJL-zWXYt8yWrfeRBSfB2S0"
+
+# Tabs to skip (non-account tabs)
+MASTER_SKIP_TABS = {
+    "Completed Eli", "Completed Radka", "Completed John F",
+    "Account Rep", "SSL Links", "Boviet",
+}
+
+# Master Sheet columns A-P (0-indexed) → PG field names
+MASTER_COL_MAP = {
+    0:  "efj",
+    1:  "move_type",
+    2:  "container",
+    3:  "bol",
+    4:  "vessel",
+    5:  "carrier",
+    6:  "origin",
+    7:  "destination",
+    8:  "eta",
+    9:  "lfd",
+    10: "pickup_date",
+    11: "delivery_date",
+    12: "status",
+    13: "driver",
+    14: "bot_notes",
+    15: "return_date",
+}
+
+# Fields the sync is allowed to update (excludes metadata-only fields)
+MASTER_SYNCABLE_FIELDS = [
+    "move_type", "container", "bol", "vessel", "carrier",
+    "origin", "destination", "eta", "lfd", "pickup_date",
+    "delivery_date", "status", "driver", "bot_notes", "return_date",
+]
+
+
+def _get_pg_master_shipments() -> dict:
+    """Get all non-Tolead, non-Boviet PG shipments, keyed by EFJ."""
+    with db.get_cursor() as cur:
+        cur.execute(
+            "SELECT * FROM shipments WHERE account NOT IN ('Tolead', 'Boviet')"
+        )
+        rows = cur.fetchall()
+    return {r["efj"]: dict(r) for r in rows}
+
+
+def _get_rep_map(sh):
+    """Read the Account Rep tab to get account→rep mapping."""
+    rep_map = {}
+    try:
+        ws = sh.worksheet("Account Rep")
+        rows = ws.get_all_values()
+        for r in rows[2:]:
+            if r and r[0].strip() and len(r) > 1 and r[1].strip():
+                rep_map[r[0].strip()] = r[1].strip()
+    except Exception as e:
+        log.warning("Could not read Account Rep tab: %s", e)
+    return rep_map
+
+
+def _upsert_master_shipment(data: dict):
+    """Insert a new shipment from Master Sheet into Postgres."""
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute("""
+                INSERT INTO shipments (
+                    efj, move_type, container, bol, vessel, carrier,
+                    origin, destination, eta, lfd, pickup_date, delivery_date,
+                    status, notes, driver, bot_notes, return_date,
+                    account, hub, rep, source, sheet_row_index, sheet_synced_at
+                ) VALUES (
+                    %(efj)s, %(move_type)s, %(container)s, %(bol)s, %(vessel)s, %(carrier)s,
+                    %(origin)s, %(destination)s, %(eta)s, %(lfd)s, %(pickup_date)s, %(delivery_date)s,
+                    %(status)s, '', %(driver)s, %(bot_notes)s, %(return_date)s,
+                    %(account)s, '', %(rep)s, 'sheet', %(sheet_row_index)s, NOW()
+                )
+                ON CONFLICT (efj) DO NOTHING
+            """, data)
+            return cur.rowcount
+
+
+def _merge_master_shipment(pg_row: dict, sheet_data: dict):
+    """
+    Merge a sheet row with an existing PG row using timestamp-based conflict resolution.
+
+    Rules:
+    1. If PG was updated since last sync (updated_at > sheet_synced_at),
+       PG wins — don't overwrite dashboard edits. But fill empty PG fields from sheet.
+    2. If PG was NOT updated since last sync, sheet wins for non-empty fields.
+    3. sheet_synced_at is always updated to NOW().
+    """
+    pg_updated = pg_row.get("updated_at")
+    pg_synced = pg_row.get("sheet_synced_at")
+
+    # Determine if PG was edited via dashboard/bot since last sync
+    pg_is_newer = False
+    if pg_updated and pg_synced and pg_updated > pg_synced:
+        pg_is_newer = True
+
+    updates = {}
+    for field in MASTER_SYNCABLE_FIELDS:
+        sheet_val = (sheet_data.get(field) or "").strip()
+        pg_val = (pg_row.get(field) or "").strip()
+
+        if pg_is_newer:
+            # PG was edited recently — only fill empty PG fields from sheet
+            if not pg_val and sheet_val:
+                updates[field] = sheet_val
+        else:
+            # Sheet is authoritative — non-empty sheet values overwrite PG
+            if sheet_val and sheet_val != pg_val:
+                updates[field] = sheet_val
+
+    # Always sync metadata
+    if sheet_data.get("account") and sheet_data["account"] != (pg_row.get("account") or ""):
+        updates["account"] = sheet_data["account"]
+    if sheet_data.get("rep") and sheet_data["rep"] != (pg_row.get("rep") or ""):
+        updates["rep"] = sheet_data["rep"]
+    if sheet_data.get("sheet_row_index"):
+        updates["sheet_row_index"] = sheet_data["sheet_row_index"]
+
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            if updates:
+                set_parts = [f"{k} = %({k})s" for k in updates]
+                set_parts.append("sheet_synced_at = NOW()")
+                updates["efj"] = sheet_data["efj"]
+                cur.execute(
+                    f"UPDATE shipments SET {', '.join(set_parts)} WHERE efj = %(efj)s",
+                    updates,
+                )
+            else:
+                # Just bump sync timestamp
+                cur.execute(
+                    "UPDATE shipments SET sheet_synced_at = NOW() WHERE efj = %s",
+                    (sheet_data["efj"],),
+                )
+
+
+def sync_master(gc, creds):
+    """Sync Master Track/Trace account tabs into Postgres."""
+    synced_new = 0
+    synced_updated = 0
+
+    try:
+        sh = gc.open_by_key(MASTER_SHEET_ID)
+
+        # Get account→rep mapping
+        rep_map = _get_rep_map(sh)
+
+        # Get all tab names (skip non-account tabs)
+        tabs = [ws.title for ws in sh.worksheets() if ws.title not in MASTER_SKIP_TABS]
+        ranges = [f"'{t}'!A:P" for t in tabs]
+
+        # Batch read all tabs
+        batch_result = sh.values_batch_get(ranges)
+        value_ranges = batch_result.get("valueRanges", [])
+
+        # Get current PG state
+        pg_map = _get_pg_master_shipments()
+
+        for vr, tab_name in zip(value_ranges, tabs):
+            rows = vr.get("values", [])
+            if len(rows) < 2:
+                continue
+
+            # Detect header row (skip title rows with fewer filled cells)
+            hdr_idx = 0
+            if len(rows) > 1:
+                r0_filled = sum(1 for c in rows[0] if c.strip()) if rows[0] else 0
+                r1_filled = sum(1 for c in rows[1] if c.strip()) if rows[1] else 0
+                if r1_filled > r0_filled:
+                    hdr_idx = 1
+
+            for ri, row in enumerate(rows[hdr_idx + 1:], start=hdr_idx + 2):
+                def _cell(idx, r=row):
+                    return r[idx].strip() if len(r) > idx else ""
+
+                efj = _cell(0)
+                if not efj:
+                    continue
+                # Skip rows that don't look like EFJ numbers
+                if not efj.startswith("EFJ") and not efj.replace("-", "").isdigit():
+                    continue
+
+                sheet_data = {
+                    "efj": efj,
+                    "move_type": _cell(1),
+                    "container": _cell(2),
+                    "bol": _cell(3),
+                    "vessel": _cell(4),
+                    "carrier": _cell(5),
+                    "origin": _cell(6),
+                    "destination": _cell(7),
+                    "eta": _cell(8),
+                    "lfd": _cell(9),
+                    "pickup_date": _cell(10),
+                    "delivery_date": _cell(11),
+                    "status": _cell(12),
+                    "driver": _cell(13),
+                    "bot_notes": _cell(14),
+                    "return_date": _cell(15),
+                    "account": tab_name,
+                    "rep": rep_map.get(tab_name, "Unassigned"),
+                    "sheet_row_index": ri,
+                }
+
+                pg_row = pg_map.get(efj)
+                if not pg_row:
+                    # New row from sheet → insert into PG
+                    inserted = _upsert_master_shipment(sheet_data)
+                    if inserted:
+                        synced_new += 1
+                else:
+                    # Existing row — merge with conflict resolution
+                    _merge_master_shipment(pg_row, sheet_data)
+                    synced_updated += 1
+
+        log.info("Master sync: %d new, %d checked/merged", synced_new, synced_updated)
+
+    except Exception as e:
+        log.error("Master Sheet sync failed: %s", e)
+
+    return synced_new, 0
+
 # ---------------------------------------------------------------------------
 # Main sync loop
 # ---------------------------------------------------------------------------
@@ -361,12 +603,15 @@ def run_sync():
     t_from, t_to = sync_tolead(gc, creds)
     time.sleep(2)
     b_from, b_to = sync_boviet(gc, creds)
+    time.sleep(2)
+    m_from, m_to = sync_master(gc, creds)
 
-    total_from = t_from + b_from
-    total_to = t_to + b_to
+    total_from = t_from + b_from + m_from
+    total_to = t_to + b_to + m_to
     log.info(
-        "Sync complete: %d from sheet → PG, %d from PG → sheet (Tolead: %d/%d, Boviet: %d/%d)",
-        total_from, total_to, t_from, t_to, b_from, b_to,
+        "Sync complete: %d from sheet → PG, %d from PG → sheet "
+        "(Tolead: %d/%d, Boviet: %d/%d, Master: %d/%d)",
+        total_from, total_to, t_from, t_to, b_from, b_to, m_from, m_to,
     )
 
 

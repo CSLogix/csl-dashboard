@@ -405,28 +405,34 @@ function splitDateTime(str) {
   return { date: s, time: "" };
 }
 
-// ─── DD-MM Short Date Display ───
-// Formats any date string to "DD-MM" for compact display
+// ─── MM-DD Short Date Display ───
+// Formats any date string to "MM/DD" for compact display
 function formatDDMM(dateStr) {
   if (!dateStr) return "";
-  const s = dateStr.trim();
-  // "YYYY-MM-DD" or "YYYY-MM-DD HH:MM"
+  // Strip time portion first — only format the date part
+  const { date: dateOnly } = splitDateTime(dateStr);
+  if (!dateOnly) return "";
+  const s = dateOnly.trim();
+  // "YYYY-MM-DD"
   const ymd = s.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (ymd) return `${ymd[3]}-${ymd[2]}`;
+  if (ymd) return `${ymd[2]}/${ymd[3]}`;
   // "MM/DD/YYYY"
   const mdy = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (mdy) return `${mdy[2].padStart(2, "0")}-${mdy[1].padStart(2, "0")}`;
-  // "DD-MM" already
-  if (/^\d{2}-\d{2}$/.test(s)) return s;
+  if (mdy) return `${mdy[1].padStart(2, "0")}/${mdy[2].padStart(2, "0")}`;
+  // "M/D" (no year, e.g. Tolead delivery "3/8")
+  const mdNoYear = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (mdNoYear) return `${mdNoYear[1].padStart(2, "0")}/${mdNoYear[2].padStart(2, "0")}`;
+  // "MM/DD" already
+  if (/^\d{2}\/\d{2}$/.test(s)) return s;
   return s.slice(0, 5);
 }
 
-// ─── Parse 4-digit DDMM input → "YYYY-MM-DD" ───
+// ─── Parse 4-digit MMDD input → "YYYY-MM-DD" ───
 function parseDDMM(input) {
   const digits = input.replace(/\D/g, "");
   if (digits.length !== 4) return null;
-  const dd = digits.slice(0, 2);
-  const mm = digits.slice(2, 4);
+  const mm = digits.slice(0, 2);
+  const dd = digits.slice(2, 4);
   const d = parseInt(dd, 10), m = parseInt(mm, 10);
   if (m < 1 || m > 12 || d < 1 || d > 31) return null;
   const year = new Date().getFullYear();
@@ -1851,8 +1857,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                     <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
                       {isEditing && inlineEditField === "pickup" ? (
                         <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                          <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
-                            onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                          <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
+                            onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "/" + v.slice(2); setInlineEditValue(v); }}
                             onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (pu.time ? " " + pu.time : ""); handleFieldUpdate(s, "pickup", v); } setInlineEditId(null); }}
                             onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                             style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
@@ -1879,8 +1885,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                     <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                       {isEditing && inlineEditField === "delivery" ? (
                         <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                          <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
-                            onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                          <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
+                            onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "/" + v.slice(2); setInlineEditValue(v); }}
                             onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (del.time ? " " + del.time : ""); handleFieldUpdate(s, "delivery", v); } setInlineEditId(null); }}
                             onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                             style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
@@ -2214,8 +2220,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                       <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
                         {isEditing && inlineEditField === "pickup" ? (
                           <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                            <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
-                              onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                            <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
+                              onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "/" + v.slice(2); setInlineEditValue(v); }}
                               onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (pu.time ? " " + pu.time : ""); handleFieldUpdate(s, "pickup", v); } setInlineEditId(null); }}
                               onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                               style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
@@ -2238,8 +2244,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                       <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                         {isEditing && inlineEditField === "delivery" ? (
                           <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                            <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
-                              onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                            <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
+                              onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "/" + v.slice(2); setInlineEditValue(v); }}
                               onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (del.time ? " " + del.time : ""); handleFieldUpdate(s, "delivery", v); } setInlineEditId(null); }}
                               onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                               style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
@@ -2351,8 +2357,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                       <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
                         {isEditing && inlineEditField === "pickup" ? (
                           <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                            <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
-                              onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                            <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
+                              onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "/" + v.slice(2); setInlineEditValue(v); }}
                               onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (pu.time ? " " + pu.time : ""); handleFieldUpdate(s, "pickup", v); } setInlineEditId(null); }}
                               onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                               style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
@@ -2375,8 +2381,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                       <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                         {isEditing && inlineEditField === "delivery" ? (
                           <div style={{ display: "flex", gap: 3 }} onClick={e => e.stopPropagation()}>
-                            <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
-                              onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                            <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
+                              onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "/" + v.slice(2); setInlineEditValue(v); }}
                               onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (del.time ? " " + del.time : ""); handleFieldUpdate(s, "delivery", v); } setInlineEditId(null); }}
                               onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                               style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
@@ -3412,26 +3418,29 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
 
   // Parse tracking timeline for schedule grid
   const parsedStops = useMemo(() => {
-    const pickup = { arrived: null, departed: null, eta: null };
-    const delivery = { arrived: null, departed: null, eta: null };
+    const pickup = { arrived: null, departed: null, eta: null, location: null };
+    const delivery = { arrived: null, departed: null, eta: null, location: null };
+    let delivered = null;
+    let deliveredLocation = null;
     if (trackingData?.timeline?.length > 0) {
       trackingData.timeline.forEach(ev => {
         const e = ev.event?.toLowerCase() || "";
         if (e.includes("pickup") || e.includes("origin")) {
-          if (ev.type === "arrived" || e.includes("arrived")) pickup.arrived = ev.time;
+          if (ev.type === "arrived" || e.includes("arrived")) { pickup.arrived = ev.time; pickup.location = ev.location; }
           if (ev.type === "departed" || e.includes("departed")) pickup.departed = ev.time;
         }
         if (e.includes("delivery") || e.includes("destination")) {
-          if (ev.type === "arrived" || e.includes("arrived")) delivery.arrived = ev.time;
+          if (ev.type === "arrived" || e.includes("arrived")) { delivery.arrived = ev.time; delivery.location = ev.location; }
           if (ev.type === "departed" || e.includes("departed")) delivery.departed = ev.time;
         }
         if (ev.type === "eta") {
           if (e.includes("pickup")) pickup.eta = ev.time;
           if (e.includes("delivery")) delivery.eta = ev.time;
         }
+        if (ev.type === "delivered") { delivered = ev.time; deliveredLocation = ev.location; }
       });
     }
-    return { pickup, delivery };
+    return { pickup, delivery, delivered, deliveredLocation };
   }, [trackingData]);
 
   if (!selectedShipment) return null;
@@ -3564,27 +3573,65 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
             </div>
           )}
 
-          {/* Schedule Grid — PU/DEL dates + actual arrival/departure */}
-          {(selectedShipment.pickupDate || selectedShipment.deliveryDate || parsedStops.pickup.arrived || parsedStops.delivery.arrived) && (
+          {/* Schedule & Tracking — compact table */}
+          {(selectedShipment.pickupDate || selectedShipment.deliveryDate || parsedStops.pickup.arrived || parsedStops.delivery.arrived) && (() => {
+            const fmtTs = (v) => {
+              if (!v) return "";
+              // ISO timestamp (from tracking events)
+              if (v.includes("T")) { try { const d = new Date(v); return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; } catch {} }
+              // Scheduled dates like "3/6/2026 9:00" or "2026-03-06 09:00" — strip year, show m/d h:mm
+              const m = v.match(/^(\d{1,2})\/(\d{1,2})\/\d{4}\s+(.+)/);
+              if (m) return `${m[1]}/${m[2]} ${m[3]}`;
+              const m2 = v.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}:\d{2})/);
+              if (m2) return `${parseInt(m2[2])}/${parseInt(m2[3])} ${m2[4]}`;
+              // Already compact like "3/6 20:45"
+              return v;
+            };
+            const origin = selectedShipment.origin || trackingData?.origin || "";
+            const dest = selectedShipment.destination || trackingData?.destination || "";
+            const mono = { fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 600 };
+            const headerCell = { fontSize: 7, fontWeight: 700, color: "#5A6478", letterSpacing: "1px", textTransform: "uppercase", padding: "0 0 3px", textAlign: "right" };
+            const valCell = { ...mono, padding: "2px 0", textAlign: "right" };
+            return (
             <div style={{ padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 6, textTransform: "uppercase" }}>Schedule</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px" }}>
-                {[
-                  { label: "PU Scheduled", value: selectedShipment.pickupDate, color: "#F0F2F5" },
-                  { label: "DEL Scheduled", value: selectedShipment.deliveryDate, color: "#F0F2F5" },
-                  { label: "PU Arrived", value: parsedStops.pickup.arrived, color: "#34d399" },
-                  { label: "DEL Arrived", value: parsedStops.delivery.arrived, color: "#34d399" },
-                  { label: "PU Departed", value: parsedStops.pickup.departed, color: "#60a5fa" },
-                  { label: "DEL Departed", value: parsedStops.delivery.departed, color: "#60a5fa" },
-                ].filter(item => item.value).map(({ label, value, color }) => (
-                  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 0" }}>
-                    <span style={{ fontSize: 8, color: "#5A6478", fontWeight: 600, letterSpacing: "0.3px", textTransform: "uppercase" }}>{label}</span>
-                    <span style={{ fontSize: 10, color, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>{value}</span>
-                  </div>
-                ))}
+              <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 6, textTransform: "uppercase" }}>Schedule & Tracking</div>
+              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr", gap: "0 10px", alignItems: "center" }}>
+                {/* Header row */}
+                <div />
+                <div style={headerCell}>Sched</div>
+                <div style={headerCell}>Arrived</div>
+                <div style={headerCell}>Departed</div>
+                {/* Pickup row */}
+                <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 0", whiteSpace: "nowrap" }}>
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#f59e0b", flexShrink: 0 }} />
+                  <span style={{ fontSize: 9, fontWeight: 700, color: "#F0F2F5" }}>PU</span>
+                  {origin && <span style={{ fontSize: 8, color: "#5A6478", overflow: "hidden", textOverflow: "ellipsis" }}>{origin.length > 18 ? origin.slice(0, 18) + "…" : origin}</span>}
+                </div>
+                <div style={{ ...valCell, color: "#C8CED8" }}>{fmtTs(selectedShipment.pickupDate) || "—"}</div>
+                <div style={{ ...valCell, color: parsedStops.pickup.arrived ? "#34d399" : "#2A3040" }}>{fmtTs(parsedStops.pickup.arrived) || "—"}</div>
+                <div style={{ ...valCell, color: parsedStops.pickup.departed ? "#60a5fa" : "#2A3040" }}>{fmtTs(parsedStops.pickup.departed) || "—"}</div>
+                {/* Delivery row */}
+                <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 0", whiteSpace: "nowrap" }}>
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />
+                  <span style={{ fontSize: 9, fontWeight: 700, color: "#F0F2F5" }}>DEL</span>
+                  {dest && <span style={{ fontSize: 8, color: "#5A6478", overflow: "hidden", textOverflow: "ellipsis" }}>{dest.length > 18 ? dest.slice(0, 18) + "…" : dest}</span>}
+                </div>
+                <div style={{ ...valCell, color: "#C8CED8" }}>{fmtTs(selectedShipment.deliveryDate) || "—"}</div>
+                <div style={{ ...valCell, color: parsedStops.delivery.arrived ? "#34d399" : "#2A3040" }}>{fmtTs(parsedStops.delivery.arrived) || "—"}</div>
+                <div style={{ ...valCell, color: parsedStops.delivery.departed ? "#60a5fa" : "#2A3040" }}>{fmtTs(parsedStops.delivery.departed) || "—"}</div>
               </div>
+              {/* Delivered confirmation */}
+              {parsedStops.delivered && (
+                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, paddingTop: 4, borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#00D4AA", flexShrink: 0 }} />
+                  <span style={{ fontSize: 9, fontWeight: 700, color: "#00D4AA" }}>Delivered</span>
+                  {parsedStops.deliveredLocation && <span style={{ fontSize: 8, color: "#5A6478" }}>{parsedStops.deliveredLocation}</span>}
+                  <span style={{ marginLeft: "auto", ...mono, fontSize: 9, color: "#8B95A8" }}>{fmtTs(parsedStops.delivered)}</span>
+                </div>
+              )}
             </div>
-          )}
+            );
+          })()}
 
           {/* Status Selector — collapsible, move-type aware */}
           {(() => {
@@ -3713,11 +3760,20 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                 ) : editField === `${selectedShipment.id}-${item.field}` ? (
                   <input autoFocus value={editValue}
                     onChange={e => setEditValue(e.target.value)}
-                    onBlur={() => { if (editValue.trim() || item.field === 'pickupDate' || item.field === 'deliveryDate') { handleFieldEdit(selectedShipment.id, item.field, editValue.trim()); } else { setEditField(null); } }}
+                    onBlur={() => {
+                      const v = editValue.trim();
+                      const SLIDE_FIELD_MAP = { pickupDate: "pickup", deliveryDate: "delivery", carrier: "carrier", origin: "origin", destination: "destination", eta: "eta", lfd: "lfd" };
+                      const pgField = SLIDE_FIELD_MAP[item.field];
+                      if (v || item.field === 'pickupDate' || item.field === 'deliveryDate') {
+                        if (pgField && selectedShipment.efj) { handleFieldUpdate(selectedShipment, pgField, v); }
+                        else { handleFieldEdit(selectedShipment.id, item.field, v); }
+                      }
+                      setEditField(null);
+                    }}
                     onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditField(null); }}
                     style={{ background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, color: "#F0F2F5", padding: "3px 8px", fontSize: 11, width: 140, textAlign: "right", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
                 ) : (
-                  <span onClick={(e) => { e.stopPropagation(); setEditField(`${selectedShipment.id}-${item.field}`); setEditValue(String(item.val)); }}
+                  <span onClick={(e) => { e.stopPropagation(); setEditField(`${selectedShipment.id}-${item.field}`); setEditValue(String(item.val || "")); }}
                     style={{ fontSize: 11, color: "#F0F2F5", cursor: "pointer", padding: "2px 6px", borderRadius: 4, fontWeight: 500 }}
                     title="Click to edit">{item.val || "—"}</span>
                 )}
@@ -4558,32 +4614,52 @@ function DispatchView({
                   <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
                     {isInlineEditing && inlineEditField === "pickup" ? (
                       <div onClick={e => e.stopPropagation()}>
-                        <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
-                          onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                        <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
+                          onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "/" + v.slice(2); setInlineEditValue(v); }}
                           onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (pu.time ? " " + pu.time : ""); handleFieldUpdate(s, "pickup", v); } setInlineEditId(null); }}
                           onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                           style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                       </div>
+                    ) : isInlineEditing && inlineEditField === "pickupTime" ? (
+                      <div onClick={e => e.stopPropagation()}>
+                        <input type="time" autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                          onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", pu.date || ""); setInlineEditId(null); return; } const v = (pu.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "pickup", v); setInlineEditId(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          style={{ ...inlineInputStyle, width: 70 }} />
+                      </div>
                     ) : (
-                      <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{formatDDMM(s.pickupDate) || "—"}</span>
+                      <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                        <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>{formatDDMM(s.pickupDate) || "—"}</span>
+                        {pu.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickupTime"); setInlineEditValue(pu.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{pu.time}</span> : null}
+                      </span>
                     )}
                   </td>
                   {/* Origin */}
                   <td style={{ ...cellStyle(colIdx++), fontSize: 10, color: "#F0F2F5", fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.origin}>{s.origin || "—"}</td>
                   {/* Destination */}
                   <td style={{ ...cellStyle(colIdx++), fontSize: 10, color: "#F0F2F5", fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.destination}>{s.destination || "—"}</td>
-                  {/* Delivery (inline-editable, DD-MM) */}
+                  {/* Delivery (inline-editable, MM/DD + time) */}
                   <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                     {isInlineEditing && inlineEditField === "delivery" ? (
                       <div onClick={e => e.stopPropagation()}>
-                        <input autoFocus placeholder="DDMM" maxLength={5} value={inlineEditValue}
-                          onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "-" + v.slice(2); setInlineEditValue(v); }}
+                        <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
+                          onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "/" + v.slice(2); setInlineEditValue(v); }}
                           onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (del.time ? " " + del.time : ""); handleFieldUpdate(s, "delivery", v); } setInlineEditId(null); }}
                           onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                           style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                       </div>
+                    ) : isInlineEditing && inlineEditField === "deliveryTime" ? (
+                      <div onClick={e => e.stopPropagation()}>
+                        <input type="time" autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                          onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", del.date || ""); setInlineEditId(null); return; } const v = (del.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "delivery", v); setInlineEditId(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          style={{ ...inlineInputStyle, width: 70 }} />
+                      </div>
                     ) : (
-                      <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{formatDDMM(s.deliveryDate) || "—"}</span>
+                      <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                        <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>{formatDDMM(s.deliveryDate) || "—"}</span>
+                        {del.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("deliveryTime"); setInlineEditValue(del.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{del.time}</span> : null}
+                      </span>
                     )}
                   </td>
                   {/* Truck Type (inline-editable dropdown) */}
@@ -4763,6 +4839,59 @@ function DispatchView({
                   <span style={{ fontSize: 10, color: "#fb923c", fontWeight: 600 }}>Behind Schedule</span>
                 </div>
               )}
+
+              {/* Schedule & Tracking — compact table (RepDashboard) */}
+              {(selectedShipment.pickupDate || selectedShipment.deliveryDate || parsedStops.pickup.arrived || parsedStops.delivery.arrived) && (() => {
+                const fmtTs = (v) => {
+                  if (!v) return "";
+                  if (v.includes("T")) { try { const d = new Date(v); return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; } catch {} }
+                  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/\d{4}\s+(.+)/);
+                  if (m) return `${m[1]}/${m[2]} ${m[3]}`;
+                  const m2 = v.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}:\d{2})/);
+                  if (m2) return `${parseInt(m2[2])}/${parseInt(m2[3])} ${m2[4]}`;
+                  return v;
+                };
+                const origin = selectedShipment.origin || trackingData?.origin || "";
+                const dest = selectedShipment.destination || trackingData?.destination || "";
+                const mono = { fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 600 };
+                const headerCell = { fontSize: 7, fontWeight: 700, color: "#5A6478", letterSpacing: "1px", textTransform: "uppercase", padding: "0 0 3px", textAlign: "right" };
+                const valCell = { ...mono, padding: "2px 0", textAlign: "right" };
+                return (
+                <div style={{ padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 6, textTransform: "uppercase" }}>Schedule & Tracking</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr", gap: "0 10px", alignItems: "center" }}>
+                    <div />
+                    <div style={headerCell}>Sched</div>
+                    <div style={headerCell}>Arrived</div>
+                    <div style={headerCell}>Departed</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 0", whiteSpace: "nowrap" }}>
+                      <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#f59e0b", flexShrink: 0 }} />
+                      <span style={{ fontSize: 9, fontWeight: 700, color: "#F0F2F5" }}>PU</span>
+                      {origin && <span style={{ fontSize: 8, color: "#5A6478", overflow: "hidden", textOverflow: "ellipsis" }}>{origin.length > 18 ? origin.slice(0, 18) + "…" : origin}</span>}
+                    </div>
+                    <div style={{ ...valCell, color: "#C8CED8" }}>{fmtTs(selectedShipment.pickupDate) || "—"}</div>
+                    <div style={{ ...valCell, color: parsedStops.pickup.arrived ? "#34d399" : "#2A3040" }}>{fmtTs(parsedStops.pickup.arrived) || "—"}</div>
+                    <div style={{ ...valCell, color: parsedStops.pickup.departed ? "#60a5fa" : "#2A3040" }}>{fmtTs(parsedStops.pickup.departed) || "—"}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 0", whiteSpace: "nowrap" }}>
+                      <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />
+                      <span style={{ fontSize: 9, fontWeight: 700, color: "#F0F2F5" }}>DEL</span>
+                      {dest && <span style={{ fontSize: 8, color: "#5A6478", overflow: "hidden", textOverflow: "ellipsis" }}>{dest.length > 18 ? dest.slice(0, 18) + "…" : dest}</span>}
+                    </div>
+                    <div style={{ ...valCell, color: "#C8CED8" }}>{fmtTs(selectedShipment.deliveryDate) || "—"}</div>
+                    <div style={{ ...valCell, color: parsedStops.delivery.arrived ? "#34d399" : "#2A3040" }}>{fmtTs(parsedStops.delivery.arrived) || "—"}</div>
+                    <div style={{ ...valCell, color: parsedStops.delivery.departed ? "#60a5fa" : "#2A3040" }}>{fmtTs(parsedStops.delivery.departed) || "—"}</div>
+                  </div>
+                  {parsedStops.delivered && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, paddingTop: 4, borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                      <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#00D4AA", flexShrink: 0 }} />
+                      <span style={{ fontSize: 9, fontWeight: 700, color: "#00D4AA" }}>Delivered</span>
+                      {parsedStops.deliveredLocation && <span style={{ fontSize: 8, color: "#5A6478" }}>{parsedStops.deliveredLocation}</span>}
+                      <span style={{ marginLeft: "auto", ...mono, fontSize: 9, color: "#8B95A8" }}>{fmtTs(parsedStops.delivered)}</span>
+                    </div>
+                  )}
+                </div>
+                );
+              })()}
 
               {/* Status Selector — move-type aware */}
               <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
@@ -5346,15 +5475,21 @@ function MacropointModal({ shipment, onClose }) {
                 {/* Stop Timeline */}
                 {d.timeline && d.timeline.length > 0 && (
                   <div style={{ marginTop: 14 }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Stop Timeline</div>
-                    {d.timeline.map((ev, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-                          background: ev.type === "arrived" ? "#10b981" : ev.type === "departed" ? "#3b82f6" : "#f59e0b" }} />
-                        <span style={{ fontSize: 10, color: "#F0F2F5", fontWeight: 500, flex: 1 }}>{ev.event}</span>
-                        <span style={{ fontSize: 10, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>{ev.time}</span>
-                      </div>
-                    ))}
+                    <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Tracking History</div>
+                    {d.timeline.map((ev, i) => {
+                      const dotColor = ev.type === "delivered" ? "#00D4AA" : ev.type === "arrived" ? "#10b981" : ev.type === "departed" ? "#3b82f6" : ev.type === "info" ? "#f59e0b" : "#8B95A8";
+                      const fmtTime = ev.time ? (() => { try { const dt = new Date(ev.time); return dt.toLocaleString("en-US", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true }); } catch { return ev.time; } })() : "";
+                      return (
+                        <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                          <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, marginTop: 3, background: dotColor }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ fontSize: 10, color: "#F0F2F5", fontWeight: 600 }}>{ev.event}</span>
+                            {ev.location && <span style={{ fontSize: 10, color: "#8B95A8", marginLeft: 6 }}>{ev.location}</span>}
+                          </div>
+                          <span style={{ fontSize: 10, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace", flexShrink: 0, whiteSpace: "nowrap" }}>{fmtTime}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -5665,7 +5800,14 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
     const fd = new FormData(); fd.append("file", file);
     try {
       const r = await apiFetch(`${API_BASE}/api/unbilled/upload`, { method: "POST", body: fd });
-      if (r.ok) { setUploadMsg("Report uploaded successfully"); fetchUnbilled(); }
+      if (r.ok) {
+        const data = await r.json();
+        let msg = `Imported ${data.imported} orders`;
+        if (data.reconciled > 0) msg += ` | ${data.reconciled} reconciled`;
+        if (data.delivered_count > 0) msg += ` | ${data.delivered_count} already delivered`;
+        setUploadMsg(msg);
+        fetchUnbilled();
+      }
       else { setUploadMsg(`Upload failed (${r.status})`); }
     } catch (e) { setUploadMsg("Upload error — backend may not be ready"); }
     setUploading(false);
@@ -5756,7 +5898,7 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
               <div style={{ fontSize: 10, color: "#3D4557", marginTop: 4 }}>Order Not Billed Report</div>
             </>
           )}
-          {uploadMsg && <div style={{ marginTop: 8, fontSize: 10, fontWeight: 600, color: uploadMsg.includes("success") ? "#34d399" : "#f87171" }}>{uploadMsg}</div>}
+          {uploadMsg && <div style={{ marginTop: 8, fontSize: 10, fontWeight: 600, color: uploadMsg.includes("failed") || uploadMsg.includes("error") ? "#f87171" : "#34d399" }}>{uploadMsg}</div>}
         </div>
 
         <div className="dash-panel" style={{ padding: "20px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
@@ -5774,18 +5916,37 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
               <div style={{ fontSize: 28, fontWeight: 800, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{sortedCustomers.length}</div>
               <div style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>Customers</div>
             </div>
+            <div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: "#34d399", fontFamily: "'JetBrains Mono', monospace" }}>{unbilledOrders.filter(o => o.shipment_delivered).length}</div>
+              <div style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>Delivered</div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* View toggle */}
-      <div style={{ display: "flex", gap: 2, marginBottom: 12, background: "#0D1119", borderRadius: 10, padding: 3, width: "fit-content" }}>
-        <button onClick={() => setGroupBy(false)}
-          style={{ padding: "5px 14px", borderRadius: 5, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-            background: !groupBy ? "#1E2738" : "transparent", color: !groupBy ? "#F0F2F5" : "#8B95A8" }}>All Orders</button>
-        <button onClick={() => setGroupBy(true)}
-          style={{ padding: "5px 14px", borderRadius: 5, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-            background: groupBy ? "#1E2738" : "transparent", color: groupBy ? "#F0F2F5" : "#8B95A8" }}>By Customer</button>
+      {/* View toggle + bulk close */}
+      <div style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 2, background: "#0D1119", borderRadius: 10, padding: 3, width: "fit-content" }}>
+          <button onClick={() => setGroupBy(false)}
+            style={{ padding: "5px 14px", borderRadius: 5, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+              background: !groupBy ? "#1E2738" : "transparent", color: !groupBy ? "#F0F2F5" : "#8B95A8" }}>All Orders</button>
+          <button onClick={() => setGroupBy(true)}
+            style={{ padding: "5px 14px", borderRadius: 5, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+              background: groupBy ? "#1E2738" : "transparent", color: groupBy ? "#F0F2F5" : "#8B95A8" }}>By Customer</button>
+        </div>
+        {unbilledOrders.filter(o => o.shipment_delivered).length > 0 && (
+          <button onClick={async () => {
+            if (!confirm(`Close ${unbilledOrders.filter(o => o.shipment_delivered).length} delivered orders and archive them to history?`)) return;
+            try {
+              const r = await apiFetch(`${API_BASE}/api/unbilled/bulk-close-delivered`, { method: "POST" });
+              if (r.ok) { const d = await r.json(); setUploadMsg(`Closed ${d.closed_count} delivered orders → archived to history`); fetchUnbilled(); }
+            } catch {}
+          }}
+            style={{ padding: "5px 14px", borderRadius: 8, border: "1px solid #34d39944", background: "#34d39918", color: "#34d399",
+              fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+            Close {unbilledOrders.filter(o => o.shipment_delivered).length} Delivered
+          </button>
+        )}
       </div>
 
       {/* Search */}
@@ -5828,7 +5989,7 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
-                  {["Order #", "Container", "Customer", "Rep", "Tractor", "Entered", "Appt Date", "Age", "Status"].map(h => (
+                  {["Order #", "Container", "Customer", "Rep", "Entered", "Age", "Tracking", "Billing"].map(h => (
                     <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: 5 }}>{h}</th>
                   ))}
                   <th style={{ padding: "10px 14px", width: 40, background: "#0D1119", position: "sticky", top: 0, zIndex: 5, borderBottom: "1px solid rgba(255,255,255,0.04)" }} />
@@ -5841,11 +6002,25 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
                     <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#5A6478" }}>{o.container}</td>
                     <td style={{ padding: "8px 14px", color: "#8B95A8", fontSize: 11 }}>{o.bill_to || o.customer}</td>
                     <td style={{ padding: "8px 14px", fontSize: 10, fontWeight: 600, color: REP_COLORS[o.rep] || "#5A6478" }}>{o.rep || "—"}</td>
-                    <td style={{ padding: "8px 14px", color: "#5A6478", fontSize: 10 }}>{o.tractor}</td>
                     <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#8B95A8" }}>{o.entered_date || o.entered}</td>
-                    <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#8B95A8" }}>{o.appt_date}</td>
                     <td style={{ padding: "8px 14px" }}>
                       <span style={{ fontSize: 11, fontWeight: 700, color: ageColor(o.age_days || 0), fontFamily: "'JetBrains Mono', monospace" }}>{o.age_days || 0}d</span>
+                    </td>
+                    <td style={{ padding: "8px 14px" }}>
+                      {o.shipment_delivered ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 12, fontSize: 9, fontWeight: 700,
+                          color: "#34d399", background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.2)" }}>
+                          <span style={{ width: 4, height: 4, borderRadius: "50%", background: "#34d399" }} />
+                          {o.shipment_status || "Delivered"}
+                        </span>
+                      ) : o.shipment_status ? (
+                        <span style={{ fontSize: 9, fontWeight: 600, color: "#5A6478", padding: "2px 8px", borderRadius: 12,
+                          background: "rgba(139,149,168,0.08)", border: "1px solid rgba(139,149,168,0.12)" }}>
+                          {o.shipment_status}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 9, color: "#3D4557" }}>—</span>
+                      )}
                     </td>
                     <td style={{ padding: "8px 14px" }}>
                       {(() => {

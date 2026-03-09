@@ -97,6 +97,35 @@ ALLOWED_EXTENSIONS = {
     ".xlsx", ".xls", ".csv", ".doc", ".docx", ".eml", ".msg",
 }
 
+
+# ── Junk attachment filter (signature icons, tracking pixels, social logos) ──
+
+JUNK_FILENAME_PATTERNS = re.compile(
+    r"^image\d{3}\.(png|jpg|jpeg|gif)$"       # Outlook signature images: image001.png
+    r"|^(icon|logo|banner|spacer|pixel|beacon)"  # Generic junk prefixes
+    r"|facebook|linkedin|twitter|instagram|youtube|tiktok"  # Social media icons
+    r"|(^|\.)(gif)$"                             # Almost all .gif attachments are tracking pixels
+    r"|^outlook_\w+\.(png|jpg)"                  # Outlook-generated images
+    r"|^~\$"                                      # Office temp files
+    , re.IGNORECASE
+)
+
+JUNK_MAX_SIZE_BYTES = 15_000  # 15KB — real docs are larger
+
+def is_junk_attachment(filename, size_bytes=None):
+    """Return True if attachment looks like a signature icon or tracking pixel."""
+    if not filename:
+        return True
+    # Known junk filename patterns
+    if JUNK_FILENAME_PATTERNS.search(filename):
+        return True
+    # Tiny image files are almost always icons/signatures
+    if size_bytes is not None and size_bytes < JUNK_MAX_SIZE_BYTES:
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext in ("png", "jpg", "jpeg", "gif", "bmp", "ico"):
+            return True
+    return False
+
 # EFJ# pattern: "EFJ" optionally followed by space/dash, then 5-6 digits
 EFJ_PATTERN = re.compile(r"EFJ[\s\-]?(\d{5,6})", re.IGNORECASE)
 # Container# pattern: 4 uppercase letters + 7 digits
@@ -995,6 +1024,7 @@ def process_message(service, msg_id):
     valid_attachments = [
         a for a in attachments
         if Path(a["filename"]).suffix.lower() in ALLOWED_EXTENSIONS
+        and not is_junk_attachment(a["filename"], a.get("size"))
     ]
 
     # Match to EFJ
@@ -1148,6 +1178,92 @@ def process_message(service, msg_id):
             extract_warehouse_rate_from_email(effective_sender, subject, body_preview)
 
 
+
+# ── Sent Mail Scanner (for reply detection) ──────────────────────────
+
+def scan_sent_messages(service):
+    """Scan sent folder for outbound messages to track CSL replies."""
+    log.info("Scanning sent messages for reply tracking...")
+
+    try:
+        # Get sent messages from last 24 hours
+        import datetime as dt
+        since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=24)).strftime("%Y/%m/%d")
+        result = service.users().messages().list(
+            userId="me",
+            q=f"in:sent after:{since}",
+            maxResults=100,
+        ).execute()
+    except Exception as e:
+        log.error("Gmail API sent list failed: %s", e)
+        return 0
+
+    messages = result.get("messages", [])
+    if not messages:
+        log.info("No recent sent messages")
+        return 0
+
+    stored = 0
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            for msg_meta in messages:
+                msg_id = msg_meta["id"]
+                try:
+                    # Check if already indexed
+                    cur.execute(
+                        "SELECT 1 FROM sent_messages WHERE gmail_message_id = %s",
+                        (msg_id,)
+                    )
+                    if cur.fetchone():
+                        continue
+
+                    # Fetch message metadata (not full body — lightweight)
+                    msg = service.users().messages().get(
+                        userId="me", id=msg_id, format="metadata",
+                        metadataHeaders=["To", "Subject", "Date"],
+                    ).execute()
+
+                    headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
+                    thread_id = msg.get("threadId", "")
+                    recipient = headers.get("To", "")
+                    subject = headers.get("Subject", "")
+
+                    # Parse date
+                    sent_at = None
+                    date_str = headers.get("Date", "")
+                    if date_str:
+                        try:
+                            from email.utils import parsedate_to_datetime
+                            sent_at = parsedate_to_datetime(date_str)
+                        except Exception:
+                            pass
+
+                    cur.execute(
+                        """INSERT INTO sent_messages
+                           (gmail_message_id, gmail_thread_id, recipient, subject, sent_at)
+                           VALUES (%s, %s, %s, %s, %s)
+                           ON CONFLICT (gmail_message_id) DO NOTHING""",
+                        (msg_id, thread_id, recipient[:500] if recipient else None,
+                         subject[:500] if subject else None, sent_at),
+                    )
+                    stored += 1
+
+                except Exception as e:
+                    log.warning("Error indexing sent message %s: %s", msg_id[:12], e)
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        log.error("sent_messages batch insert failed: %s", e)
+    finally:
+        put_conn(conn)
+
+    if stored:
+        log.info("Indexed %d new sent messages", stored)
+    return stored
+
+
 def scan_inbox(service):
     """Scan for unread emails and process them."""
     log.info("Scanning inbox...")
@@ -1203,6 +1319,7 @@ def run_loop():
         try:
             load_reference_cache()
             scan_inbox(service)
+            scan_sent_messages(service)
             check_unreplied_customer_emails()
             failures = 0
         except Exception as e:

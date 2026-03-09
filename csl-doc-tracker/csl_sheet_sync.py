@@ -44,6 +44,9 @@ BOVIET_SHEET_ID = "1OP-ZDaMCOsPxcxezHSPfN5ftUXlUcOjFgsfCQgDp3wI"
 
 SYNC_INTERVAL = 600  # 10 minutes
 
+# Statuses that mean the load is done — skip importing these from sheets
+TERMINAL_STATUSES = {"completed", "ready to close", "delivered", "cancelled", "billed_closed"}
+
 # ---------------------------------------------------------------------------
 # Same configs as app.py
 # ---------------------------------------------------------------------------
@@ -192,6 +195,8 @@ def sync_tolead(gc, creds):
 
                 if not load_id:
                     continue
+                if status.lower() in TERMINAL_STATUSES:
+                    continue
 
                 key = efj or load_id
                 origin = _shorten_address(_cell(cols["origin"]) or hub_cfg["default_origin"])
@@ -290,6 +295,8 @@ def sync_boviet(gc, creds):
                 load_id = row[cfg["load_id_col"]].strip() if len(row) > cfg["load_id_col"] else ""
                 status = row[cfg["status_col"]].strip() if len(row) > cfg["status_col"] else ""
                 if not efj:
+                    continue
+                if status.lower() in TERMINAL_STATUSES:
                     continue
 
                 bov_pickup = ""

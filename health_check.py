@@ -22,7 +22,7 @@ SMTP_USER     = os.environ["SMTP_USER"]
 SMTP_PASSWORD = os.environ["SMTP_PASSWORD"]
 ALERT_TO      = "john.feltz@evansdelivery.com"
 
-SERVICES = ["csl-ftl", "csl-boviet", "csl-tolead", "csl-upload", "csl-webhook"]
+SERVICES = ["csl-boviet", "csl-tolead", "csl-upload"]
 
 
 def check_service(name):

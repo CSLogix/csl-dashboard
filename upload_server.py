@@ -327,22 +327,44 @@ def macropoint_page():
 
         if out.get("status") == "success":
             tracking_url = out["url"]
+            efj = data["efj"]
+            pro = data["pro"]
+            # Write tracking URL to Postgres
             try:
-                creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
-                creds.refresh(GoogleRequest())
-                gc  = gspread.authorize(creds)
-                sh  = gc.open_by_key(SHEET_ID)
-                tab_name = data["tab"]
-                efj = data["efj"]
-                pro = data["pro"]
-                ws  = sh.worksheet(tab_name)
-                rows = ws.get_all_values()
-                for i, row in enumerate(rows):
-                    if row and row[0].strip() == efj:
-                        ws.update_cell(i+1, 3, f'=HYPERLINK("{tracking_url}","{pro}")')
-                        break
+                import sys as _sys
+                if "/root/csl-bot" not in _sys.path:
+                    _sys.path.insert(0, "/root/csl-bot")
+                from csl_pg_writer import pg_update_shipment
+                pg_update_shipment(efj, container_url=tracking_url)
+                print(f"[MP] Wrote tracking URL to Postgres for {efj}")
             except Exception as e:
-                return render_template_string(MP_HTML, parsed=None, error=f"Sheet update failed: {e}", success=None, otp_required=False, form_data=None)
+                print(f"[MP] Postgres write failed (non-fatal): {e}")
+            # Also update FTL tracking cache
+            try:
+                cache_path = "/root/csl-bot/ftl_tracking_cache.json"
+                with open(cache_path, "r") as _cf:
+                    cache = json.load(_cf)
+                if efj in cache:
+                    cache[efj]["macropoint_url"] = tracking_url
+                else:
+                    cache[efj] = {
+                        "efj": efj,
+                        "load_num": pro,
+                        "status": "Tracking Started",
+                        "mp_load_id": pro,
+                        "macropoint_url": tracking_url,
+                        "last_scraped": None,
+                        "driver_phone": None,
+                        "cant_make_it": None,
+                        "stop_times": {}
+                    }
+                tmp_path = cache_path + ".tmp"
+                with open(tmp_path, "w") as _cf:
+                    json.dump(cache, _cf, indent=2)
+                os.replace(tmp_path, cache_path)
+                print(f"[MP] Updated tracking cache for {efj}")
+            except Exception as e:
+                print(f"[MP] Cache update failed (non-fatal): {e}")
             return render_template_string(MP_HTML, parsed=None, error=None, success=tracking_url, otp_required=False, form_data=None)
         else:
             return render_template_string(MP_HTML, parsed=None, error=out.get("error","Unknown error"), success=None, otp_required=False, form_data=None)

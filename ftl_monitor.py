@@ -80,6 +80,8 @@ _STATUS_RANK = {
     "Tracking Completed Successfully": 8,
 }
 
+_TERMINAL_STATUSES = {"Delivered", "Tracking Completed Successfully", "Billed/Closed", "billed_closed"}
+
 def _status_is_regression(old_status, new_status):
     """Return True if new_status is a regression from old_status."""
     old_rank = _STATUS_RANK.get(old_status, 0)
