@@ -11,6 +11,7 @@ Grouped table format per tab:
 After sending, syncs state files so monitors only alert on NEW changes.
 """
 import os
+import re
 import json
 import smtplib
 import time
@@ -25,7 +26,7 @@ from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 from dotenv import load_dotenv
 
-from ftl_monitor import scrape_macropoint
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 load_dotenv()
 
@@ -119,6 +120,421 @@ TOLEAD_HUBS = [
 FTL_STATE_FILE    = "/root/csl-bot/ftl_sent_alerts.json"
 BOVIET_STATE_FILE = "/root/csl-bot/boviet_sent_alerts.json"
 TOLEAD_STATE_FILE = "/root/csl-bot/tolead_sent_alerts.json"
+
+
+
+# ── Macropoint page parser (self-contained, restored from ftl_monitor backup) ──
+DEBUG = False
+_DATE_RE = re.compile(
+    r"\b\d{1,2}/\d{1,2}/\d{2,4}\b"
+    r"|\b\d{4}-\d{2}-\d{2}\b"
+    r"|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\.?\s+\d{1,2},?\s+\d{4}\b",
+    re.I,
+)
+
+_DATETIME_RE = re.compile(
+    r"(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}:\d{2}(?::\d{2})?\s*[AP]M)(?:\s*[A-Z]{2,3})?",
+    re.I,
+)
+
+_MONTH_MAP = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5,  "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+
+def _to_mmdd(date_str: str) -> str | None:
+    s = date_str.strip()
+    m = re.match(r"(\d{1,2})/(\d{1,2})/\d{2,4}", s)
+    if m:
+        return f"{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    m = re.match(r"\d{4}-(\d{2})-(\d{2})", s)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}"
+    m = re.match(r"([A-Za-z]+)\.?\s+(\d{1,2}),?\s+\d{4}", s, re.I)
+    if m:
+        mo = _MONTH_MAP.get(m.group(1)[:3].lower())
+        if mo:
+            return f"{mo:02d}-{int(m.group(2)):02d}"
+    return None
+
+
+def _parse_planned_dt(dt_str: str) -> datetime | None:
+    s = re.sub(r"\s+[A-Z]{2,3}$", "", dt_str.strip())
+    for fmt in ["%m/%d/%Y %I:%M %p", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M"]:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+# ── Macropoint page parser ───────────────────────────────────────────────────────
+def _split_stops(text: str) -> tuple[str, str]:
+    # Try "Stop Order" table header first — split after Stop 1 / Stop 2 content
+    s1 = re.search(r"\bStop\s+Order\b", text, re.I)
+    if s1:
+        after_header = text[s1.start():]
+        # Find the standalone "1" and "2" that mark stop sections after the header
+        stops = list(re.finditer(r"(?:^|\n)\s*([12])\s*\n", after_header))
+        stop1_pos = None
+        stop2_pos = None
+        for m in stops:
+            if m.group(1) == "1" and stop1_pos is None:
+                stop1_pos = s1.start() + m.start()
+            elif m.group(1) == "2" and stop1_pos is not None and stop2_pos is None:
+                stop2_pos = s1.start() + m.start()
+        if stop1_pos is not None and stop2_pos is not None:
+            return text[stop1_pos:stop2_pos], text[stop2_pos:]
+        if stop1_pos is not None:
+            return text[stop1_pos:], ""
+    # Fallback: look for "Stop 1" / "Stop 2" literally
+    s1 = re.search(r"\bStop\s*1\b", text, re.I)
+    s2 = re.search(r"\bStop\s*2\b", text, re.I)
+    if s1:
+        if s2 and s2.start() > s1.start():
+            return text[s1.start():s2.start()], text[s2.start():]
+        return text[s1.start():], ""
+    return "", ""
+
+
+def _find_event_date(section: str, event: str) -> str | None:
+    # Only match confirmed events with @ timestamp:
+    # "Arrived @ 02/24 13:12 - ET" or "Departed @ 02/24 07:40 - CT"
+    # Do NOT match bare "Arrived"/"Departed" toggle labels near unrelated dates.
+    m = re.search(
+        rf"\b{re.escape(event)}\s*@\s*(\d{{1,2}}/\d{{1,2}})",
+        section, re.I,
+    )
+    if m:
+        parts = m.group(1).split("/")
+        return f"{int(parts[0]):02d}-{int(parts[1]):02d}"
+
+    lines = [l.strip() for l in section.split("\n") if l.strip()]
+    for i, line in enumerate(lines):
+        if re.search(rf"\b{re.escape(event)}\s*@", line, re.I):
+            m = re.search(r"(\d{1,2})/(\d{1,2})", line)
+            if m:
+                return f"{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    return None
+
+
+def _find_event_timestamp(section: str, event: str) -> str | None:
+    """Extract full timestamp like '02/25 10:27 CT' for an Arrived/Departed event."""
+    m = re.search(
+        rf"\b{re.escape(event)}\s*@\s*(\d{{1,2}}/\d{{1,2}})\s+(\d{{1,2}}:\d{{2}})\s*-\s*([A-Z]{{2,3}})",
+        section, re.I,
+    )
+    if m:
+        return f"{m.group(1)} {m.group(2)} {m.group(3)}"
+    return None
+
+
+def _find_planned_start(section: str) -> str | None:
+    m = re.search(
+        r"(\d{1,2})/(\d{1,2})\s+(\d{1,2}:\d{2})\s*-\s*\d{1,2}:\d{2}",
+        section,
+    )
+    if m:
+        return f"{int(m.group(1)):02d}-{int(m.group(2)):02d} {m.group(3)}"
+    return None
+
+
+def _find_planned_dt(section: str) -> datetime | None:
+    lines = [l.strip() for l in section.split("\n") if l.strip()]
+    for i, line in enumerate(lines):
+        if re.search(r"\bPlanned\b", line, re.I):
+            context = " ".join(lines[i:i + 3])
+            m = _DATETIME_RE.search(context)
+            if m:
+                return _parse_planned_dt(f"{m.group(1)} {m.group(2)}")
+    return None
+
+
+def _has_events(section: str) -> bool:
+    if not section:
+        return False
+    if re.search(r"\b(Arrived|Departed)\s*@\s*\d{1,2}/\d{1,2}\b", section, re.I):
+        return True
+    lines = [l.strip() for l in section.split("\n") if l.strip()]
+    for i, line in enumerate(lines):
+        if re.search(r"\b(Arrived|Departed)\b", line, re.I):
+            context = " ".join(lines[i:i + 3])
+            if _DATE_RE.search(context):
+                return True
+    return False
+
+
+
+def _extract_stop_eta(section: str) -> str | None:
+    """Extract ETA + behind/ahead info from a stop section.
+    Returns e.g. 'ETA: 2/25/2026 11:11 PM CT — 20.7 Hours BEHIND' or None."""
+    parts = []
+    # Look for "X.X Hours BEHIND" or "X.X Hours AHEAD"
+    m_behind = re.search(
+        r"(\d+\.?\d*)\s+Hours?\s+(BEHIND|AHEAD)",
+        section, re.I,
+    )
+    if m_behind:
+        parts.append(f"{m_behind.group(1)} Hours {m_behind.group(2).upper()}")
+    # Look for "ETA: M/D/YYYY H:MM AM/PM TZ"
+    m_eta = re.search(
+        r"ETA:\s*(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}\s*[AP]M\s*[A-Z]{1,3})",
+        section, re.I,
+    )
+    if m_eta:
+        parts.append(f"ETA: {m_eta.group(1).strip()}")
+    return " — ".join(parts) if parts else None
+
+
+def _parse_macropoint(
+    text: str,
+) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
+    stop1_text, stop2_text = _split_stops(text)
+    stop1_arrived       = _find_event_date(stop1_text,   "Arrived")  if stop1_text else None
+    stop1_departed      = _find_event_date(stop1_text,   "Departed") if stop1_text else None
+    stop2_arrived       = _find_event_date(stop2_text,   "Arrived")  if stop2_text else None
+    stop2_departed      = _find_event_date(stop2_text,   "Departed") if stop2_text else None
+    stop1_planned_start = _find_planned_start(stop1_text)             if stop1_text else None
+    stop2_planned_start = _find_planned_start(stop2_text)             if stop2_text else None
+
+    # Full timestamps for email alerts (e.g. '02/25 10:27 CT')
+    # ETAs for stops that haven't been timestamped yet
+    stop1_eta = _extract_stop_eta(stop1_text) if stop1_text and not stop1_arrived else None
+    stop2_eta = _extract_stop_eta(stop2_text) if stop2_text and not stop2_arrived else None
+    stop_times = {
+        "stop1_arrived":  _find_event_timestamp(stop1_text, "Arrived")  if stop1_text else None,
+        "stop1_departed": _find_event_timestamp(stop1_text, "Departed") if stop1_text else None,
+        "stop2_arrived":  _find_event_timestamp(stop2_text, "Arrived")  if stop2_text else None,
+        "stop2_departed": _find_event_timestamp(stop2_text, "Departed") if stop2_text else None,
+        "stop1_eta":      stop1_eta,
+        "stop2_eta":      stop2_eta,
+    }
+
+    # Detect "CAN'T MAKE IT" — only alert if the stop has NOT been timestamped yet
+    _cmi_parts = []
+    if stop1_text and not stop1_arrived and re.search(r"CAN['’]?T\s+MAKE\s+IT", stop1_text, re.I):
+        eta1 = _extract_stop_eta(stop1_text)
+        _cmi_parts.append("Driver Won't Make PU in Time" + (f" [{eta1}]" if eta1 else ""))
+    if stop2_text and not stop2_arrived and re.search(r"CAN['’]?T\s+MAKE\s+IT", stop2_text, re.I):
+        eta2 = _extract_stop_eta(stop2_text)
+        _cmi_parts.append("Driver Won't Make Delivery in Time" + (f" [{eta2}]" if eta2 else ""))
+    cant_make_it = " & ".join(_cmi_parts) if _cmi_parts else None
+
+    # Extract Macropoint Load ID
+    load_id_match = re.search(r"Load\s+Id\s*\n\s*(\S+)", text)
+    if not load_id_match:
+        load_id_match = re.search(r"\bLoad\s+([A-Z0-9][\w\-]+\d)", text)
+    mp_load_id = load_id_match.group(1) if load_id_match else None
+
+    # Statuses we IGNORE — no alert needed
+    IGNORE_STATUSES = {"ready to track", "tracking now"}
+    text_lower = text.lower()
+
+    # ── FraudGuard / phone issues ─────────────────────────────────────────
+    if re.search(
+        r"FraudGuard"
+        r"|phone\s*(unresponsive|unreachable|not\s*respond)"
+        r"|unable\s+to\s+(locate|reach|contact).{0,20}(driver|phone)"
+        r"|driver.{0,20}(unreachable|unresponsive)",
+        text, re.I,
+    ):
+        return "Driver Phone Unresponsive", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id, cant_make_it, stop_times
+
+    # ── Tracking completed = Delivered ────────────────────────────────────
+    if re.search(r"Tracking\s*Completed\s*Successfully", text, re.I):
+        return "Delivered", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id, cant_make_it, stop_times
+
+    # ── Stop 2 Departed = left delivery ───────────────────────────────────
+    if stop2_departed:
+        return "Departed Delivery", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id, cant_make_it, stop_times
+
+    # ── Stop 2 Arrived = at delivery ──────────────────────────────────────
+    if stop2_arrived:
+        return "Arrived at Delivery", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id, cant_make_it, stop_times
+
+    # ── Stop 1 Departed = left pickup, en route ───────────────────────────
+    if stop1_departed:
+        return "Departed Pickup - En Route", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id, cant_make_it, stop_times
+
+    # ── Stop 1 Arrived = at pickup ────────────────────────────────────────
+    if stop1_arrived:
+        return "Driver Arrived at Pickup", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id, cant_make_it, stop_times
+
+    # ── Running late — past planned pickup time, no arrival ───────────────
+    planned_dt = _find_planned_dt(stop1_text)
+    if planned_dt:
+        now = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+        if now > planned_dt:
+            return "Running Late", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id, cant_make_it, stop_times
+
+    # ── Tracking behind / falling behind schedule ─────────────────────────
+    if re.search(r"(tracking\s+behind|behind\s+schedule|falling\s+behind)", text, re.I):
+        return "Tracking Behind Schedule", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id, cant_make_it, stop_times
+
+    # ── No events yet = waiting for update ────────────────────────────────
+    if stop1_text and not _has_events(stop1_text) and not _has_events(stop2_text):
+        # Check if this is just "Ready to Track" or "Tracking Now" — skip those
+        if any(s in text_lower for s in IGNORE_STATUSES):
+            return None, stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id, cant_make_it, stop_times
+        return "Tracking Waiting for Update", stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id, cant_make_it, stop_times
+
+    return None, stop1_arrived, stop2_departed, stop1_planned_start, stop2_planned_start, mp_load_id, cant_make_it, stop_times
+
+
+# ── Playwright scraper ───────────────────────────────────────────────────────────
+
+def _load_mp_cookies():
+    """Load Macropoint portal session cookies, or None if unavailable."""
+    try:
+        with open(MP_COOKIES_FILE) as f:
+            cookies = json.load(f)
+        # Fix expires: Playwright rejects large microsecond timestamps
+        for c in cookies:
+            exp = c.get("expires", -1)
+            if isinstance(exp, (int, float)) and exp > 1e12:
+                c["expires"] = int(exp / 1e6)
+            elif exp == 0 or exp is None:
+                c["expires"] = -1
+        return cookies
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def scrape_driver_phone(browser, mp_load_id: str, load_ref: str, mp_cookies: list = None) -> str | None:
+    """
+    Open the Macropoint portal shipment detail page and extract
+    the driver's tracking phone number.
+    Returns the phone string or None.
+    """
+    if not mp_cookies or not mp_load_id:
+        return None
+
+    page = browser.new_page()
+    try:
+        ctx = page.context
+        ctx.add_cookies(mp_cookies)
+
+        # Try the shipment search/detail page
+        # Macropoint portal shipment URLs: /shipments or search by load number
+        search_url = f"{MP_PORTAL_URL}/shipments?search={load_ref}"
+        page.goto(search_url, wait_until="domcontentloaded", timeout=20_000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=12_000)
+        except PlaywrightTimeout:
+            pass
+        page.wait_for_timeout(2000)
+
+        # Check if session expired (redirected to login)
+        if "auth.gln.com" in page.url or "login" in page.url.lower():
+            print("    MP portal session expired — skipping driver phone lookup")
+            return None
+
+        text = page.inner_text("body")
+
+        # Try to find phone number patterns in the shipment detail
+        # Macropoint shows tracking phone near "Phone" or "Tracking Phone" labels
+        phone_patterns = [
+            # "Tracking Phone\n(443) 555-1234" or "Phone\n+14435551234"
+            r"(?:Tracking\s+)?Phone[:\s]*\n?\s*(\+?1?[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})",
+            # Generic US phone in the page
+            r"(\(\d{3}\)\s*\d{3}[-.]?\d{4})",
+            r"(\d{3}[-.]?\d{3}[-.]?\d{4})",
+        ]
+
+        # First try clicking into the shipment detail if we're on a list page
+        try:
+            # Click the first shipment row/link that matches our load
+            link = page.locator(f'a:has-text("{load_ref}"), tr:has-text("{load_ref}")').first
+            if link.is_visible(timeout=3000):
+                link.click(timeout=5000)
+                page.wait_for_load_state("networkidle", timeout=10_000)
+                page.wait_for_timeout(2000)
+                text = page.inner_text("body")
+        except Exception:
+            pass  # Already on detail page or couldn't click — use current text
+
+        # Extract phone numbers from the page
+        found_phones = []
+        for pattern in phone_patterns:
+            matches = re.findall(pattern, text, re.I)
+            found_phones.extend(matches)
+
+        if not found_phones:
+            return None
+
+        # Filter out the Evans dispatch phone (we don't want that)
+        dispatch_digits = "4437614954"
+        for phone in found_phones:
+            digits = re.sub(r"\D", "", phone)
+            if digits.startswith("1") and len(digits) == 11:
+                digits = digits[1:]
+            if digits != dispatch_digits and len(digits) == 10:
+                # Format nicely
+                formatted = f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+                print(f"    Driver phone found: {formatted}")
+                return formatted
+
+        return None
+
+    except PlaywrightTimeout:
+        print("    MP portal timeout — skipping driver phone")
+        return None
+    except Exception as exc:
+        print(f"    MP portal error: {exc}")
+        return None
+    finally:
+        page.close()
+
+
+def scrape_macropoint(
+    browser, url: str, mp_cookies: list = None
+) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
+    page = browser.new_page()
+    try:
+        # Inject authenticated cookies — Macropoint now requires auth
+        if mp_cookies:
+            page.context.add_cookies(mp_cookies)
+
+        page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=20_000)
+        except PlaywrightTimeout:
+            pass
+
+        # Blazor WASM Control Tower needs time to render tracking data
+        # Wait up to 20s for tracking content to appear
+        for _wait in range(10):
+            page.wait_for_timeout(2_000)
+            text = page.inner_text("body")
+            if any(kw in text for kw in ["Arrived", "Departed", "In Transit",
+                                          "Stop Order", "Tracking Completed",
+                                          "FraudGuard", "Ready To Track",
+                                          "Tracking Now", "Load Status"]):
+                break
+        else:
+            text = page.inner_text("body")
+    except PlaywrightTimeout as exc:
+        print(f"    TIMEOUT: {exc}")
+        return None, None, None, None, None, None, None, {}
+    except Exception as exc:
+        print(f"    ERROR: {exc}")
+        return None, None, None, None, None, None, None, {}
+    finally:
+        page.close()
+
+    if DEBUG:
+        safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", url.rstrip("/").split("/")[-1])
+        debug_path = f"/tmp/mp_debug_{safe_name}.txt"
+        try:
+            with open(debug_path, "w") as f:
+                f.write(text)
+            print(f"    DEBUG: inner_text saved → {debug_path}")
+        except Exception as exc:
+            print(f"    DEBUG WARNING: could not save debug file: {exc}")
+
+    return _parse_macropoint(text)
+
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
