@@ -14,13 +14,17 @@ const apiFetch = (url, opts = {}) =>
 // ─── Status Normalization ───
 const STATUS_MAP = {
   // Dray statuses
-  "at yard": "at_port", "at pickup": "at_port", "discharged": "at_port", "at port": "at_port",
+  "at yard": "at_yard", "at pickup": "at_port", "discharged": "released", "at port": "at_port",
   "vessel": "on_vessel", "vessel arrived": "on_vessel", "on vessel": "on_vessel",
   "in transit": "in_transit", "intransit": "in_transit",
   "delivered": "delivered",
-  "returned to port": "empty_return", "empty return": "empty_return",
-  "hold": "pending",
+  "returned to port": "returned_to_port", "empty return": "empty_return",
+  "hold": "on_hold", "on hold": "on_hold",
   "scheduled": "scheduled",
+  "released": "released",
+  "rail": "rail",
+  "transload": "transload",
+  "on site loading": "on_site_loading", "on-site loading": "on_site_loading",
   // FTL statuses
   "unassigned": "unassigned",
   "assigned": "assigned",
@@ -88,6 +92,8 @@ function mapShipment(s, idx) {
     project: s.project || "",
     hub: s.hub || "",
     mpStatus: s.mp_status || "",
+    mpDisplayStatus: s.mp_display_status || "",
+    mpDisplayDetail: s.mp_display_detail || "",
     email_count: s.email_count || 0,
     email_max_priority: s.email_max_priority || 0,
     synced: true,
@@ -104,7 +110,14 @@ const STATUSES = [
   { key: "delivered", label: "Delivered", icon: "✦", grad: "linear-gradient(135deg, #22C55E, #4ADE80)" },
   { key: "empty_return", label: "Empty Return", icon: "↩", grad: "linear-gradient(135deg, #06B6D4, #22D3EE)" },
   { key: "pending", label: "Pending", icon: "◆", grad: "linear-gradient(135deg, #4B5563, #6B7280)" },
+  { key: "on_hold", label: "On Hold", icon: "⏸", grad: "linear-gradient(135deg, #D97706, #F59E0B)" },
   { key: "scheduled", label: "Scheduled", icon: "📅", grad: "linear-gradient(135deg, #8B5CF6, #A78BFA)" },
+  { key: "released", label: "Released", icon: "✓", grad: "linear-gradient(135deg, #059669, #10B981)" },
+  { key: "returned_to_port", label: "Returned to Port", icon: "↩", grad: "linear-gradient(135deg, #0891B2, #06B6D4)" },
+  { key: "at_yard", label: "At Yard", icon: "◆", grad: "linear-gradient(135deg, #4F46E5, #6366F1)" },
+  { key: "rail", label: "Rail", icon: "◈", grad: "linear-gradient(135deg, #475569, #64748B)" },
+  { key: "transload", label: "Transload", icon: "⇄", grad: "linear-gradient(135deg, #7C3AED, #8B5CF6)" },
+  { key: "on_site_loading", label: "On Site Loading", icon: "▲", grad: "linear-gradient(135deg, #B45309, #D97706)" },
   { key: "issue", label: "Exception", icon: "⚠", grad: "linear-gradient(135deg, #EF4444, #F87171)" },
   { key: "cancelled", label: "Cancelled", icon: "✕", grad: "linear-gradient(135deg, #6B7280, #9CA3AF)" },
   { key: "cancelled_tonu", label: "TONU", icon: "⚠", grad: "linear-gradient(135deg, #EF4444, #F87171)" },
@@ -147,7 +160,14 @@ const STATUS_COLORS = {
   delivered: { main: "#22C55E", glow: "#22C55E33" },
   empty_return: { main: "#06B6D4", glow: "#06B6D433" },
   pending: { main: "#4B5563", glow: "#4B556333" },
+  on_hold: { main: "#D97706", glow: "#D9770633" },
   scheduled: { main: "#8B5CF6", glow: "#8B5CF633" },
+  released: { main: "#059669", glow: "#05966933" },
+  returned_to_port: { main: "#0891B2", glow: "#0891B233" },
+  at_yard: { main: "#4F46E5", glow: "#4F46E533" },
+  rail: { main: "#475569", glow: "#47556933" },
+  transload: { main: "#7C3AED", glow: "#7C3AED33" },
+  on_site_loading: { main: "#B45309", glow: "#B4530933" },
   issue: { main: "#F87171", glow: "#EF444433" },
   cancelled: { main: "#6B7280", glow: "#6B728033" },
   cancelled_tonu: { main: "#EF4444", glow: "#EF444433" },
@@ -357,7 +377,7 @@ function applyColFilters(data, filters, trackingSummary) {
   return data.filter(s => active.every(([key, val]) => {
     if (key === "pickup" || key === "delivery") return matchesDatePreset(key === "pickup" ? s.pickupDate : s.deliveryDate, val);
     if (key === "status") return s.status === val;
-    if (key === "mpStatus") { const e = (s.efj || "").replace(/^EFJ\s*/i, ""); return (s.mpStatus || trackingSummary?.[e]?.mpStatus || "") === val; }
+    if (key === "mpStatus") { const e = (s.efj || "").replace(/^EFJ\s*/i, ""); return (s.mpDisplayStatus || trackingSummary?.[e]?.mpDisplayStatus || s.mpStatus || trackingSummary?.[e]?.mpStatus || "") === val; }
     return (s[key] || "") === val;
   }));
 }
@@ -368,7 +388,7 @@ function buildColFilterOptions(data, trackingSummary) {
     .map(v => ({ value: v, label: [...STATUSES, ...FTL_STATUSES].find(st => st.key === v)?.label || v }))
     .sort((a, b) => a.label.localeCompare(b.label));
   opts.carrier = [...new Set(data.map(s => s.carrier).filter(Boolean))].sort();
-  opts.mpStatus = [...new Set(data.map(s => { const e = (s.efj||"").replace(/^EFJ\s*/i,""); return s.mpStatus || trackingSummary?.[e]?.mpStatus || ""; }).filter(Boolean))].sort();
+  opts.mpStatus = [...new Set(data.map(s => { const e = (s.efj||"").replace(/^EFJ\s*/i,""); return s.mpDisplayStatus || trackingSummary?.[e]?.mpDisplayStatus || s.mpStatus || trackingSummary?.[e]?.mpStatus || ""; }).filter(Boolean))].sort();
   opts.origin = [...new Set(data.map(s => s.origin).filter(v => v && v !== "\u2014" && v !== "—"))].sort();
   opts.destination = [...new Set(data.map(s => s.destination).filter(v => v && v !== "\u2014" && v !== "—"))].sort();
   opts.pickup = DATE_FILTER_PRESETS;
@@ -527,48 +547,58 @@ function DocIndicators({ docs }) {
 }
 
 // ─── FTL Tracking Badge — shows actual Macropoint status ───
-function TrackingBadge({ tracking, mpStatus }) {
-  // mpStatus = Macropoint tracking status (e.g. "Tracking Now", "Driver Phone Unresponsive")
-  // tracking = shipment tracking summary (status, behindSchedule, cantMakeIt)
-  const mpSt = (mpStatus || tracking?.mpStatus || "").trim();
-  const mpLower = mpSt.toLowerCase();
-  if (mpSt) {
-    let color, bg, border;
-    if (mpLower.includes("unresponsive") || mpLower.includes("waiting for update")) {
-      color = "#A855F7"; bg = "rgba(168,85,247,0.12)"; border = "rgba(168,85,247,0.25)";
-    } else if (mpLower.includes("requesting app")) {
-      color = "#f87171"; bg = "rgba(239,68,68,0.12)"; border = "rgba(239,68,68,0.25)";
-    } else if (mpLower.includes("completed")) {
-      color = "#22C55E"; bg = "rgba(34,197,94,0.12)"; border = "rgba(34,197,94,0.25)";
-    } else if (mpLower.includes("tracking now")) {
-      color = "#34d399"; bg = "rgba(52,211,153,0.12)"; border = "rgba(52,211,153,0.25)";
-    } else {
-      color = "#8B95A8"; bg = "rgba(139,149,168,0.12)"; border = "rgba(139,149,168,0.25)";
-    }
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 12, fontSize: 9, fontWeight: 700, color, background: bg, border: `1px solid ${border}`, whiteSpace: "nowrap" }}>{mpSt}</span>
-    );
+function TrackingBadge({ tracking, mpStatus, mpDisplayStatus, mpDisplayDetail }) {
+  // mpDisplayStatus = classified status from server (On Time, Behind Schedule, At Pickup, etc.)
+  // Falls back to mpStatus (raw Macropoint status) then tracking summary
+  const display = (mpDisplayStatus || "").trim();
+  const raw = (mpStatus || tracking?.mpStatus || "").trim();
+  const detail = (mpDisplayDetail || tracking?.mpDisplayDetail || "").trim();
+
+  // Use classified display status if available, otherwise fall back to raw
+  const label = display || raw;
+  if (!label) {
+    if (!tracking) return <span style={{ fontSize: 9, color: "#5A6478", fontStyle: "italic" }}>No MP</span>;
+    const st = (tracking.status || "").trim();
+    if (!st) return <span style={{ fontSize: 9, color: "#5A6478", fontStyle: "italic" }}>No MP</span>;
   }
-  if (!tracking) return <span style={{ fontSize: 9, color: "#5A6478", fontStyle: "italic" }}>No MP</span>;
-  const status = (tracking.status || "").trim();
-  const sl = status.toLowerCase();
+
+  const ll = (label || "").toLowerCase();
   let color, bg, border;
-  if (tracking.cantMakeIt) {
-    color = "#f87171"; bg = "rgba(239,68,68,0.12)"; border = "rgba(239,68,68,0.25)";
-  } else if (tracking.behindSchedule) {
-    color = "#fb923c"; bg = "rgba(251,146,60,0.12)"; border = "rgba(251,146,60,0.25)";
-  } else if (sl.includes("deliver")) {
+
+  // Color mapping for classified statuses
+  if (ll === "on time" || ll.includes("tracking active")) {
     color = "#22C55E"; bg = "rgba(34,197,94,0.12)"; border = "rgba(34,197,94,0.25)";
-  } else if (sl.includes("transit") || sl.includes("departed")) {
+  } else if (ll === "behind schedule") {
+    color = "#EF4444"; bg = "rgba(239,68,68,0.12)"; border = "rgba(239,68,68,0.25)";
+  } else if (ll === "in transit") {
     color = "#3B82F6"; bg = "rgba(59,130,246,0.12)"; border = "rgba(59,130,246,0.25)";
-  } else if (sl.includes("arrived") || sl.includes("origin") || sl.includes("pickup")) {
+  } else if (ll === "at pickup") {
     color = "#F59E0B"; bg = "rgba(245,158,11,0.12)"; border = "rgba(245,158,11,0.25)";
+  } else if (ll === "at delivery") {
+    color = "#8B5CF6"; bg = "rgba(139,92,246,0.12)"; border = "rgba(139,92,246,0.25)";
+  } else if (ll === "delivered") {
+    color = "#22C55E"; bg = "rgba(34,197,94,0.12)"; border = "rgba(34,197,94,0.25)";
+  } else if (ll === "awaiting update") {
+    color = "#F97316"; bg = "rgba(249,115,22,0.12)"; border = "rgba(249,115,22,0.25)";
+  } else if (ll === "no signal") {
+    color = "#EF4444"; bg = "rgba(239,68,68,0.12)"; border = "rgba(239,68,68,0.25)";
+  } else if (ll === "assigned") {
+    color = "#6B7280"; bg = "rgba(107,114,128,0.12)"; border = "rgba(107,114,128,0.25)";
+  } else if (ll === "unassigned" || ll === "no mp") {
+    color = "#5A6478"; bg = "rgba(90,100,120,0.08)"; border = "rgba(90,100,120,0.15)";
+  } else if (ll.includes("unresponsive")) {
+    color = "#EF4444"; bg = "rgba(239,68,68,0.12)"; border = "rgba(239,68,68,0.25)";
+  } else if (ll.includes("completed")) {
+    color = "#22C55E"; bg = "rgba(34,197,94,0.12)"; border = "rgba(34,197,94,0.25)";
   } else {
-    color = "#34d399"; bg = "rgba(52,211,153,0.12)"; border = "rgba(52,211,153,0.25)";
+    color = "#8B95A8"; bg = "rgba(139,149,168,0.12)"; border = "rgba(139,149,168,0.25)";
   }
-  const label = status || (tracking.cantMakeIt ? "Alert" : tracking.behindSchedule ? "Behind" : "On Time");
+
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 12, fontSize: 9, fontWeight: 700, color, background: bg, border: `1px solid ${border}`, whiteSpace: "nowrap" }}>{label}</span>
+    <span
+      title={detail || undefined}
+      style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 12, fontSize: 9, fontWeight: 700, color, background: bg, border: `1px solid ${border}`, whiteSpace: "nowrap", cursor: detail ? "help" : "default" }}
+    >{label}</span>
   );
 }
 
@@ -754,7 +784,14 @@ export default function DispatchDashboard() {
       ]);
       if (shipmentsRes.status === "fulfilled") {
         const mapped = shipmentsRes.value.shipments.map(mapShipment);
-        setShipments(mapped);
+        setShipments(prev => {
+          const prevMap = new Map(prev.map(s => [s.efj, s]));
+          return mapped.map(s => {
+            const existing = prevMap.get(s.efj);
+            if (existing && !existing.synced) return { ...existing, id: s.id };
+            return s;
+          });
+        });
         const acctNames = [...new Set(mapped.map(s => s.account).filter(Boolean))].sort();
         setAccounts(["All Accounts", ...acctNames]);
       }
@@ -856,7 +893,7 @@ export default function DispatchDashboard() {
     const fallback = setTimeout(() => setLoaded(true), 10000);
     return () => clearTimeout(fallback);
   }, [fetchData, fetchProfiles]);
-  useEffect(() => { const i = setInterval(fetchData, 60000); return () => clearInterval(i); }, [fetchData]);
+  useEffect(() => { const i = setInterval(fetchData, 90000); return () => clearInterval(i); }, [fetchData]);
 
   // Deep link support: ?view=billing&load=EFJ-XXXX
   useEffect(() => {
@@ -1042,7 +1079,7 @@ export default function DispatchDashboard() {
   };
 
   // Inline field update — writes to Postgres via POST /api/v2/load/{efj}/update
-  const FIELD_TO_PG = { pickup: "pickup_date", delivery: "delivery_date", eta: "eta", lfd: "lfd", carrier: "carrier", driver: "driver", origin: "origin", destination: "destination", status: "status", vessel: "vessel", bol: "bol", return_date: "return_date" };
+  const FIELD_TO_PG = { pickup: "pickup_date", delivery: "delivery_date", eta: "eta", lfd: "lfd", carrier: "carrier", driver: "driver", origin: "origin", destination: "destination", status: "status", vessel: "vessel", bol: "bol", return_date: "return_date", ssl: "vessel", container: "container" };
   const handleFieldUpdate = async (shipment, field, value) => {
     const stateKey = field === "pickup" ? "pickupDate" : field === "delivery" ? "deliveryDate" : field;
     setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, [stateKey]: value, synced: false } : s));
@@ -1967,7 +2004,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                     <td style={{ ...tdBase, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
                     {/* MP Status */}
                     <td style={tdBase}>
-                      {(s.moveType === "FTL" || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
+                      {(s.moveType === "FTL" || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
                     </td>
                     {/* Pickup (inline-editable, DD-MM + time) */}
                     <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
@@ -3680,7 +3717,14 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
           {selectedShipment.moveType === "FTL" && trackingData?.behindSchedule && !trackingData?.cantMakeIt && (
             <div style={{ padding: "0 20px 8px" }}>
               <div style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#fb923c", fontWeight: 600 }}>
-                ⏱ Behind Schedule
+                ⏱ Behind Schedule{trackingData?.mpDisplayDetail ? ` — ${trackingData.mpDisplayDetail}` : ""}
+              </div>
+            </div>
+          )}
+          {selectedShipment.moveType === "FTL" && trackingData?.mpDisplayStatus === "On Time" && !trackingData?.cantMakeIt && !trackingData?.behindSchedule && trackingData?.mpDisplayDetail && (
+            <div style={{ padding: "0 20px 8px" }}>
+              <div style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#22C55E", fontWeight: 600 }}>
+                ✓ On Time — {trackingData.mpDisplayDetail}
               </div>
             </div>
           )}
@@ -3807,6 +3851,11 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
           <div style={{ padding: "14px 20px" }}>
             {[
               { label: "Account", field: "account", val: selectedShipment.account },
+              { label: "Container / Load #", field: "container", val: selectedShipment.container },
+              { label: "BOL / Booking", field: "bol", val: selectedShipment.bol },
+              ...(selectedShipment.moveType !== "FTL" ? [
+                { label: "SSL / Vessel", field: "ssl", val: selectedShipment.ssl },
+              ] : []),
               { label: "Carrier", field: "carrier", val: selectedShipment.carrier },
               // Carrier directory info for dray loads
               ...(() => {
@@ -3874,7 +3923,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                     onChange={e => setEditValue(e.target.value)}
                     onBlur={() => {
                       const v = editValue.trim();
-                      const SLIDE_FIELD_MAP = { pickupDate: "pickup", deliveryDate: "delivery", carrier: "carrier", origin: "origin", destination: "destination", eta: "eta", lfd: "lfd" };
+                      const SLIDE_FIELD_MAP = { pickupDate: "pickup", deliveryDate: "delivery", carrier: "carrier", origin: "origin", destination: "destination", eta: "eta", lfd: "lfd", ssl: "ssl", container: "container", bol: "bol" };
                       const pgField = SLIDE_FIELD_MAP[item.field];
                       if (v || item.field === 'pickupDate' || item.field === 'deliveryDate') {
                         if (pgField && selectedShipment.efj) { handleFieldUpdate(selectedShipment, pgField, v); }
@@ -4390,11 +4439,11 @@ function DispatchView({
     { key: "status", label: "Status", w: 100, sortFn: (a, b) => a.status.localeCompare(b.status) },
     { key: "efj", label: "EFJ #", w: 90, sortFn: (a, b) => a.loadNumber.localeCompare(b.loadNumber) },
     { key: "container", label: "Container/Load #", w: 120, sortFn: (a, b) => a.container.localeCompare(b.container) },
-    ...(hasFTL ? [{ key: "mpStatus", label: "MP Status", w: 90, sortFn: (a, b) => {
+    ...(hasFTL ? [{ key: "mpStatus", label: "MP Status", w: 110, sortFn: (a, b) => {
       const efjA = (a.efj || "").replace(/^EFJ\s*/i, ""); const efjB = (b.efj || "").replace(/^EFJ\s*/i, "");
-      const aS = (a.mpStatus || trackingSummary?.[efjA]?.mpStatus || "").toLowerCase();
-      const bS = (b.mpStatus || trackingSummary?.[efjB]?.mpStatus || "").toLowerCase();
-      const pri = s => s.includes("unresponsive") ? 3 : s.includes("requesting") ? 2 : s.includes("waiting") ? 1 : 0;
+      const aS = (a.mpDisplayStatus || trackingSummary?.[efjA]?.mpDisplayStatus || "").toLowerCase();
+      const bS = (b.mpDisplayStatus || trackingSummary?.[efjB]?.mpDisplayStatus || "").toLowerCase();
+      const pri = s => s === "behind schedule" ? 5 : s === "no signal" ? 4 : s === "awaiting update" ? 3 : s === "at delivery" ? 2 : s === "at pickup" ? 1 : 0;
       return pri(bS) - pri(aS);
     }}] : []),
     { key: "pickup", label: "Pickup", w: 110, sortFn: (a, b) => (a.pickupDate || "").localeCompare(b.pickupDate || "") },
@@ -4433,7 +4482,7 @@ function DispatchView({
       const t = trackingSummary?.[efjBare];
       return [s.account,
         [...FTL_STATUSES, ...STATUSES].find(st => st.key === s.status)?.label || s.status,
-        s.loadNumber, s.container, s.mpStatus || t?.mpStatus || "",
+        s.loadNumber, s.container, s.mpDisplayStatus || t?.mpDisplayStatus || s.mpStatus || t?.mpStatus || "",
         s.pickupDate || "", s.origin, s.destination, s.deliveryDate || "",
         s.truckType || "", s.trailerNumber || "", s.driverPhone || "", s.carrierEmail || "",
         s.customerRate || "", (s.notes || "").replace(/"/g, '""'),
@@ -4783,7 +4832,7 @@ function DispatchView({
                   <td style={{ ...cellStyle(colIdx++), fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
                   {/* MP Status (FTL only) */}
                   {hasFTL && <td style={cellStyle(colIdx++)}>
-                    {(isFTL || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
+                    {(isFTL || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
                   </td>}
                   {/* Pickup (inline-editable, DD-MM) */}
                   <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
@@ -5011,7 +5060,13 @@ function DispatchView({
               {trackingData?.behindSchedule && !trackingData?.cantMakeIt && (
                 <div style={{ margin: "0 20px 8px", padding: "8px 12px", borderRadius: 8, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ fontSize: 12 }}>⏱</span>
-                  <span style={{ fontSize: 10, color: "#fb923c", fontWeight: 600 }}>Behind Schedule</span>
+                  <span style={{ fontSize: 10, color: "#fb923c", fontWeight: 600 }}>Behind Schedule{trackingData?.mpDisplayDetail ? ` — ${trackingData.mpDisplayDetail}` : ""}</span>
+                </div>
+              )}
+              {trackingData?.mpDisplayStatus === "On Time" && !trackingData?.cantMakeIt && !trackingData?.behindSchedule && trackingData?.mpDisplayDetail && (
+                <div style={{ margin: "0 20px 8px", padding: "8px 12px", borderRadius: 8, background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 12 }}>✓</span>
+                  <span style={{ fontSize: 10, color: "#22C55E", fontWeight: 600 }}>On Time — {trackingData.mpDisplayDetail}</span>
                 </div>
               )}
 
@@ -5568,7 +5623,19 @@ function MacropointModal({ shipment, onClose }) {
                 {d.behindSchedule && !d.cantMakeIt && (
                   <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontSize: 16 }}>⏱</span>
-                    <span style={{ fontSize: 11, color: "#fb923c", fontWeight: 700 }}>Behind Schedule</span>
+                    <div>
+                      <span style={{ fontSize: 11, color: "#fb923c", fontWeight: 700 }}>Behind Schedule</span>
+                      {d.mpDisplayDetail && <div style={{ fontSize: 10, color: "#fdba74", marginTop: 2 }}>{d.mpDisplayDetail}</div>}
+                    </div>
+                  </div>
+                )}
+                {d.scheduleAlert && !d.behindSchedule && !d.cantMakeIt && (
+                  <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 10, background: d.mpDisplayStatus === "On Time" ? "rgba(34,197,94,0.12)" : "rgba(59,130,246,0.12)", border: `1px solid ${d.mpDisplayStatus === "On Time" ? "rgba(34,197,94,0.3)" : "rgba(59,130,246,0.3)"}`, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>{d.mpDisplayStatus === "On Time" ? "\u2713" : "\u2139"}</span>
+                    <div>
+                      <span style={{ fontSize: 11, color: d.mpDisplayStatus === "On Time" ? "#22C55E" : "#60A5FA", fontWeight: 700 }}>{d.mpDisplayStatus || "Tracking"}</span>
+                      {d.mpDisplayDetail && <div style={{ fontSize: 10, color: d.mpDisplayStatus === "On Time" ? "#86EFAC" : "#93C5FD", marginTop: 2 }}>{d.mpDisplayDetail}{d.distanceToStop ? ` | ${parseFloat(d.distanceToStop).toFixed(0)} mi to stop` : ""}</div>}
+                    </div>
                   </div>
                 )}
 
