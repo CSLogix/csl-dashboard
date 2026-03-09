@@ -3577,8 +3577,8 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
           {(selectedShipment.pickupDate || selectedShipment.deliveryDate || parsedStops.pickup.arrived || parsedStops.delivery.arrived) && (() => {
             const fmtTs = (v) => {
               if (!v) return "";
-              // ISO timestamp (from tracking events)
-              if (v.includes("T")) { try { const d = new Date(v); return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; } catch {} }
+              // ISO timestamp (from tracking events) — check for digit-T-digit to avoid matching "ET" suffix
+              if (/\dT\d/.test(v)) { try { const d = new Date(v); if (!isNaN(d)) return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; } catch {} }
               // Scheduled dates like "3/6/2026 9:00" or "2026-03-06 09:00" — strip year, show m/d h:mm
               const m = v.match(/^(\d{1,2})\/(\d{1,2})\/\d{4}\s+(.+)/);
               if (m) return `${m[1]}/${m[2]} ${m[3]}`;
