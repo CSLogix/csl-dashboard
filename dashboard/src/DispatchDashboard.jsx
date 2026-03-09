@@ -328,6 +328,53 @@ function isDateFuture(str) {
   const d = parseDate(str); if (!d) return false;
   const t = new Date(); t.setHours(23,59,59,999); return d > t;
 }
+function isDateThisWeek(str) {
+  const d = parseDate(str); if (!d) return false;
+  const now = new Date(); const day = now.getDay(); const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+  const mon = new Date(now); mon.setDate(diff); mon.setHours(0,0,0,0);
+  const sun = new Date(mon); sun.setDate(sun.getDate() + 6); sun.setHours(23,59,59,999);
+  return d >= mon && d <= sun;
+}
+
+// ─── Column Header Filter Helpers ───
+const COL_FILTER_KEY_MAP = {
+  "Account": "account", "Status": "status", "Carrier": "carrier",
+  "MP Status": "mpStatus", "Origin": "origin", "Destination": "destination",
+  "Pickup": "pickup", "Delivery": "delivery", "PU": "pickup", "DEL": "delivery",
+};
+const DATE_FILTER_PRESETS = ["Today", "Tomorrow", "This Week", "Past Due"];
+
+function matchesDatePreset(dateStr, preset) {
+  if (preset === "Today") return isDateToday(dateStr);
+  if (preset === "Tomorrow") return isDateTomorrow(dateStr);
+  if (preset === "This Week") return isDateThisWeek(dateStr);
+  if (preset === "Past Due") return dateStr && isDatePast(dateStr);
+  return true;
+}
+function applyColFilters(data, filters, trackingSummary) {
+  const active = Object.entries(filters).filter(([, v]) => v != null);
+  if (!active.length) return data;
+  return data.filter(s => active.every(([key, val]) => {
+    if (key === "pickup" || key === "delivery") return matchesDatePreset(key === "pickup" ? s.pickupDate : s.deliveryDate, val);
+    if (key === "status") return s.status === val;
+    if (key === "mpStatus") { const e = (s.efj || "").replace(/^EFJ\s*/i, ""); return (s.mpStatus || trackingSummary?.[e]?.mpStatus || "") === val; }
+    return (s[key] || "") === val;
+  }));
+}
+function buildColFilterOptions(data, trackingSummary) {
+  const opts = {};
+  opts.account = [...new Set(data.map(s => s.account).filter(Boolean))].sort();
+  opts.status = [...new Set(data.map(s => s.status).filter(Boolean))]
+    .map(v => ({ value: v, label: [...STATUSES, ...FTL_STATUSES].find(st => st.key === v)?.label || v }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  opts.carrier = [...new Set(data.map(s => s.carrier).filter(Boolean))].sort();
+  opts.mpStatus = [...new Set(data.map(s => { const e = (s.efj||"").replace(/^EFJ\s*/i,""); return s.mpStatus || trackingSummary?.[e]?.mpStatus || ""; }).filter(Boolean))].sort();
+  opts.origin = [...new Set(data.map(s => s.origin).filter(v => v && v !== "\u2014" && v !== "—"))].sort();
+  opts.destination = [...new Set(data.map(s => s.destination).filter(v => v && v !== "\u2014" && v !== "—"))].sort();
+  opts.pickup = DATE_FILTER_PRESETS;
+  opts.delivery = DATE_FILTER_PRESETS;
+  return opts;
+}
 
 function resolveRepForShipment(s) {
   if (s.rep) return s.rep;
@@ -1672,6 +1719,17 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
   const [inlineEditId, setInlineEditId] = useState(null);
   const [inlineEditField, setInlineEditField] = useState(null);
   const [inlineEditValue, setInlineEditValue] = useState("");
+  const [repColumnFilters, setRepColumnFilters] = useState({});
+  const [repOpenFilterCol, setRepOpenFilterCol] = useState(null);
+  const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
+
+  // Close column filter dropdown on outside click
+  useEffect(() => {
+    if (!repOpenFilterCol) return;
+    const handler = (e) => { if (!e.target.closest('.col-filter-dd')) setRepOpenFilterCol(null); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [repOpenFilterCol]);
 
   const isMaster = MASTER_REPS.includes(repName);
   const isBoviet = repName === "Boviet";
@@ -1784,21 +1842,79 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
   // Total count for toggle badges (both views show same data, different layout)
   const totalCount = displayShipsFiltered.length;
 
+  // Column filter: filtered data + options
+  const repColFilterOpts = useMemo(() => buildColFilterOptions(isOps ? opsTableShips : displayShips, trackingSummary), [isOps, opsTableShips, displayShips, trackingSummary]);
+  const opsDataFiltered = useMemo(() => applyColFilters(opsTableShips, repColumnFilters, trackingSummary), [opsTableShips, repColumnFilters, trackingSummary]);
+  const displayDataFiltered = useMemo(() => applyColFilters(displayShips, repColumnFilters, trackingSummary), [displayShips, repColumnFilters, trackingSummary]);
+
+  // Render a filterable <th> with column dropdown
+  const renderFilterTh = (label, extraStyle) => {
+    const filterKey = COL_FILTER_KEY_MAP[label];
+    const isFilterable = !!filterKey;
+    const hasFilter = isFilterable && !!repColumnFilters[filterKey];
+    const isOpen = repOpenFilterCol === label;
+    const opts = isFilterable ? (repColFilterOpts[filterKey] || []) : [];
+    return (
+      <th key={label} style={{ ...thStyle, ...extraStyle, position: "relative", zIndex: isOpen ? 50 : 5,
+        borderBottom: hasFilter ? "2px solid rgba(0,212,170,0.4)" : thStyle.borderBottom,
+        background: hasFilter ? "rgba(0,212,170,0.04)" : thStyle.background,
+        color: hasFilter ? "#00D4AA" : thStyle.color }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <span style={{ flex: 1 }}>{label}</span>
+          {isFilterable && (
+            <span className="col-filter-dd"
+              onClick={e => { e.stopPropagation(); if (isOpen) { setRepOpenFilterCol(null); } else { const rect = e.currentTarget.closest('th').getBoundingClientRect(); setFilterDropdownPos({ top: rect.bottom + 2, left: rect.left }); setRepOpenFilterCol(label); } }}
+              style={{ fontSize: 8, color: hasFilter ? "#00D4AA" : "#5A6478", cursor: "pointer",
+                padding: "2px 3px", borderRadius: 3, background: hasFilter ? "rgba(0,212,170,0.12)" : "transparent", lineHeight: 1 }}>
+              {hasFilter ? "✦" : "▾"}
+            </span>
+          )}
+        </div>
+        {isOpen && isFilterable && (
+          <div className="col-filter-dd" onClick={e => e.stopPropagation()}
+            style={{ position: "fixed", top: filterDropdownPos.top, left: filterDropdownPos.left, zIndex: 9999, background: "#1A2236",
+              border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, minWidth: 150,
+              maxHeight: 300, overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
+            <div onClick={() => { setRepColumnFilters(f => { const n = {...f}; delete n[filterKey]; return n; }); setRepOpenFilterCol(null); }}
+              style={{ padding: "6px 10px", fontSize: 11, color: !hasFilter ? "#00D4AA" : "#8B95A8",
+                cursor: "pointer", borderRadius: 4, background: !hasFilter ? "rgba(0,212,170,0.06)" : "transparent", fontWeight: 600 }}>
+              All
+            </div>
+            {opts.map(opt => {
+              const val = typeof opt === "object" ? opt.value : opt;
+              const lbl = typeof opt === "object" ? opt.label : opt;
+              const isActive = repColumnFilters[filterKey] === val;
+              return (
+                <div key={val} onClick={() => { setRepColumnFilters(f => ({ ...f, [filterKey]: val })); setRepOpenFilterCol(null); }}
+                  style={{ padding: "6px 10px", fontSize: 11, color: isActive ? "#00D4AA" : "#F0F2F5",
+                    cursor: "pointer", borderRadius: 4, background: isActive ? "rgba(0,212,170,0.08)" : "transparent",
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {lbl}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </th>
+    );
+  };
+
   // ── FTL Dispatch Table (shared by master + ops in FTL view) ──
   const renderFTLTable = (ships) => {
     const ftlCols = ["Account", "Status", "EFJ #", "Container/Load #", "MP Status", "Pickup", "Origin", "Destination", "Delivery", "Truck", "Trailer #", "Driver Phone", "Carrier Email", "Rate", "Notes"];
+    const filteredShips = applyColFilters(ships, repColumnFilters, trackingSummary);
     return (
       <div className="dash-panel" style={{ overflow: "hidden" }}>
         <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span className="dash-panel-title">FTL Dispatch — {ships.length} loads</span>
+          <span className="dash-panel-title">FTL Dispatch — {filteredShips.length} loads</span>
         </div>
         <div style={{ overflow: "auto", maxHeight: "calc(100vh - 340px)", minHeight: 400 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
-              <tr>{ftlCols.map(h => <th key={h} style={thStyle}>{h}</th>)}</tr>
+              <tr>{ftlCols.map(h => renderFilterTh(h))}</tr>
             </thead>
             <tbody>
-              {ships.map((s) => {
+              {filteredShips.map((s) => {
                 const sc = (isFTLShipment(s) ? FTL_STATUS_COLORS : STATUS_COLORS)[s.status] || { main: "#94a3b8" };
                 const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
                 const tracking = trackingSummary?.[efjBare] || trackingSummary?.[s.container];
@@ -2079,16 +2195,16 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
         {(() => {
           const filterState = isOps ? opsTableFilter : masterTableFilter;
           const setFilter = isOps ? setOpsTableFilter : setMasterTableFilter;
-          if (filterState === "all") return null;
+          if (filterState === "all" && Object.keys(repColumnFilters).length === 0) return null;
           return (
-            <button onClick={() => setFilter("all")}
+            <button onClick={() => { setFilter("all"); setRepColumnFilters({}); setRepOpenFilterCol(null); }}
               style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.15)", background: "rgba(239,68,68,0.08)", color: "#f87171", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               ✕ Clear
             </button>
           );
         })()}
         <span style={{ marginLeft: "auto", fontSize: 11, color: "#8B95A8", fontWeight: 600 }}>
-          {(isOps ? opsTableShips : displayShipsFiltered).length} {(isOps ? opsTableShips : displayShipsFiltered).length === 1 ? "load" : "loads"}
+          {(isOps ? opsDataFiltered : displayDataFiltered).length} {(isOps ? opsDataFiltered : displayDataFiltered).length === 1 ? "load" : "loads"}
         </span>
       </div>
 
@@ -2159,7 +2275,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
         <div className="dash-panel" style={{ overflow: "hidden" }}>
           <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span className="dash-panel-title">
-              {isBoviet ? bovietTab : `${toleadHub} Hub`} {"\u2014"} {opsTableFilter === "all" ? "Active Loads" : opsTableShips.length + " Loads"}
+              {isBoviet ? bovietTab : `${toleadHub} Hub`} {"\u2014"} {opsDataFiltered.length} {opsDataFiltered.length === 1 ? "Load" : "Loads"}
             </span>
             {opsTableFilter !== "all" && (
               <button onClick={() => setOpsTableFilter("all")}
@@ -2172,13 +2288,11 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
-                  {["EFJ #", "Container/Load #", "Type", "Carrier", "Origin \u2192 Dest", "ETA/ERD", "PU", "DEL", "Driver", "Status"].map(h => (
-                    <th key={h} style={thStyle}>{h}</th>
-                  ))}
+                  {["EFJ #", "Container/Load #", "Type", "Carrier", "Origin \u2192 Dest", "ETA/ERD", "PU", "DEL", "Driver", "Status"].map(h => renderFilterTh(h))}
                 </tr>
               </thead>
               <tbody>
-                {opsTableShips.map((s) => {
+                {opsDataFiltered.map((s) => {
                   const sc = STATUS_COLORS[s.status] || { main: "#94a3b8" };
                   const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
                   const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
@@ -2291,7 +2405,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
       <div className="dash-panel" style={{ overflow: "hidden" }}>
         <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span className="dash-panel-title">
-            {expandedAccount || "All Accounts"} {"\u2014"} {displayShips.length} loads
+            {expandedAccount || "All Accounts"} {"\u2014"} {displayDataFiltered.length} loads
           </span>
           {masterTableFilter !== "all" && (
             <button onClick={() => setMasterTableFilter("all")}
@@ -2307,13 +2421,11 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
-                  {repCols.map(h => (
-                    <th key={h} style={thStyle}>{h}</th>
-                  ))}
+                  {repCols.map(h => renderFilterTh(h))}
                 </tr>
               </thead>
               <tbody>
-                {displayShips.map((s) => {
+                {displayDataFiltered.map((s) => {
                   const sc = STATUS_COLORS[s.status] || { main: "#94a3b8" };
                   const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
                   const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
@@ -4112,6 +4224,16 @@ function DispatchView({
   const [inlineEditValue, setInlineEditValue] = useState("");
   const [showDatePopover, setShowDatePopover] = useState(false);
   const [zebraStripe, setZebraStripe] = useState(true);
+  const [columnFilters, setColumnFilters] = useState({});
+  const [openFilterCol, setOpenFilterCol] = useState(null);
+
+  // Close column filter dropdown on outside click
+  useEffect(() => {
+    if (!openFilterCol) return;
+    const handler = (e) => { if (!e.target.closest('.col-filter-dd')) setOpenFilterCol(null); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openFilterCol]);
 
   const activeStatusList = useMemo(() => {
     if (moveTypeFilter === "ftl") return FTL_STATUSES;
@@ -4287,17 +4409,22 @@ function DispatchView({
     { key: "notes", label: "Notes", w: 140, sortFn: (a, b) => (a.notes || "").localeCompare(b.notes || "") },
   ];
 
+  // Column filter: compute unique options + apply filters
+  const FILTERABLE_KEYS = useMemo(() => ["account", "status", "mpStatus", "origin", "destination", "pickup", "delivery"], []);
+  const colFilterOpts = useMemo(() => buildColFilterOptions(filtered, trackingSummary), [filtered, trackingSummary]);
+  const columnFiltered = useMemo(() => applyColFilters(filtered, columnFilters, trackingSummary), [filtered, columnFilters, trackingSummary]);
+
   const sorted = useMemo(() => {
-    if (!sortCol) return filtered;
+    if (!sortCol) return columnFiltered;
     const col = DISPATCH_COLS.find(c => c.key === sortCol);
-    if (!col) return filtered;
-    return [...filtered].sort((a, b) => {
+    if (!col) return columnFiltered;
+    return [...columnFiltered].sort((a, b) => {
       const result = col.sortFn(a, b);
       return sortDir === "asc" ? result : -result;
     });
-  }, [filtered, sortCol, sortDir]);
+  }, [columnFiltered, sortCol, sortDir]);
 
-  const hasActiveFilters = activeStatus !== "all" || activeAccount !== "All Accounts" || activeRep !== "All Reps" || searchQuery !== "" || !!dateFilter || moveTypeFilter !== "all" || !!dateRangeField;
+  const hasActiveFilters = activeStatus !== "all" || activeAccount !== "All Accounts" || activeRep !== "All Reps" || searchQuery !== "" || !!dateFilter || moveTypeFilter !== "all" || !!dateRangeField || Object.keys(columnFilters).length > 0;
 
   const exportCSV = () => {
     const headers = ["Account", "Status", "EFJ #", "Container/Load #", "MP Status", "Pickup Date/Time", "Origin", "Destination", "Delivery Date/Time", "Truck Type", "Trailer #", "Driver Phone", "Carrier Email", "Customer Rate", "Notes", "Move Type", "Carrier"];
@@ -4494,7 +4621,7 @@ function DispatchView({
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: "#8B95A8" }}>
           <span><span style={{ color: "#8B95A8", fontWeight: 700 }}>{filtered.length}</span> of {shipments.length}</span>
           {hasActiveFilters && (
-            <button onClick={() => { setActiveStatus("all"); setActiveAccount("All Accounts"); setActiveRep("All Reps"); setSearchQuery(""); if (setDateFilter) setDateFilter(null); setMoveTypeFilter("all"); setDateRangeField(null); setDateRangeStart(""); setDateRangeEnd(""); }}
+            <button onClick={() => { setActiveStatus("all"); setActiveAccount("All Accounts"); setActiveRep("All Reps"); setSearchQuery(""); if (setDateFilter) setDateFilter(null); setMoveTypeFilter("all"); setDateRangeField(null); setDateRangeStart(""); setDateRangeEnd(""); setColumnFilters({}); setOpenFilterCol(null); }}
               style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.15)", borderRadius: 6, padding: "4px 10px", fontSize: 10, fontWeight: 600, color: "#f87171", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               ✕ Clear filters
             </button>
@@ -4527,16 +4654,64 @@ function DispatchView({
         <table style={{ width: "100%", minWidth: 1600, borderCollapse: "collapse", fontSize: 11 }}>
           <thead>
             <tr>
-              {DISPATCH_COLS.map((col, ci) => (
-                <th key={col.key}
-                  onClick={() => {
-                    if (sortCol === col.key) setSortDir(d => d === "asc" ? "desc" : "asc");
-                    else { setSortCol(col.key); setSortDir("asc"); }
-                  }}
-                  style={{ padding: "7px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: sortCol === col.key ? "#00D4AA" : "#8B95A8", letterSpacing: "0.8px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.08)", borderRight: ci < DISPATCH_COLS.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", background: "#0D1119", position: "sticky", top: 0, zIndex: 5, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", maxWidth: col.w }}>
-                  {col.label} {sortCol === col.key ? (sortDir === "asc" ? "▲" : "▼") : ""}
-                </th>
-              ))}
+              {DISPATCH_COLS.map((col, ci) => {
+                const isFilterable = FILTERABLE_KEYS.includes(col.key);
+                const hasColFilter = !!columnFilters[col.key];
+                const isOpen = openFilterCol === col.key;
+                const opts = colFilterOpts[col.key] || [];
+                return (
+                  <th key={col.key}
+                    style={{ padding: "7px 8px", textAlign: "left", fontSize: 10, fontWeight: 700,
+                      color: hasColFilter ? "#00D4AA" : sortCol === col.key ? "#00D4AA" : "#8B95A8",
+                      letterSpacing: "0.8px", textTransform: "uppercase",
+                      borderBottom: hasColFilter ? "2px solid rgba(0,212,170,0.4)" : "1px solid rgba(255,255,255,0.08)",
+                      borderRight: ci < DISPATCH_COLS.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none",
+                      background: hasColFilter ? "rgba(0,212,170,0.04)" : "#0D1119",
+                      position: "sticky", top: 0, zIndex: isOpen ? 50 : 5, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", maxWidth: col.w }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                      <span style={{ flex: 1 }} onClick={() => {
+                        if (sortCol === col.key) setSortDir(d => d === "asc" ? "desc" : "asc");
+                        else { setSortCol(col.key); setSortDir("asc"); }
+                      }}>
+                        {col.label} {sortCol === col.key ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                      </span>
+                      {isFilterable && (
+                        <span className="col-filter-dd"
+                          onClick={(e) => { e.stopPropagation(); setOpenFilterCol(isOpen ? null : col.key); }}
+                          style={{ fontSize: 8, color: hasColFilter ? "#00D4AA" : "#5A6478", cursor: "pointer",
+                            padding: "2px 3px", borderRadius: 3, background: hasColFilter ? "rgba(0,212,170,0.12)" : "transparent", lineHeight: 1 }}>
+                          {hasColFilter ? "✦" : "▾"}
+                        </span>
+                      )}
+                    </div>
+                    {isOpen && (
+                      <div className="col-filter-dd" onClick={e => e.stopPropagation()}
+                        style={{ position: "absolute", top: "100%", left: 0, marginTop: 2, zIndex: 60, background: "#1A2236",
+                          border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, minWidth: 150,
+                          maxHeight: 300, overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
+                        <div onClick={() => { setColumnFilters(f => { const n = {...f}; delete n[col.key]; return n; }); setOpenFilterCol(null); }}
+                          style={{ padding: "6px 10px", fontSize: 11, color: !hasColFilter ? "#00D4AA" : "#8B95A8",
+                            cursor: "pointer", borderRadius: 4, background: !hasColFilter ? "rgba(0,212,170,0.06)" : "transparent", fontWeight: 600 }}>
+                          All
+                        </div>
+                        {opts.map(opt => {
+                          const val = typeof opt === "object" ? opt.value : opt;
+                          const label = typeof opt === "object" ? opt.label : opt;
+                          const isActive = columnFilters[col.key] === val;
+                          return (
+                            <div key={val} onClick={() => { setColumnFilters(f => ({ ...f, [col.key]: val })); setOpenFilterCol(null); }}
+                              style={{ padding: "6px 10px", fontSize: 11, color: isActive ? "#00D4AA" : "#F0F2F5",
+                                cursor: "pointer", borderRadius: 4, background: isActive ? "rgba(0,212,170,0.08)" : "transparent",
+                                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {label}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
