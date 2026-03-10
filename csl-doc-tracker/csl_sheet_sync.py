@@ -59,11 +59,13 @@ BOVIET_TAB_CONFIGS = {
     "Piedra":           {"efj_col": 0, "load_id_col": 2, "status_col": 8,
                          "pickup_col": 6, "delivery_col": 7,
                          "phone_col": 11, "trailer_col": 12,
+                         "carrier_email_col": 10, "driver_name_col": 13,
                          "default_origin": "Greenville, NC", "default_dest": "Mexia, TX",
                          "start_row": 45},
     "Hanson":           {"efj_col": 0, "load_id_col": 1, "status_col": 6,
                          "pickup_col": 4, "delivery_col": 5,
-                         "phone_col": 8, "trailer_col": 10},
+                         "phone_col": 8, "trailer_col": 10,
+                         "carrier_email_col": 7, "driver_name_col": 9},
 }
 
 TOLEAD_HUB_CONFIGS = {
@@ -311,6 +313,12 @@ def sync_boviet(gc, creds):
                     bov_phone = row[cfg["phone_col"]].strip() if len(row) > cfg["phone_col"] else ""
                 if "trailer_col" in cfg:
                     bov_trailer = row[cfg["trailer_col"]].strip() if len(row) > cfg["trailer_col"] else ""
+                bov_carrier_email = ""
+                bov_driver_name = ""
+                if "carrier_email_col" in cfg:
+                    bov_carrier_email = row[cfg["carrier_email_col"]].strip() if len(row) > cfg["carrier_email_col"] else ""
+                if "driver_name_col" in cfg:
+                    bov_driver_name = row[cfg["driver_name_col"]].strip() if len(row) > cfg["driver_name_col"] else ""
 
                 sheet_data = {
                     "efj": efj,
@@ -346,6 +354,24 @@ def sync_boviet(gc, creds):
                 else:
                     # Update from sheet
                     _upsert_shipment(sheet_data)
+
+                # Sync driver info to driver_contacts for dashboard enrichment
+                if bov_carrier_email or bov_driver_name or bov_phone or bov_trailer:
+                    try:
+                        with db.get_conn() as conn:
+                            with db.get_cursor(conn) as cur:
+                                cur.execute("""
+                                    INSERT INTO driver_contacts (efj, carrier_email, trailer_number, driver_name, driver_phone, updated_at)
+                                    VALUES (%s, %s, %s, %s, %s, NOW())
+                                    ON CONFLICT (efj) DO UPDATE SET
+                                        carrier_email  = CASE WHEN EXCLUDED.carrier_email != '' THEN EXCLUDED.carrier_email ELSE driver_contacts.carrier_email END,
+                                        trailer_number = CASE WHEN EXCLUDED.trailer_number != '' THEN EXCLUDED.trailer_number ELSE driver_contacts.trailer_number END,
+                                        driver_name    = CASE WHEN EXCLUDED.driver_name != '' THEN EXCLUDED.driver_name ELSE driver_contacts.driver_name END,
+                                        driver_phone   = CASE WHEN EXCLUDED.driver_phone != '' THEN EXCLUDED.driver_phone ELSE driver_contacts.driver_phone END,
+                                        updated_at     = NOW()
+                                """, (efj, bov_carrier_email or "", bov_trailer or "", bov_driver_name or "", bov_phone or ""))
+                    except Exception as e:
+                        log.warning("driver_contacts upsert failed for %s: %s", efj, e)
 
             time.sleep(1)
 
