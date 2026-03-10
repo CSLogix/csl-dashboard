@@ -875,6 +875,8 @@ class SheetCache:
                 hub_sh = gc.open_by_key(hub_cfg["sheet_id"])
                 hub_ws = hub_sh.worksheet(hub_cfg["tab"])
                 hub_rows = hub_ws.get_all_values()
+                # Fetch hyperlinks for MP URLs
+                hub_links = _get_sheet_hyperlinks(_goog_creds, hub_cfg["sheet_id"], hub_cfg["tab"])
                 cols = hub_cfg["cols"]
                 hub_count = 0
                 hub_start = hub_cfg.get("start_row", 1)
@@ -943,6 +945,14 @@ class SheetCache:
                     driver_trailer = _cell(cols.get("driver")) if cols.get("driver") is not None else ""
                     driver_phone = _cell(cols.get("phone")) if cols.get("phone") is not None else ""
 
+                    # Extract MP URL from hyperlinks
+                    _mp_url = ""
+                    _efj_col = cols["efj"]
+                    if hub_links and ri < len(hub_links):
+                        _lr = hub_links[ri]
+                        if _efj_col < len(_lr) and _lr[_efj_col]:
+                            _mp_url = _lr[_efj_col]
+
                     all_shipments.append({
                         "account": "Tolead", "efj": efj or load_id,
                         "move_type": "FTL", "container": load_id, "bol": "",
@@ -953,9 +963,9 @@ class SheetCache:
                         "pickup": pickup, "delivery": delivery,
                         "status": status, "notes": "", "bot_alert": "",
                         "return_port": "", "rep": "Tolead",
-                        "container_url": "",
+                        "container_url": _mp_url,
                         "hub": hub_name,
-                        "driver": driver_trailer,
+                        "driver": "",
                         "driver_phone": driver_phone,
                     })
                     hub_count += 1

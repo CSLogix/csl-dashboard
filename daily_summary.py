@@ -30,6 +30,33 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 load_dotenv()
 
+
+# ── Date filter: only scrape loads with pickup/delivery this week ──
+def _is_this_week(date_str):
+    """Return True if date_str falls within the current Mon-Sun week."""
+    if not date_str or not date_str.strip():
+        return False
+    import re
+    from datetime import datetime, timedelta
+    s = date_str.strip()
+    today = datetime.now()
+    # Monday of this week
+    week_start = today - timedelta(days=today.weekday())
+    week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Sunday end of this week
+    week_end = week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
+    # Try common date formats
+    for fmt in ("%m/%d/%Y", "%m/%d/%y", "%m/%d", "%Y-%m-%d", "%m/%d/%Y %H:%M", "%m/%d/%y %H:%M"):
+        try:
+            dt = datetime.strptime(s.split()[0] if " " in s else s, fmt.split()[0] if " " in fmt else fmt)
+            # If no year parsed (m/d format), assume current year
+            if dt.year == 1900:
+                dt = dt.replace(year=today.year)
+            return week_start <= dt <= week_end
+        except ValueError:
+            continue
+    return False
+
 # ── Config ──────────────────────────────────────────────────────────────────
 CREDENTIALS_FILE = os.environ.get("GOOGLE_CREDENTIALS_FILE", "/root/csl-credentials.json")
 SCOPES = [
@@ -940,6 +967,12 @@ def scan_boviet(creds, gc):
                 "sheet_status": status,
             })
 
+        # Filter to loads picking up or delivering this week
+        before = len(entries)
+        entries = [e for e in entries if _is_this_week(e.get("pickup")) or _is_this_week(e.get("delivery"))]
+        if before > len(entries):
+            print(f"    [{tab_name}] Filtered {before} -> {len(entries)} (this week only)")
+
         if entries:
             print(f"    [{tab_name}] {len(entries)} tracked load(s)")
             results[tab_name] = {"entries": entries}
@@ -1036,6 +1069,12 @@ def scan_tolead(creds, gc):
                 "sheet_status": status,
                 "hub": hub_name,
             })
+
+        # Filter to loads picking up or delivering this week
+        before = len(entries)
+        entries = [e for e in entries if _is_this_week(e.get("pickup")) or _is_this_week(e.get("delivery")) or _is_this_week(e.get("dest"))]
+        if before > len(entries):
+            print(f"    [{hub_name}/{tab}] Filtered {before} -> {len(entries)} (this week only)")
 
         tracked_count = len(entries)
         ntc_count = len(needs_cover)

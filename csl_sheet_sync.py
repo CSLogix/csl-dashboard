@@ -98,6 +98,31 @@ TOLEAD_HUB_CONFIGS = {
 def _shorten_address(addr):
     if not addr:
         return addr
+
+
+def _get_sheet_hyperlinks(creds, sheet_id, tab_name):
+    """Fetch hyperlink URLs from a sheet tab via Sheets API v4."""
+    import requests as _requests
+    from google.auth.transport.requests import Request as GoogleRequest
+    try:
+        creds.refresh(GoogleRequest())
+        api_url = (
+            f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}"
+            f"?ranges={_requests.utils.quote(tab_name)}"
+            f"&fields=sheets.data.rowData.values.hyperlink"
+            f"&includeGridData=true"
+        )
+        resp = _requests.get(api_url, headers={"Authorization": f"Bearer {creds.token}"})
+        resp.raise_for_status()
+        data = resp.json()
+        result = []
+        for row_data in data["sheets"][0]["data"][0].get("rowData", []):
+            result.append([cell.get("hyperlink") for cell in row_data.get("values", [])])
+        return result
+    except Exception as e:
+        log.warning("Hyperlink fetch failed for %s/%s: %s", sheet_id[:8], tab_name, e)
+        return []
+
     addr = re.sub(r'^\(\w+\)\s*', '', addr).strip()
     addr = re.sub(r'\s*\([^)]*\)\s*$', '', addr).strip()
     m = re.search(r'([A-Za-z][A-Za-z .]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$', addr)
@@ -154,6 +179,7 @@ def _upsert_shipment(data: dict):
                     origin = COALESCE(NULLIF(EXCLUDED.origin, ''), shipments.origin),
                     destination = COALESCE(NULLIF(EXCLUDED.destination, ''), shipments.destination),
                     container = EXCLUDED.container,
+                    container_url = COALESCE(NULLIF(EXCLUDED.container_url, ''), shipments.container_url),
                     sheet_row_index = EXCLUDED.sheet_row_index,
                     updated_at = NOW()
             """, data)
@@ -162,6 +188,25 @@ def _upsert_shipment(data: dict):
 # ---------------------------------------------------------------------------
 # Sync Tolead
 # ---------------------------------------------------------------------------
+def _write_driver_contact(efj, trailer="", phone=""):
+    """Write trailer/phone to driver_contacts table (upsert)."""
+    if not efj or (not trailer and not phone):
+        return
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("""
+                    INSERT INTO driver_contacts (efj, trailer_number, driver_phone)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (efj) DO UPDATE SET
+                        trailer_number = COALESCE(NULLIF(EXCLUDED.trailer_number, ''), driver_contacts.trailer_number),
+                        driver_phone = COALESCE(NULLIF(EXCLUDED.driver_phone, ''), driver_contacts.driver_phone),
+                        updated_at = NOW()
+                """, (efj, trailer or None, phone or None))
+    except Exception as e:
+        log.debug("driver_contact write for %s: %s", efj, e)
+
+
 def sync_tolead(gc, creds):
     synced_from_sheet = 0
     synced_to_sheet = 0
@@ -174,6 +219,9 @@ def sync_tolead(gc, creds):
             hub_rows = hub_ws.get_all_values()
             cols = hub_cfg["cols"]
             hub_start = hub_cfg.get("start_row", 1)
+
+            # Fetch hyperlinks for MP URLs from the EFJ column
+            hub_links = _get_sheet_hyperlinks(creds, hub_cfg["sheet_id"], hub_cfg["tab"])
 
             # Get current Postgres state for this hub
             pg_map = _get_pg_shipments("Tolead", hub_name)
@@ -199,19 +247,41 @@ def sync_tolead(gc, creds):
                 # If EFJ was assigned, clean up old load_id-keyed row to prevent duplicates
                 if efj and load_id and efj != load_id:
                     try:
-                        cur = conn.cursor()
-                        cur.execute("DELETE FROM shipments WHERE efj = %s AND efj != %s", (load_id, efj))
-                        if cur.rowcount > 0:
-                            log.info("Tolead %s: cleaned up old row keyed by %s (now %s)", hub_name, load_id, efj)
+                        with db.get_conn() as _conn:
+                            with db.get_cursor(_conn) as _cur:
+                                # Migrate tracking_events from ghost to real EFJ
+                                _cur.execute("UPDATE tracking_events SET efj = %s WHERE efj = %s", (efj, load_id))
+                                migrated = _cur.rowcount
+                                # Copy container_url from ghost if real record is empty
+                                _cur.execute("""
+                                    UPDATE shipments SET container_url = sub.container_url
+                                    FROM (SELECT container_url FROM shipments WHERE efj = %s AND container_url != '') sub
+                                    WHERE shipments.efj = %s AND (shipments.container_url IS NULL OR shipments.container_url = '')
+                                """, (load_id, efj))
+                                # Delete the ghost record
+                                _cur.execute("DELETE FROM shipments WHERE efj = %s", (load_id,))
+                                if _cur.rowcount > 0:
+                                    log.info("Tolead %s: cleaned up ghost %s -> %s (migrated %d events)", hub_name, load_id, efj, migrated)
                     except Exception as de:
                         log.warning("Tolead %s: failed to clean up old row %s: %s", hub_name, load_id, de)
+
+                # Extract Macropoint URL from hyperlink in the EFJ column
+                mp_url = ""
+                efj_col = cols["efj"]
+                # hub_rows is 0-indexed but ri is 1-indexed (header at index 0)
+                link_row_idx = ri - 1  # Convert sheet row to 0-indexed for hub_links
+                if hub_links and link_row_idx < len(hub_links):
+                    link_row = hub_links[link_row_idx]
+                    if efj_col < len(link_row) and link_row[efj_col]:
+                        mp_url = link_row[efj_col]
 
                 origin = _shorten_address(_cell(cols["origin"]) or hub_cfg["default_origin"])
                 pickup_date = _cell(cols["pickup_date"])
                 pickup_time = _cell(cols["pickup_time"])
                 pickup = f"{pickup_date} {pickup_time}".strip() if pickup_date else ""
                 delivery = _cell(cols["delivery"])
-                driver_trailer = _cell(cols.get("driver")) if cols.get("driver") is not None else ""
+                # cols["driver"] actually contains TRAILER data (per sheet layout)
+                trailer_val = _cell(cols.get("driver")) if cols.get("driver") is not None else ""
                 driver_phone = _cell(cols.get("phone")) if cols.get("phone") is not None else ""
 
                 sheet_data = {
@@ -229,14 +299,14 @@ def sync_tolead(gc, creds):
                     "delivery_date": delivery,
                     "status": status,
                     "notes": "",
-                    "driver": driver_trailer,
+                    "driver": "",
                     "bot_notes": "",
                     "return_date": "",
                     "account": "Tolead",
                     "hub": hub_name,
                     "rep": "Tolead",
                     "source": "sheet",
-                    "container_url": "",
+                    "container_url": mp_url,
                     "driver_phone": driver_phone,
                     "sheet_row_index": ri,
                 }
@@ -244,26 +314,21 @@ def sync_tolead(gc, creds):
                 pg_row = pg_map.get(key)
 
                 if not pg_row:
-                    # New row from sheet → insert into Postgres
                     _upsert_shipment(sheet_data)
                     synced_from_sheet += 1
                 else:
-                    # Row exists in both — compare status
                     sheet_status = (status or "").strip().lower()
                     pg_status = (pg_row["status"] or "").strip().lower()
 
                     if sheet_status != pg_status:
-                        # Check if Postgres was updated more recently
-                        pg_updated = pg_row.get("updated_at")
-                        # For sheet → PG sync, sheet always wins unless PG was explicitly
-                        # updated via dashboard (source would change or updated_at > last sync).
-                        # Simple approach: sheet wins for status, PG wins for fields updated via dashboard.
-                        # Since we can't track sheet timestamps, sheet always wins on sync.
                         _upsert_shipment(sheet_data)
                         synced_from_sheet += 1
                     else:
-                        # Status same, but update other fields from sheet
                         _upsert_shipment(sheet_data)
+
+                # Write trailer to driver_contacts (separate from shipments.driver)
+                if trailer_val or driver_phone:
+                    _write_driver_contact(key, trailer=trailer_val, phone=driver_phone)
 
             log.info("Tolead %s: synced", hub_name)
 
@@ -271,6 +336,8 @@ def sync_tolead(gc, creds):
             log.error("Tolead %s sync failed: %s", hub_name, e)
 
     return synced_from_sheet, synced_to_sheet
+
+
 
 
 # ---------------------------------------------------------------------------
