@@ -1422,7 +1422,8 @@ export default function DispatchDashboard() {
               handleDriverFieldUpdate={handleDriverFieldUpdate}
               repProfiles={repProfiles} onProfileUpdate={fetchProfiles}
               trackingSummary={trackingSummary} docSummary={docSummary}
-              inboxThreads={inboxThreads} />
+              inboxThreads={inboxThreads}
+              onNavigateInbox={(tab) => { setActiveView("inbox"); }} />
           )}
           {activeView === "dispatch" && (
             <DispatchView loaded={loaded} shipments={shipments} filtered={filtered} accounts={accounts}
@@ -1811,7 +1812,7 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
 // ═══════════════════════════════════════════════════════════════
 // REP DASHBOARD VIEW
 // ═══════════════════════════════════════════════════════════════
-function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, repProfiles, onProfileUpdate, trackingSummary, docSummary, inboxThreads }) {
+function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, repProfiles, onProfileUpdate, trackingSummary, docSummary, inboxThreads, onNavigateInbox }) {
   const [expandedAccount, setExpandedAccount] = useState(null);
   const [bovietTab, setBovietTab] = useState("Piedra");
   const [toleadHub, setToleadHub] = useState("ORD");
@@ -2288,16 +2289,16 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
           { label: "No Driver", value: actionNoDriver.length, c: "#EF4444", filter: "needs_driver" },
           { label: "Behind", value: actionBehind.length, c: "#F97316", filter: "behind" },
           { label: "No POD", value: actionNoPod.length, c: "#A855F7", filter: "awaiting_pod" },
-          { label: "Needs Reply", value: inboxNeedsReply, c: "#EF4444", filter: null },
-          { label: "Rate Responses", value: inboxRateResponses, c: "#00D4AA", filter: null },
+          { label: "Needs Reply", value: inboxNeedsReply, c: "#EF4444", filter: null, action: () => onNavigateInbox("needs_reply") },
+          { label: "Rate Responses", value: inboxRateResponses, c: "#00D4AA", filter: null, action: () => onNavigateInbox("rates") },
         ];
         return (
         <div style={{ display: "flex", gap: 6, marginBottom: 14, marginTop: 8, flexWrap: "wrap" }}>
           {pills.map((s, i) => (
-            <button key={i} onClick={() => { if (s.filter) setFilter(s.filter); }}
+            <button key={i} onClick={() => { if (s.filter) setFilter(s.filter); else if (s.action) s.action(); }}
               style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${filterState === s.filter && s.filter ? `${s.c}44` : "rgba(255,255,255,0.06)"}`,
                 background: filterState === s.filter && s.filter ? `${s.c}15` : "rgba(255,255,255,0.03)",
-                cursor: s.filter ? "pointer" : "default", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
+                cursor: s.filter || s.action ? "pointer" : "default", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
               <span style={{ fontSize: 16, fontWeight: 800, color: s.value > 0 ? s.c : "#334155", fontFamily: "'JetBrains Mono', monospace" }}>{s.value}</span>
               <span style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, textTransform: "uppercase" }}>{s.label}</span>
             </button>
