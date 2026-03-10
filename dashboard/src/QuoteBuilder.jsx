@@ -512,6 +512,7 @@ export default function QuoteBuilder() {
   const [rateIntelLoading, setRateIntelLoading] = useState(false);
   const [rateIntelOpen, setRateIntelOpen] = useState(false);
   const [rateIntelGroups, setRateIntelGroups] = useState(new Set([0]));
+  const [marketData, setMarketData] = useState(null); // { floor, average, ceiling, data_points } from extraction
   const rateIntelTimer = useRef(null);
   useEffect(() => {
     if (!route.pod && !route.finalDelivery) { setRateIntel(null); return; }
@@ -622,6 +623,10 @@ export default function QuoteBuilder() {
           return [...merged, ...extras];
         });
       }
+      if (data.market_floor || data.market_average || data.market_ceiling) {
+        setMarketData({ floor: data.market_floor || null, average: data.market_average || null, ceiling: data.market_ceiling || null, data_points: data.data_points || null });
+        setRateIntelOpen(true);
+      }
       setSaveMsg({ type: "success", text: "Extracted! Review and adjust rates." });
     } catch (err) {
       setSaveMsg({ type: "error", text: `Extraction failed: ${err.message}` });
@@ -675,6 +680,10 @@ export default function QuoteBuilder() {
           }));
           return [...merged, ...extras];
         });
+      }
+      if (data.market_floor || data.market_average || data.market_ceiling) {
+        setMarketData({ floor: data.market_floor || null, average: data.market_average || null, ceiling: data.market_ceiling || null, data_points: data.data_points || null });
+        setRateIntelOpen(true);
       }
       setSaveMsg({ type: "success", text: "Extracted! Review and adjust rates." });
     } catch (err) {
@@ -1055,7 +1064,7 @@ export default function QuoteBuilder() {
             </div>
 
             {/* ── Rate Intelligence Panel ── */}
-            {(rateIntel || rateIntelLoading) && (
+            {(rateIntel || rateIntelLoading || marketData) && (
               <div style={{ marginTop: 6, marginBottom: 2, border: "1px solid rgba(0,212,170,0.15)", borderRadius: 10, overflow: "hidden" }}>
                 <button onClick={() => setRateIntelOpen(o => !o)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(0,212,170,0.05)", border: "none", cursor: "pointer", color: "#00D4AA", fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                   <span>{rateIntelLoading ? "Searching rates..." : `Rate Intel${rateIntel?.lane_groups?.length ? ` — ${rateIntel.lane_groups.length} lane${rateIntel.lane_groups.length > 1 ? "s" : ""}, ${rateIntel.stats?.count || 0} quotes` : rateIntel?.stats?.count ? ` — ${rateIntel.stats.count} quotes` : ""}`}</span>
@@ -1150,6 +1159,26 @@ export default function QuoteBuilder() {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    ) : marketData ? (
+                      <div>
+                        <div style={{ display: "flex", gap: 12, marginBottom: 6, fontSize: 11, alignItems: "center" }}>
+                          <div><span style={{ color: "#5A6478" }}>Floor </span><span style={{ color: "#22c55e", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{marketData.floor ? `$${marketData.floor}` : "—"}</span></div>
+                          <div><span style={{ color: "#5A6478" }}>Avg </span><span style={{ color: "#F0F2F5", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{marketData.average ? `$${marketData.average}` : "—"}</span></div>
+                          <div><span style={{ color: "#5A6478" }}>Ceiling </span><span style={{ color: "#f59e0b", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{marketData.ceiling ? `$${marketData.ceiling}` : "—"}</span></div>
+                          {marketData.data_points && <div style={{ marginLeft: "auto", fontSize: 9, color: "#3D4557" }}>{marketData.data_points} results</div>}
+                        </div>
+                        {marketData.floor && marketData.ceiling && (() => {
+                          const lo = parseFloat(marketData.floor), hi = parseFloat(marketData.ceiling), avg = parseFloat(marketData.average || 0);
+                          const pct = v => Math.max(0, Math.min(100, ((v - lo) / (hi - lo)) * 100));
+                          return (
+                            <div style={{ position: "relative", height: 4, background: "rgba(255,255,255,0.07)", borderRadius: 2, marginBottom: 6 }}>
+                              <div style={{ position: "absolute", left: 0, right: 0, height: "100%", background: "linear-gradient(90deg, #22c55e, #f59e0b)", borderRadius: 2, opacity: 0.4 }} />
+                              {avg > 0 && <div style={{ position: "absolute", left: `${pct(avg)}%`, top: -2, width: 2, height: 8, background: "#F0F2F5", borderRadius: 1, transform: "translateX(-50%)" }} title={`Avg $${marketData.average}`} />}
+                            </div>
+                          );
+                        })()}
+                        <div style={{ fontSize: 9, color: "#3D4557" }}>Market data from uploaded screenshot · not saved to history</div>
                       </div>
                     ) : (
                       <div style={{ fontSize: 11, color: "#5A6478", padding: "4px 0" }}>No rate history for this lane</div>
