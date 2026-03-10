@@ -2150,7 +2150,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                 const isEditing = inlineEditId === s.id;
                 const cellBorder = "1px solid rgba(255,255,255,0.04)";
                 const tdBase = { padding: "5px 8px", borderBottom: "1px solid rgba(255,255,255,0.06)", borderRight: cellBorder };
-                const repTermInfo = parseTerminalNotes(s.notes);
+                const repTermInfo = parseTerminalNotes(s.botAlert);
                 const repTermBg = repTermInfo?.isReady ? "rgba(34,197,94,0.06)" : repTermInfo?.hasHolds ? "rgba(239,68,68,0.05)" : undefined;
                 return (
                   <tr key={s.id} className="row-hover" onClick={() => { if (!isEditing) handleLoadClick(s); }}
@@ -2189,6 +2189,11 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                       <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
                         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{s.loadNumber}</span>
                         <DocIndicators docs={docs} />
+                        {parseTerminalNotes(s.botAlert)?.hasHolds && (
+                          <span title={s.botAlert} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, background: "#EF4444", borderRadius: 3, animation: "alert-pulse 1.8s ease-in-out infinite", flexShrink: 0, cursor: "default" }}>
+                            <svg viewBox="0 0 24 24" fill="white" style={{ width: 9, height: 9 }}><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+                          </span>
+                        )}
                       </div>
                     </td>
                     {/* Container/Load # */}
@@ -2313,7 +2318,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                           onBlur={() => { handleMetadataUpdate(s, "notes", inlineEditValue); setInlineEditId(null); }}
                           onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                           style={{ ...inlineInputStyle, width: 140 }} onClick={e => e.stopPropagation()} placeholder="Add note..." />
-                      ) : parseTerminalNotes(s.notes) ? (
+                      ) : parseTerminalNotes(s.botAlert) ? (
                         <TerminalBadge notes={s.notes} />
                       ) : (
                         <span style={{ fontSize: 10, color: s.notes ? "#F0F2F5" : "#3D4557", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.notes || ""}>{s.notes || "\u2014"}</span>
@@ -2539,6 +2544,9 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{s.loadNumber}</span>
                           <DocIndicators docs={docs} />
+                          {s.botAlert && s.botAlert.includes("HOLD") && (
+                            <span title={s.botAlert} style={{ fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: "rgba(239,68,68,0.15)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.35)", letterSpacing: "0.3px", animation: "alert-pulse 1.8s ease-in-out infinite", cursor: "default" }}>HOLD</span>
+                          )}
                         </div>
                       </td>
                       <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
@@ -2673,6 +2681,9 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{s.loadNumber}</span>
                           <DocIndicators docs={docs} />
+                          {s.botAlert && s.botAlert.includes("HOLD") && (
+                            <span title={s.botAlert} style={{ fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: "rgba(239,68,68,0.15)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.35)", letterSpacing: "0.3px", animation: "alert-pulse 1.8s ease-in-out infinite", cursor: "default" }}>HOLD</span>
+                          )}
                         </div>
                       </td>
                       <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
@@ -4273,8 +4284,8 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
           </div>
 
           {/* Terminal Ground Truth */}
-          {parseTerminalNotes(selectedShipment.notes) && (() => {
-            const t = parseTerminalNotes(selectedShipment.notes);
+          {parseTerminalNotes(selectedShipment.botAlert) && (() => {
+            const t = parseTerminalNotes(selectedShipment.botAlert);
             const hasHold = t.hasHolds;
             return (
               <div style={{ padding: "10px 20px 12px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
@@ -5139,7 +5150,7 @@ function DispatchView({
               const inlineInputStyle = { background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 4, color: "#F0F2F5", padding: "2px 5px", fontSize: 11, width: 90, outline: "none", fontFamily: "'JetBrains Mono', monospace" };
               const cellStyle = (ci) => ({ padding: "5px 8px", borderBottom: "1px solid rgba(255,255,255,0.06)", borderRight: ci < DISPATCH_COLS.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" });
               const zebraBg = zebraStripe && rowIdx % 2 === 1 ? "rgba(255,255,255,0.025)" : "transparent";
-              const dispTermInfo = parseTerminalNotes(s.notes);
+              const dispTermInfo = parseTerminalNotes(s.botAlert);
               const termBg = dispTermInfo?.isReady ? "rgba(34,197,94,0.06)" : dispTermInfo?.hasHolds ? "rgba(239,68,68,0.05)" : null;
               const rowBg = isSelected ? `${sc.main}10` : termBg || zebraBg;
               let colIdx = 0;
@@ -5181,6 +5192,11 @@ function DispatchView({
                       <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{s.loadNumber}</span>
                       {!s.synced && <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#fbbf24", display: "inline-block", animation: "pulse-glow 1s ease infinite" }} />}
                       <DocIndicators docs={docs} />
+                      {dispTermInfo?.hasHolds && (
+                        <span title={s.botAlert} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, background: "#EF4444", borderRadius: 3, animation: "alert-pulse 1.8s ease-in-out infinite", flexShrink: 0, cursor: "default" }}>
+                          <svg viewBox="0 0 24 24" fill="white" style={{ width: 9, height: 9 }}><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+                        </span>
+                      )}
                       {s.email_count > 0 && (
                         <span title={`${s.email_count} email${s.email_count > 1 ? "s" : ""}${s.email_max_priority >= 4 ? " (urgent)" : ""}`}
                           style={{ fontSize: 8, padding: "0 4px", borderRadius: 8, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
@@ -5316,7 +5332,7 @@ function DispatchView({
                         onBlur={() => { handleMetadataUpdate(s, "notes", inlineEditValue); setInlineEditId(null); }}
                         onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                         style={{ ...inlineInputStyle, width: 140 }} onClick={e => e.stopPropagation()} placeholder="Add note..." />
-                    ) : parseTerminalNotes(s.notes) ? (
+                    ) : parseTerminalNotes(s.botAlert) ? (
                       <TerminalBadge notes={s.notes} />
                     ) : (
                       <span style={{ fontSize: 10, color: s.notes ? "#F0F2F5" : "#3D4557", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.notes || ""}>{s.notes || "—"}</span>
@@ -5578,8 +5594,8 @@ function DispatchView({
               </div>
 
               {/* Terminal Ground Truth */}
-              {parseTerminalNotes(selectedShipment.notes) && (() => {
-                const t = parseTerminalNotes(selectedShipment.notes);
+              {parseTerminalNotes(selectedShipment.botAlert) && (() => {
+                const t = parseTerminalNotes(selectedShipment.botAlert);
                 const hasHold = t.hasHolds;
                 return (
                   <div style={{ padding: "10px 20px 12px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
