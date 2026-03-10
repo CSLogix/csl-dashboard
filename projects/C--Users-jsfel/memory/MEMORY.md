@@ -56,7 +56,7 @@
 - `check_nola_containers(container_numbers)` → `{cnum: {ready, location, holds, bot_notes, pickup_date, ...}}`
 - `check_pnct_containers()` / `check_seagirt_containers()` — same pattern, different siteId
 - Bot Notes format: `"Avail:NO | Loc:Vessel | Carrier:HOLD|Misc:2H | Vessel:OOCL BREMERHAVEN 14W"`
-- **Write targets**: Bot Notes → Col N; Pickup Date (when ready) → Col K
+- **Write targets**: Bot Notes → Col O; Pickup Date (when ready) → Col K
 
 ### Column Mapping (confirmed by user)
 - Availability (Ready for Delivery + Location) → Col K (Pickup Date) and/or Col N prefix
@@ -84,6 +84,7 @@ Full plan (in order, all systems stay running):
 - `TerminalBadge` component — 3 states: green `READY` badge, red hold-code badges (2H/TMF/FRT/CBP/USDA), grey loc fallback
 - Row tinting: green `rgba(34,197,94,0.06)` when READY, red `rgba(239,68,68,0.05)` when holds present
 - Patched in both **RepDashboard ops table** and **DispatchView** — Notes cell + `<tr>` background
+- **LoadSlideOver Terminal Status block** — injected in both RepDashboard (~line 4275) and DispatchView (~line 5549) slide-over panels; renders `TerminalBadge` + vessel name above the Notes textarea; hidden when no terminal data (commit `0ed4e46`)
 - Plain notes (no `Avail:` prefix) fall through to existing inline-edit text — no regression
 - Bot notes column is **Col O** in Master Tracker (CLAUDE.md says O=Bot Notes, N=Driver/Truck)
 - State test: set Col O to `Avail:YES | Loc:In Yard | Carrier:RELEASED | Misc:None` → row goes green after cache expires
@@ -92,7 +93,7 @@ Full plan (in order, all systems stay running):
 - `patch_webhook_gaps.py` (2026-03-10) — Fixed 4 data flow gaps between MacroPoint webhook and React dashboard. See [webhook-details.md](webhook-details.md)
 - `quote_extractor.py` rewrite (2026-03-10) — Sonnet upgrade, hub normalization, LoadMatch prompt
 - `terminal_nola.py` deployed (2026-03-10) — PA terminal API scraper, no auth, pure requests
-- `TerminalBadge` + `parseTerminalNotes` (2026-03-10) — Frontend parser for Col O bot notes, visual hold badges + row tinting
+- `TerminalBadge` + `parseTerminalNotes` (2026-03-10) — Frontend parser for Col O bot notes, visual hold badges + row tinting + LoadSlideOver Terminal Status section
 
 ## Server Auth Notes
 - Dev key in systemd: `CSL_DEV_KEY=114d9df820d6c9c8aff380208a555b5e5d163e76a213518f`
