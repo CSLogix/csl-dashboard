@@ -436,6 +436,7 @@ MASTER_SHEET_ID = "19MB5HmmWwsVXY_nADCYYLJL-zWXYt8yWrfeRBSfB2S0"
 
 # Tabs to skip (non-account tabs)
 MASTER_SKIP_TABS = {
+    "Sheet14",
     "Completed Eli", "Completed Radka", "Completed John F",
     "Account Rep", "SSL Links", "Boviet",
 }

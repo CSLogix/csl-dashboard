@@ -34,6 +34,35 @@ COL_DRIVER    = "N"
 COL_BOTNOTES  = "O"
 COL_RETURN    = "P"
 
+# Tabs with non-standard column layout (16-col: Agent Alert at N, Return at O)
+# These tabs are missing the extra Notes column that standard 17-col tabs have
+TAB_COL_OVERRIDES = {
+    "GW-World": {"COL_BOTNOTES": "N", "COL_RETURN": "O"},
+    "Mamata":   {"COL_BOTNOTES": "N", "COL_RETURN": "O"},
+}
+
+def _tab_cols(account):
+    """Return (COL_BOTNOTES, COL_RETURN) for a given account tab."""
+    ov = TAB_COL_OVERRIDES.get(account, {})
+    return (
+        ov.get("COL_BOTNOTES", COL_BOTNOTES),
+        ov.get("COL_RETURN",   COL_RETURN),
+    )
+
+def _fmt_eta(val):
+    """Convert ISO date/datetime string to MM/DD for sheet display.
+    e.g. '2026-03-10 06:00' → '03/10'  |  '2026-03-10' → '03/10'
+    Returns original string if it can't be parsed (manual entries preserved).
+    """
+    if not val:
+        return val
+    try:
+        # Works for '2026-03-10', '2026-03-10 06:00', '2026-03-10 06:00:00'
+        dt = datetime.strptime(val.strip()[:10], "%Y-%m-%d")
+        return dt.strftime("%m/%d")
+    except Exception:
+        return val  # leave manual entries (03/10, 26-Mar, etc.) untouched
+
 # Module-level cache for gspread client (reused across calls within same process)
 _gc = None
 
@@ -55,7 +84,7 @@ def _find_row_by_efj(ws, efj):
     try:
         col_a = ws.col_values(1)  # Column A
         for i, val in enumerate(col_a):
-            if val.strip() == efj:
+            if val.strip() == efj.strip():
                 return i + 1  # 1-indexed
     except Exception as e:
         log.error("Error searching for %s: %s", efj, e)
@@ -79,16 +108,17 @@ def sheet_update_import(efj, account, eta=None, pickup=None, return_date=None, s
             return
 
         timestamp = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
+        _botnotes_col, _return_col = _tab_cols(account)
 
         # Batch update: ETA, Pickup, Return, Timestamp as RAW
         raw_updates = []
         if eta:
-            raw_updates.append({"range": f"{COL_ETA}{row}", "values": [[eta]]})
+            raw_updates.append({"range": f"{COL_ETA}{row}", "values": [[_fmt_eta(eta)]]})
         if pickup:
             raw_updates.append({"range": f"{COL_PICKUP}{row}", "values": [[pickup]]})
         if return_date:
-            raw_updates.append({"range": f"{COL_RETURN}{row}", "values": [[return_date]]})
-        raw_updates.append({"range": f"{COL_BOTNOTES}{row}", "values": [[timestamp]]})
+            raw_updates.append({"range": f"{_return_col}{row}", "values": [[return_date]]})
+        raw_updates.append({"range": f"{_botnotes_col}{row}", "values": [[f"{timestamp} — {status}" if status else timestamp]]})
 
         if raw_updates:
             ws.batch_update(raw_updates, value_input_option="RAW")
@@ -127,11 +157,12 @@ def sheet_update_export(efj, account, container=None, status=None, bot_notes=Non
             log.warning("Sheet dual-write: %s not found in tab '%s'", efj, account)
             return
 
+        _botnotes_col, _return_col = _tab_cols(account)
         updates = []
         if container:
             updates.append({"range": f"{COL_CONTAINER}{row}", "values": [[container]]})
         if bot_notes:
-            updates.append({"range": f"{COL_BOTNOTES}{row}", "values": [[bot_notes]]})
+            updates.append({"range": f"{_botnotes_col}{row}", "values": [[bot_notes]]})
 
         if updates:
             ws.batch_update(updates, value_input_option="RAW")
@@ -166,6 +197,7 @@ def sheet_update_ftl(efj, account, pickup=None, delivery=None, status=None, driv
             return
 
         timestamp = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
+        _botnotes_col, _return_col = _tab_cols(account)
 
         raw_updates = []
         if pickup:
@@ -174,7 +206,7 @@ def sheet_update_ftl(efj, account, pickup=None, delivery=None, status=None, driv
             raw_updates.append({"range": f"{COL_DELIVERY}{row}", "values": [[delivery]]})
         if driver:
             raw_updates.append({"range": f"{COL_DRIVER}{row}", "values": [[driver]]})
-        raw_updates.append({"range": f"{COL_BOTNOTES}{row}", "values": [[timestamp]]})
+        raw_updates.append({"range": f"{_botnotes_col}{row}", "values": [[f"{timestamp} — {status}" if status else timestamp]]})
 
         if raw_updates:
             ws.batch_update(raw_updates, value_input_option="RAW")

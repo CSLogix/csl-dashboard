@@ -24,7 +24,7 @@ SMTP_PASSWORD=os.environ["SMTP_PASSWORD"]
 EMAIL_CC=os.environ.get("EMAIL_CC","efj-operations@evansdelivery.com")
 EMAIL_FALLBACK=os.environ.get("EMAIL_CC","efj-operations@evansdelivery.com")
 ACCOUNT_LOOKUP_TAB="Account Rep"
-SKIP_TABS={"Sheet 4","DTCELNJW","Account Rep","SSL Links","Completed Eli","Completed Radka","Completed John F"}
+SKIP_TABS={"Sheet 4","Sheet14","DTCELNJW","Account Rep","SSL Links","Completed Eli","Completed Radka","Completed John F"}
 COL_EFJ=0;COL_MOVE_TYPE=1;COL_CONTAINER=2;COL_BOOKING=3;COL_VESSEL=4
 COL_CARRIER=5;COL_ORIGIN=6;COL_DEST=7;COL_ERD=8;COL_CUTOFF=9;COL_NOTES=14
 SCOPES=["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
@@ -76,28 +76,32 @@ SSL_LINKS_PG = {
 }
 
 ACCOUNT_REPS_PG = {
-    "Allround": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "Boviet":   {"rep": "",      "email": "Boviet-efj@evansdelivery.com"},
-    "Cadi":     {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "CNL":      {"rep": "Janice","email": "Janice.Cortes@evansdelivery.com"},
-    "DHL":      {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
-    "DSV":      {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
-    "EShipping":{"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
-    "IWS":      {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "Kishco":   {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
-    "Kripke":   {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "MAO":      {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
-    "Mamata":   {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
-    "Meiko":    {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "MGF":      {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "Mitchell's Transport": {"rep": "John F", "email": "John.Feltz@evansdelivery.com"},
-    "Rose":     {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
-    "SEI Acquisition": {"rep": "John F", "email": "John.Feltz@evansdelivery.com"},
-    "Sutton":   {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "Tanera":   {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "TCR":      {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "Texas International": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "USHA":     {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Allround":        {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Boviet":          {"rep": "",      "email": "Boviet-efj@evansdelivery.com"},
+    "Cadi":            {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "CNL":             {"rep": "Janice","email": "Janice.Cortes@evansdelivery.com"},
+    "DHL":             {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
+    "DSV":             {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "EShipping":       {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "GW-World":        {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
+    "IWS":             {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Kischo":          {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "Kripke":          {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "LS Cargo":        {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "MAO":             {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "Mamata":          {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
+    "MD Metal":        {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Meiko":           {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "MGF":             {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Mitchells Trans": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Rose":            {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "SEI Acquistion":  {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Sutton":          {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Talatrans":       {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Tanera":          {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "TCR":             {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Texas":           {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "USHA":            {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
 }
 
 

@@ -435,6 +435,12 @@ load_dotenv()
 
 from csl_pg_writer import pg_update_shipment, pg_archive_shipment
 from csl_sheet_writer import sheet_update_import, sheet_archive_row
+try:
+    from terminal_nola import check_nola_containers as _check_nola
+    _TERMINAL_NOLA_OK = True
+except ImportError:
+    _TERMINAL_NOLA_OK = False
+    def _check_nola(_): return {}
 
 SHEET_ID         = os.environ["SHEET_ID"]
 CREDENTIALS_FILE = os.environ.get("GOOGLE_CREDENTIALS_FILE", "/root/csl-credentials.json")
@@ -471,7 +477,7 @@ COL_STATUS    = 13  # M — dropdown status
 COL_TIMESTAMP = 15  # O
 
 # Statuses the bot sets -- only overwrite if current status is empty or one of these
-BOT_MANAGED_STATUSES = {'', 'Vessel', 'Vessel Arrived', 'Discharged', 'Returned to Port', 'On Vessel'}
+BOT_MANAGED_STATUSES = {'', 'Vessel', 'Vessel Arrived', 'Discharged', 'Rail', 'Released', 'Returned to Port', 'On Vessel'}
 
 # ── Postgres migration: hardcoded lookups (replaces sheet tabs) ──────────
 import psycopg2
@@ -723,13 +729,22 @@ RETURN_KEYWORDS = ["return", "empty return", "empty due", "return date",
 
 
 def _find_date_near_keyword(text, keywords):
+    """Return the first date found on the keyword line itself, or the immediately
+    following line only.  The old 3-line window caused dates from the next field
+    to bleed into the wrong column when carrier pages list fields tightly.
+    """
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     for i, line in enumerate(lines):
         if any(kw in line.lower() for kw in keywords):
-            context = " ".join(lines[i: i + 3])
-            m = DATE_RE.search(context)
+            # Prefer date on the same line (e.g. "ETA: 03/15")
+            m = DATE_RE.search(line)
             if m:
                 return m.group(0)
+            # Fall back to next line only -- avoids grabbing dates 2+ rows away
+            if i + 1 < len(lines):
+                m = DATE_RE.search(lines[i + 1])
+                if m:
+                    return m.group(0)
     return None
 
 
@@ -755,7 +770,15 @@ def _dismiss_dialogs(page):
             pass
 
 
+def _scrape_jitter():
+    """Brief randomized pause before form submission — mimics human read time.
+    Keeps browser scrapers from looking like automated scripts to rate limiters."""
+    import random, time
+    time.sleep(random.uniform(0.8, 2.2))
+
+
 def _submit(page, input_loc, value):
+    _scrape_jitter()
     input_loc.click()
     input_loc.fill(value)
     input_loc.press("Enter")
@@ -2046,7 +2069,7 @@ def run_once(args):
                 "password": os.environ["PROXY_PASSWORD"],
             },
         )
-        circuit_breaker = CircuitBreaker(threshold=3)
+        circuit_breaker = CircuitBreaker(threshold=5)
 
         # Quick proxy health check before scraping
         proxy_ok = check_proxy_health(browser)
@@ -2152,8 +2175,9 @@ def run_once(args):
 
                 # ── Write to Postgres (primary) ──────────────────────────────
                 if job["efj"] and not args.dry_run:
-                    # Apply same overwrite guards as sheet mode
-                    write_eta = eta if (eta and not job["existing_eta"]) else None
+                    # ETA: always update — vessel ETA is carrier-driven and naturally fluid
+                    write_eta = eta if eta else None
+                    # Pickup/Return: guarded — reps enter these after manual coordination
                     write_pickup = pickup if (pickup and not job["existing_pickup"]) else None
                     write_return = ret if (ret and not job["existing_return"]) else None
                     write_status = status if (status and job["existing_status"] in BOT_MANAGED_STATUSES) else None
@@ -2208,6 +2232,51 @@ def run_once(args):
                         "return_date": ret,
                         "status":      status,
                     })
+
+            # ── Terminal cross-check for NOLA containers ────────────────────
+            if _TERMINAL_NOLA_OK and not args.dry_run:
+                nola_jobs = [
+                    j for j in dray_jobs
+                    if j.get("container") and j.get("efj") and
+                    "new orleans" in (j["row_data"][6] if len(j["row_data"]) > 6 else "").lower()
+                ]
+                if nola_jobs:
+                    try:
+                        nola_cnums = [j["container"] for j in nola_jobs]
+                        print(f"\n  Terminal check (NOLA): {len(nola_cnums)} container(s)...")
+                        terminal_results = _check_nola(nola_cnums)
+                        for j in nola_jobs:
+                            cnum = j["container"]
+                            t = terminal_results.get(cnum)
+                            if not t:
+                                print(f"    {cnum}: not in terminal API response")
+                                continue
+                            # Update bot_notes with terminal status
+                            tn = t["bot_notes"]
+                            pg_update_shipment(j["efj"], bot_notes=tn)
+                            # Write pickup date if terminal confirms available and no rep date set
+                            if t["ready"] and t["pickup_date"] and not j["existing_pickup"]:
+                                pg_update_shipment(j["efj"], pickup_date=t["pickup_date"])
+                                sheet_update_import(j["efj"], tab_name, pickup=t["pickup_date"])
+                                print(f"    {cnum}: AVAILABLE — pickup {t['pickup_date']}")
+                            else:
+                                print(f"    {cnum}: {tn[:90]}")
+                            # Write bot_notes directly to sheet Col N via csl_sheet_writer helper
+                            try:
+                                import gspread
+                                from csl_sheet_writer import _get_gc, _find_row_by_efj, _tab_cols
+                                gc = _get_gc()
+                                if gc:
+                                    sh = gc.open_by_key(os.environ.get("SHEET_ID", ""))
+                                    ws = sh.worksheet(tab_name)
+                                    srow = _find_row_by_efj(ws, j["efj"])
+                                    if srow:
+                                        botnotes_col, _ = _tab_cols(tab_name)
+                                        ws.update(f"{botnotes_col}{srow}", [[tn]], value_input_option="RAW")
+                            except Exception as _se:
+                                pass  # sheet write is best-effort
+                    except Exception as _te:
+                        print(f"  WARNING: Terminal check error: {_te}")
 
             # ── Archive completed loads (Postgres only) ──────────────────────
             if archive_jobs and not args.dry_run:

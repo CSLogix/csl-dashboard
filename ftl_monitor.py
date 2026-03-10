@@ -574,3 +574,13 @@ if __name__ == "__main__":
         print("Run complete.")
     else:
         main()
+
+
+# ── scrape_macropoint re-export ───────────────────────────────────────────────
+# boviet_monitor and tolead_monitor import scrape_macropoint from this module.
+# The implementation lives in daily_summary.py. Re-export it here.
+try:
+    from daily_summary import scrape_macropoint  # noqa: F401
+except ImportError:
+    def scrape_macropoint(browser, url, mp_cookies=None):
+        raise NotImplementedError("scrape_macropoint not available")
