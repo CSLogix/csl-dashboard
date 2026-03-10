@@ -4623,30 +4623,10 @@ async def api_update_status(efj: str, request: Request):
                 raise HTTPException(404, f"Row for {efj} not found in {tab}")
             ws.update_cell(target_row, status_col + 1, new_status)
 
-            # ── Auto-archive to Completed tab on billed_closed ──
-            if new_status == "billed_closed" and target_row:
-                try:
-                    rep_name = sheet_cache.rep_map.get(tab, "")
-                    completed_tab = f"Completed {rep_name}" if rep_name else ""
-                    if completed_tab and completed_tab in _COMPLETED_TABS:
-                        row_data = rows[target_row - 1] if target_row - 1 < len(rows) else []
-                        if row_data:
-                            # Write billed_closed into the row data before archiving
-                            while len(row_data) <= status_col:
-                                row_data.append("")
-                            row_data[status_col] = new_status
-                            # Append to Completed tab
-                            cws = sh.worksheet(completed_tab)
-                            cws.append_row(row_data, value_input_option="USER_ENTERED")
-                            # Delete from active tab
-                            ws.delete_rows(target_row)
-                            log.info("Archived %s from %s → %s (row %d)", efj, tab, completed_tab, target_row)
-                            # Invalidate completed cache so it refreshes
-                            _completed_cache["ts"] = 0
-                    else:
-                        log.warning("No completed tab for rep=%r (account=%s) — skipping archive", rep_name, tab)
-                except Exception as archive_err:
-                    log.error("Auto-archive failed for %s: %s (status still updated)", efj, archive_err)
+            # NOTE: billed_closed no longer auto-archives here.
+            # Archiving now ONLY fires via the billing close path:
+            # POST /api/unbilled/{id}/status → billing_status=closed → _archive_shipment_on_close()
+            # This prevents loads from disappearing before the finance cycle completes.
 
         # Update cache
         shipment["status"] = new_status
@@ -7994,6 +7974,28 @@ async def api_v2_update_status(efj: str, request: Request):
             _v2_write_status_to_sheet(efj, new_status, account, row.get("hub"))
         except Exception as e:
             log.warning("Sheet write-back failed for %s: %s (Postgres updated OK)", efj, e)
+
+    # Billing gate: if closing as billed, check for open unbilled orders
+    if new_status.strip().lower() in ("billed_closed", "billed and closed"):
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute(
+                    "SELECT id FROM unbilled_orders "
+                    "WHERE REPLACE(order_num, ' ', '') = %s "
+                    "AND dismissed = FALSE AND billing_status != 'closed' "
+                    "LIMIT 1",
+                    (efj,),
+                )
+                open_unbilled = cur.fetchone()
+        if open_unbilled:
+            raise HTTPException(
+                409,
+                "Cannot close: Active billing record found. "
+                "Please close this load via the Unbilled Orders dashboard.",
+            )
+        # No active unbilled order — archive now (load has no billing record)
+        _archive_shipment_on_close(efj)
+        log.info("billed_closed: no unbilled order for %s — archived directly", efj)
 
     return {"ok": True, "efj": efj, "status": new_status}
 
