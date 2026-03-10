@@ -116,6 +116,59 @@ function mapShipment(s, idx) {
   };
 }
 
+// ─── Terminal Bot Notes Parser ───
+// Parses Col O bot notes written by terminal_nola.py, e.g.:
+//   "Avail:NO | Loc:Vessel | Carrier:HOLD | Misc:2H | Vessel:OOCL BREMERHAVEN 14W"
+function parseTerminalNotes(notes) {
+  if (!notes || !notes.includes("Avail:")) return null;
+  const get = (key) => {
+    const m = notes.match(new RegExp(key + ":([^|\\n]+)", "i"));
+    return m ? m[1].trim() : null;
+  };
+  const avail = get("Avail");
+  const loc = get("Loc");
+  const carrier = get("Carrier");
+  const cbp = get("CBP") || get("Customs");
+  const usda = get("USDA");
+  const miscRaw = get("Misc");
+  const vessel = get("Vessel");
+  const holds = [];
+  if (miscRaw && miscRaw !== "None" && miscRaw !== "(None)") {
+    miscRaw.split(",").forEach(c => { const t = c.trim(); if (t) holds.push(t); });
+  }
+  if (carrier === "HOLD") holds.push("FRT");
+  if (cbp === "HOLD") holds.push("CBP");
+  if (usda === "HOLD") holds.push("USDA");
+  const isReady = avail === "YES" && holds.length === 0;
+  const hasHolds = holds.length > 0;
+  return { avail, loc, carrier, cbp, usda, miscRaw, holds, vessel, isReady, hasHolds };
+}
+
+// ─── Terminal Status Badge ───
+function TerminalBadge({ notes }) {
+  const t = parseTerminalNotes(notes);
+  if (!t) return null;
+  if (t.isReady) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#22C55E18", color: "#22C55E", border: "1px solid #22C55E33", letterSpacing: "0.5px", fontFamily: "'JetBrains Mono', monospace" }}>READY</span>
+        {t.loc && <span style={{ fontSize: 9, color: "#8B95A8" }}>{t.loc}</span>}
+      </span>
+    );
+  }
+  if (t.hasHolds) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 3, flexWrap: "wrap" }}>
+        {t.holds.map(h => (
+          <span key={h} style={{ fontSize: 9, fontWeight: 700, padding: "2px 5px", borderRadius: 4, background: "#EF444418", color: "#F87171", border: "1px solid #EF444422", letterSpacing: "0.5px", fontFamily: "'JetBrains Mono', monospace" }}>{h}</span>
+        ))}
+        {t.loc && <span style={{ fontSize: 9, color: "#8B95A8", marginLeft: 2 }}>{t.loc === "In Yard" ? "Yard" : t.loc}</span>}
+      </span>
+    );
+  }
+  return <span style={{ fontSize: 9, color: "#6B7280", fontFamily: "'JetBrains Mono', monospace" }}>{t.loc || "In Transit"}</span>;
+}
+
 // ─── Statuses ───
 const STATUSES = [
   { key: "all", label: "All", icon: "◎", grad: "linear-gradient(135deg, #4B5563, #6B7280)" },
@@ -2097,9 +2150,11 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                 const isEditing = inlineEditId === s.id;
                 const cellBorder = "1px solid rgba(255,255,255,0.04)";
                 const tdBase = { padding: "5px 8px", borderBottom: "1px solid rgba(255,255,255,0.06)", borderRight: cellBorder };
+                const repTermInfo = parseTerminalNotes(s.notes);
+                const repTermBg = repTermInfo?.isReady ? "rgba(34,197,94,0.06)" : repTermInfo?.hasHolds ? "rgba(239,68,68,0.05)" : undefined;
                 return (
                   <tr key={s.id} className="row-hover" onClick={() => { if (!isEditing) handleLoadClick(s); }}
-                    style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
+                    style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)", background: repTermBg }}>
                     {/* Account */}
                     <td style={{ ...tdBase, color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}>{s.account}</td>
                     {/* Status (inline-editable) */}
@@ -2258,6 +2313,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                           onBlur={() => { handleMetadataUpdate(s, "notes", inlineEditValue); setInlineEditId(null); }}
                           onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                           style={{ ...inlineInputStyle, width: 140 }} onClick={e => e.stopPropagation()} placeholder="Add note..." />
+                      ) : parseTerminalNotes(s.notes) ? (
+                        <TerminalBadge notes={s.notes} />
                       ) : (
                         <span style={{ fontSize: 10, color: s.notes ? "#F0F2F5" : "#3D4557", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.notes || ""}>{s.notes || "\u2014"}</span>
                       )}
@@ -5051,7 +5108,9 @@ function DispatchView({
               const inlineInputStyle = { background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 4, color: "#F0F2F5", padding: "2px 5px", fontSize: 11, width: 90, outline: "none", fontFamily: "'JetBrains Mono', monospace" };
               const cellStyle = (ci) => ({ padding: "5px 8px", borderBottom: "1px solid rgba(255,255,255,0.06)", borderRight: ci < DISPATCH_COLS.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" });
               const zebraBg = zebraStripe && rowIdx % 2 === 1 ? "rgba(255,255,255,0.025)" : "transparent";
-              const rowBg = isSelected ? `${sc.main}10` : zebraBg;
+              const dispTermInfo = parseTerminalNotes(s.notes);
+              const termBg = dispTermInfo?.isReady ? "rgba(34,197,94,0.06)" : dispTermInfo?.hasHolds ? "rgba(239,68,68,0.05)" : null;
+              const rowBg = isSelected ? `${sc.main}10` : termBg || zebraBg;
               let colIdx = 0;
               return (
                 <tr key={s.id} className="row-hover" onClick={() => { if (!isInlineEditing) handleLoadClick(s); }}
@@ -5226,6 +5285,8 @@ function DispatchView({
                         onBlur={() => { handleMetadataUpdate(s, "notes", inlineEditValue); setInlineEditId(null); }}
                         onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                         style={{ ...inlineInputStyle, width: 140 }} onClick={e => e.stopPropagation()} placeholder="Add note..." />
+                    ) : parseTerminalNotes(s.notes) ? (
+                      <TerminalBadge notes={s.notes} />
                     ) : (
                       <span style={{ fontSize: 10, color: s.notes ? "#F0F2F5" : "#3D4557", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.notes || ""}>{s.notes || "—"}</span>
                     )}
