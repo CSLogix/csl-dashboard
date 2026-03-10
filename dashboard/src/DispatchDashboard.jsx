@@ -287,6 +287,9 @@ const ALERT_TYPES = {
   POD_RECEIVED: "pod_received",
   NEEDS_DRIVER: "needs_driver",
   DOC_INDEXED: "doc_indexed",
+  RATE_RESPONSE: "rate_response",
+  PAYMENT_ESCALATION: "payment_escalation",
+  SEND_FINAL_CHARGES: "send_final_charges",
 };
 const ALERT_TYPE_CONFIG = {
   status_change:           { icon: "\u2197", color: "#3B82F6", label: "Status Change" },
@@ -295,6 +298,9 @@ const ALERT_TYPE_CONFIG = {
   pod_received:             { icon: "\u25C9", color: "#22C55E", label: "POD Received" },
   needs_driver:             { icon: "\u25CF", color: "#EF4444", label: "Needs Driver" },
   doc_indexed:              { icon: "\u25C8", color: "#8B5CF6", label: "Doc Indexed" },
+  rate_response:            { icon: "\u2605", color: "#00D4AA", label: "Rate Response" },
+  payment_escalation:       { icon: "\u26A0", color: "#EF4444", label: "Payment Alert" },
+  send_final_charges:       { icon: "$", color: "#F59E0B", label: "Send Final Charges" },
 };
 
 function getRepShipments(shipments, repName) {
@@ -774,6 +780,8 @@ export default function DispatchDashboard() {
   const [dismissedAlertIds, setDismissedAlertIds] = useState(() => loadDismissedAlerts());
   const prevStatusMapRef = useRef({});
   const prevDocMapRef = useRef({});
+  const prevRateAlertsRef = useRef(new Set());
+  const [inboxThreads, setInboxThreads] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editField, setEditField] = useState(null);
   const [editValue, setEditValue] = useState("");
@@ -897,6 +905,39 @@ export default function DispatchDashboard() {
       try {
         const crRes = await apiFetch(`${API_BASE}/api/carriers`);
         if (crRes.ok) { const crData = await crRes.json(); setCarrierDirectory(crData.carriers || []); }
+      } catch {}
+      // Fetch rate response alerts + inbox threads for email integration
+      try {
+        const [rateRes, inboxRes] = await Promise.allSettled([
+          apiFetch(`${API_BASE}/api/rate-response-alerts`).then(r => r.ok ? r.json() : null),
+          apiFetch(`${API_BASE}/api/inbox?days=7`).then(r => r.ok ? r.json() : null),
+        ]);
+        if (rateRes.status === "fulfilled" && rateRes.value) {
+          const alerts = rateRes.value.alerts || [];
+          const prev = prevRateAlertsRef.current;
+          const newAlerts = [];
+          for (const a of alerts) {
+            const key = `${a.id}`;
+            if (!prev.has(key)) {
+              const alertType = a.email_type === "payment_escalation" ? ALERT_TYPES.PAYMENT_ESCALATION
+                : (a.email_type === "carrier_invoice" || a.email_type === "carrier_rate_confirmation") ? ALERT_TYPES.SEND_FINAL_CHARGES
+                : ALERT_TYPES.RATE_RESPONSE;
+              newAlerts.push({
+                id: `${alertType}-${a.id}-${Date.now()}`, type: alertType,
+                efj: a.efj, account: "", rep: a.rep || "",
+                message: alertType === ALERT_TYPES.PAYMENT_ESCALATION ? `Payment alert: ${a.efj || "Unknown"} \u2014 ${a.subject || ""}`
+                  : alertType === ALERT_TYPES.SEND_FINAL_CHARGES ? `Send final charges: ${a.efj || "Unknown"}`
+                  : `Rate response: ${a.sender || "Carrier"} on ${a.lane || a.efj || ""}`,
+                detail: a.summary || a.subject || "", timestamp: new Date(a.sent_at || Date.now()).getTime(),
+              });
+            }
+          }
+          if (prev.size > 0 && newAlerts.length > 0) setEventAlerts(p => [...newAlerts, ...p].slice(0, 200));
+          prevRateAlertsRef.current = new Set(alerts.map(a => `${a.id}`));
+        }
+        if (inboxRes.status === "fulfilled" && inboxRes.value) {
+          setInboxThreads(inboxRes.value.threads || []);
+        }
       } catch {}
       setLastSyncTime(new Date());
       setApiError(null);
@@ -1380,7 +1421,8 @@ export default function DispatchDashboard() {
               handleFieldUpdate={handleFieldUpdate} handleMetadataUpdate={handleMetadataUpdate}
               handleDriverFieldUpdate={handleDriverFieldUpdate}
               repProfiles={repProfiles} onProfileUpdate={fetchProfiles}
-              trackingSummary={trackingSummary} docSummary={docSummary} />
+              trackingSummary={trackingSummary} docSummary={docSummary}
+              inboxThreads={inboxThreads} />
           )}
           {activeView === "dispatch" && (
             <DispatchView loaded={loaded} shipments={shipments} filtered={filtered} accounts={accounts}
@@ -1769,7 +1811,7 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
 // ═══════════════════════════════════════════════════════════════
 // REP DASHBOARD VIEW
 // ═══════════════════════════════════════════════════════════════
-function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, repProfiles, onProfileUpdate, trackingSummary, docSummary }) {
+function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, repProfiles, onProfileUpdate, trackingSummary, docSummary, inboxThreads }) {
   const [expandedAccount, setExpandedAccount] = useState(null);
   const [bovietTab, setBovietTab] = useState("Piedra");
   const [toleadHub, setToleadHub] = useState("ORD");
@@ -1868,6 +1910,31 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
   const actionBehind = actionBase.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !["delivered", "empty_return"].includes(s.status));
   const actionNoPod = actionBase.filter(s => { if (s.status !== "delivered") return false; const eb = (s.efj || "").replace(/^EFJ\s*/i, ""); return !(docSummary?.[eb] || docSummary?.[s.efj])?.pod; });
   const actionActive = actionBase.filter(s => !["delivered", "empty_return"].includes(s.status));
+
+  // Inbox-derived pill data for this rep
+  const repAccts = (REP_ACCOUNTS[repName] || []).map(a => a.toLowerCase());
+  const repInboxThreads = useMemo(() => {
+    if (!inboxThreads?.length) return [];
+    return inboxThreads.filter(t => {
+      const threadAcct = (t.account || "").toLowerCase();
+      if (repAccts.some(a => threadAcct.includes(a))) return true;
+      // For Boviet/Tolead, match on account name
+      if (repName === "Boviet" && threadAcct.includes("boviet")) return true;
+      if (repName === "Tolead" && threadAcct.includes("tolead")) return true;
+      // Match by rep name in suggested_rep
+      const tRep = (t.suggested_rep || "").toLowerCase();
+      if (tRep && tRep === repName.toLowerCase()) return true;
+      // Match by EFJ — check if any of the rep's shipments match the thread EFJ
+      if (t.efj) {
+        const tEfj = t.efj.replace(/^EFJ\s*/i, "").toLowerCase();
+        return actionBase.some(s => (s.efj || "").replace(/^EFJ\s*/i, "").toLowerCase() === tEfj);
+      }
+      return false;
+    });
+  }, [inboxThreads, repName, actionBase]);
+  const inboxNeedsReply = repInboxThreads.filter(t => t.needs_reply && t.email_type !== "rate_outreach").length;
+  const inboxRateResponses = repInboxThreads.filter(t => t.email_type === "carrier_rate_response").length;
+
   const opsBase = displayShipsFiltered;
   const opsPickupsToday = opsBase.filter(s => isDateToday(s.pickupDate) && s.status !== "delivered");
   const opsPickupsTomorrow = opsBase.filter(s => isDateTomorrow(s.pickupDate) && s.status !== "delivered");
@@ -2221,14 +2288,16 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
           { label: "No Driver", value: actionNoDriver.length, c: "#EF4444", filter: "needs_driver" },
           { label: "Behind", value: actionBehind.length, c: "#F97316", filter: "behind" },
           { label: "No POD", value: actionNoPod.length, c: "#A855F7", filter: "awaiting_pod" },
+          { label: "Needs Reply", value: inboxNeedsReply, c: "#EF4444", filter: null },
+          { label: "Rate Responses", value: inboxRateResponses, c: "#00D4AA", filter: null },
         ];
         return (
         <div style={{ display: "flex", gap: 6, marginBottom: 14, marginTop: 8, flexWrap: "wrap" }}>
           {pills.map((s, i) => (
-            <button key={i} onClick={() => setFilter(s.filter)}
-              style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${filterState === s.filter ? `${s.c}44` : "rgba(255,255,255,0.06)"}`,
-                background: filterState === s.filter ? `${s.c}15` : "rgba(255,255,255,0.03)",
-                cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
+            <button key={i} onClick={() => { if (s.filter) setFilter(s.filter); }}
+              style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${filterState === s.filter && s.filter ? `${s.c}44` : "rgba(255,255,255,0.06)"}`,
+                background: filterState === s.filter && s.filter ? `${s.c}15` : "rgba(255,255,255,0.03)",
+                cursor: s.filter ? "pointer" : "default", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
               <span style={{ fontSize: 16, fontWeight: 800, color: s.value > 0 ? s.c : "#334155", fontFamily: "'JetBrains Mono', monospace" }}>{s.value}</span>
               <span style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, textTransform: "uppercase" }}>{s.label}</span>
             </button>
@@ -2750,6 +2819,31 @@ const EMAIL_TYPE_COLORS = {
   delivery_update: { bg: "rgba(6,182,212,0.12)", color: "#06B6D4" },
   tracking_update: { bg: "rgba(6,182,212,0.12)", color: "#06B6D4" },
   general: { bg: "rgba(139,149,168,0.12)", color: "#8B95A8" },
+  payment_escalation: { bg: "rgba(239,68,68,0.15)", color: "#EF4444" },
+  carrier_rate_response: { bg: "rgba(0,212,170,0.15)", color: "#00D4AA" },
+  rate_outreach: { bg: "rgba(59,130,246,0.12)", color: "#3B82F6" },
+  carrier_invoice: { bg: "rgba(249,115,22,0.12)", color: "#F97316" },
+  carrier_rate_confirmation: { bg: "rgba(168,85,247,0.12)", color: "#A855F7" },
+  warehouse_rate: { bg: "rgba(6,182,212,0.12)", color: "#06B6D4" },
+};
+
+const INBOX_TYPE_LABELS = {
+  carrier_rate: "CARRIER RATE",
+  customer_rate: "CUSTOMER RATE",
+  carrier_rate_response: "RATE RESPONSE",
+  carrier_rate_confirmation: "RATE CON",
+  carrier_invoice: "INVOICE",
+  payment_escalation: "PAYMENT ALERT",
+  rate_outreach: "OUTREACH",
+  pod: "POD",
+  bol: "BOL",
+  detention: "DETENTION",
+  appointment: "APPT",
+  invoice: "INVOICE",
+  delivery_update: "DELIVERY",
+  tracking_update: "TRACKING",
+  general: "GENERAL",
+  warehouse_rate: "WAREHOUSE",
 };
 
 function _relTime(dateStr) {
@@ -2768,12 +2862,17 @@ function _relTime(dateStr) {
 function InboxView({ handleLoadClick }) {
   const { inboxThreads, inboxStats, setInboxThreads, setInboxStats, shipments, setSelectedShipment, setActiveView } = useAppStore();
   const [activeTab, setActiveTab] = useState("all");
-  const [expandedThread, setExpandedThread] = useState(null);
   const [loading, setLoading] = useState(true);
   const [assigningId, setAssigningId] = useState(null);
   const [assignEfj, setAssignEfj] = useState("");
   const [feedbackGiven, setFeedbackGiven] = useState({});
   const [correctionId, setCorrectionId] = useState(null);
+  const [sortCol, setSortCol] = useState("time");
+  const [sortDir, setSortDir] = useState("desc");
+  const [inboxSearch, setInboxSearch] = useState("");
+  const [selectedThread, setSelectedThread] = useState(null);
+  const [colFilters, setColFilters] = useState({});
+  const [openFilterCol, setOpenFilterCol] = useState(null);
 
   const fetchInbox = useCallback(async () => {
     try {
@@ -2790,12 +2889,7 @@ function InboxView({ handleLoadClick }) {
   }, [activeTab]);
 
   useEffect(() => { setLoading(true); fetchInbox(); }, [fetchInbox]);
-
-  // Poll every 60s
-  useEffect(() => {
-    const iv = setInterval(fetchInbox, 60000);
-    return () => clearInterval(iv);
-  }, [fetchInbox]);
+  useEffect(() => { const iv = setInterval(fetchInbox, 90000); return () => clearInterval(iv); }, [fetchInbox]);
 
   const handleAssign = async (emailId) => {
     if (!assignEfj.trim()) return;
@@ -2807,14 +2901,10 @@ function InboxView({ handleLoadClick }) {
       if (res.ok) { setAssigningId(null); setAssignEfj(""); fetchInbox(); }
     } catch (e) { console.error("Assign failed:", e); }
   };
-
   const handleDismiss = async (emailId) => {
-    try {
-      await apiFetch(`${API_BASE}/api/unmatched-emails/${emailId}/dismiss`, { method: "POST" });
-      fetchInbox();
-    } catch (e) { console.error("Dismiss failed:", e); }
+    try { await apiFetch(`${API_BASE}/api/unmatched-emails/${emailId}/dismiss`, { method: "POST" }); fetchInbox(); }
+    catch (e) { console.error("Dismiss failed:", e); }
   };
-
   const handleFeedback = async (emailId, feedback, correctedType) => {
     try {
       await apiFetch(`${API_BASE}/api/inbox/${emailId}/feedback`, {
@@ -2825,275 +2915,383 @@ function InboxView({ handleLoadClick }) {
       setCorrectionId(null);
     } catch (e) { console.error("Feedback failed:", e); }
   };
-
   const openLoad = (efj) => {
     if (!efj) return;
     const ship = (Array.isArray(shipments) ? shipments : []).find(s => s.efj === efj);
-    if (ship) { setSelectedShipment(ship); }
+    if (ship) { setSelectedShipment(ship); setSelectedThread(null); }
   };
 
   const threads = inboxThreads;
   const stats = inboxStats;
+  const CORRECTION_TYPES = ["carrier_rate", "customer_rate", "carrier_rate_response", "carrier_rate_confirmation", "carrier_invoice", "payment_escalation", "pod", "bol", "appointment", "detention", "delivery_update", "tracking_update", "invoice", "general"];
 
-  const CORRECTION_TYPES = ["carrier_rate", "customer_rate", "pod", "bol", "appointment", "detention", "delivery_update", "tracking_update", "invoice", "general"];
+  // Filtering
+  const filtered = useMemo(() => {
+    let list = threads;
+    if (inboxSearch.trim()) {
+      const q = inboxSearch.toLowerCase();
+      list = list.filter(t =>
+        (t.latest_subject || "").toLowerCase().includes(q) ||
+        (t.latest_sender || "").toLowerCase().includes(q) ||
+        (t.efj || "").toLowerCase().includes(q) ||
+        (t.lane || "").toLowerCase().includes(q)
+      );
+    }
+    const active = Object.entries(colFilters).filter(([, v]) => v != null);
+    if (active.length) {
+      list = list.filter(t => active.every(([key, val]) => {
+        if (key === "type") return t.email_type === val;
+        if (key === "efj") return t.efj === val;
+        if (key === "sender") return (t.latest_sender || "").replace(/<[^>]+>/g, "").trim() === val;
+        if (key === "status") {
+          if (val === "needs_reply") return t.needs_reply;
+          if (val === "replied") return t.has_csl_reply;
+          if (val === "unmatched") return t.source === "unmatched";
+          return true;
+        }
+        return true;
+      }));
+    }
+    return list;
+  }, [threads, inboxSearch, colFilters]);
 
-  return (
-    <div style={{ padding: "24px 24px 80px", maxWidth: 960 }}>
-      {/* Header */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", marginBottom: 4 }}>Inbox</div>
-        <div style={{ fontSize: 11, color: "#8B95A8" }}>
-          {stats.total_threads || 0} threads
-          {stats.needs_reply > 0 && <> &middot; <span style={{ color: "#EF4444", fontWeight: 600 }}>{stats.needs_reply} need reply</span></>}
-          {stats.unmatched > 0 && <> &middot; <span style={{ color: "#F97316" }}>{stats.unmatched} unmatched</span></>}
-          {stats.high_priority > 0 && <> &middot; {stats.high_priority} high priority</>}
+  // Sorting
+  const sorted = useMemo(() => {
+    const list = [...filtered];
+    const dir = sortDir === "asc" ? 1 : -1;
+    list.sort((a, b) => {
+      let cmp = 0;
+      if (sortCol === "priority") cmp = (a.max_priority || 0) - (b.max_priority || 0);
+      else if (sortCol === "subject") cmp = (a.latest_subject || "").localeCompare(b.latest_subject || "");
+      else if (sortCol === "efj") cmp = (a.efj || "").localeCompare(b.efj || "");
+      else if (sortCol === "type") cmp = (a.email_type || "").localeCompare(b.email_type || "");
+      else if (sortCol === "msgs") cmp = (a.message_count || 0) - (b.message_count || 0);
+      else if (sortCol === "sender") cmp = (a.latest_sender || "").localeCompare(b.latest_sender || "");
+      else if (sortCol === "time") cmp = (a.latest_sent_at || "").localeCompare(b.latest_sent_at || "");
+      return cmp * dir;
+    });
+    return list;
+  }, [filtered, sortCol, sortDir]);
+
+  // Column filter options
+  const filterOpts = useMemo(() => {
+    const opts = {};
+    opts.type = [...new Set(threads.map(t => t.email_type).filter(Boolean))].sort();
+    opts.efj = [...new Set(threads.map(t => t.efj).filter(Boolean))].sort();
+    opts.sender = [...new Set(threads.map(t => (t.latest_sender || "").replace(/<[^>]+>/g, "").trim()).filter(Boolean))].sort();
+    opts.status = ["needs_reply", "replied", "unmatched"];
+    return opts;
+  }, [threads]);
+
+  const toggleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("desc"); }
+  };
+
+  const thStyle = { padding: "6px 8px", textAlign: "left", fontSize: 8, fontWeight: 600, color: "#8B95A8", letterSpacing: "1px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: 5, cursor: "pointer", whiteSpace: "nowrap", userSelect: "none" };
+  const cellStyle = { padding: "5px 8px", fontSize: 10, color: "#F0F2F5", borderBottom: "1px solid rgba(255,255,255,0.03)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+
+  const renderFilterDrop = (colKey, w) => {
+    if (openFilterCol !== colKey) return null;
+    const options = filterOpts[colKey] || [];
+    return (
+      <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 60, background: "#141A28", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: 4, minWidth: w || 120, maxHeight: 200, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "4px 8px", fontSize: 9, color: "#8B95A8", cursor: "pointer", borderRadius: 4 }}
+          onClick={() => { setColFilters(f => { const n = { ...f }; delete n[colKey]; return n; }); setOpenFilterCol(null); }}>
+          Clear filter
         </div>
-      </div>
-
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-        {INBOX_TABS.map(tab => {
-          const isActive = activeTab === tab.key;
-          let count = null;
-          if (tab.key === "needs_reply") count = stats.needs_reply;
-          else if (tab.key === "unmatched") count = stats.unmatched;
+        {options.map(opt => {
+          const label = colKey === "type" ? (INBOX_TYPE_LABELS[opt] || opt.replace(/_/g, " ")) : colKey === "status" ? opt.replace(/_/g, " ") : opt;
           return (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              style={{
-                padding: "6px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer",
-                background: isActive ? "rgba(0,212,170,0.12)" : "rgba(255,255,255,0.04)",
-                color: isActive ? "#00D4AA" : "#8B95A8",
-                border: isActive ? "1px solid rgba(0,212,170,0.25)" : "1px solid rgba(255,255,255,0.06)",
-              }}>
-              {tab.label}
-              {count > 0 && (
-                <span style={{
-                  marginLeft: 6, padding: "1px 6px", borderRadius: 10, fontSize: 9, fontWeight: 700,
-                  background: tab.key === "needs_reply" ? "rgba(239,68,68,0.20)" : "rgba(249,115,22,0.20)",
-                  color: tab.key === "needs_reply" ? "#EF4444" : "#F97316",
-                  ...(tab.key === "needs_reply" && count > 0 ? { animation: "alert-pulse 2s ease infinite" } : {}),
-                }}>
-                  {count}
-                </span>
-              )}
-            </button>
+            <div key={opt} style={{ padding: "4px 8px", fontSize: 9, color: colFilters[colKey] === opt ? "#00D4AA" : "#F0F2F5", cursor: "pointer", borderRadius: 4, background: colFilters[colKey] === opt ? "rgba(0,212,170,0.08)" : "transparent" }}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
+              onMouseLeave={e => e.currentTarget.style.background = colFilters[colKey] === opt ? "rgba(0,212,170,0.08)" : "transparent"}
+              onClick={() => { setColFilters(f => ({ ...f, [colKey]: opt })); setOpenFilterCol(null); }}>
+              {label}
+            </div>
           );
         })}
-        <button onClick={() => { setLoading(true); fetchInbox(); }}
-          style={{ marginLeft: "auto", padding: "6px 12px", borderRadius: 8, fontSize: 10, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", color: "#8B95A8", border: "1px solid rgba(255,255,255,0.06)" }}>
-          Refresh
-        </button>
+      </div>
+    );
+  };
+
+  const renderTh = (label, colKey, w, filterable) => {
+    const isSort = sortCol === colKey;
+    const hasFilter = colFilters[colKey] != null;
+    return (
+      <th key={colKey} style={{ ...thStyle, width: w || "auto", minWidth: w || "auto", position: "relative",
+        borderBottom: hasFilter ? "2px solid rgba(0,212,170,0.4)" : thStyle.borderBottom,
+        background: hasFilter ? "rgba(0,212,170,0.04)" : thStyle.background,
+        color: isSort ? "#00D4AA" : thStyle.color }}>
+        <span onClick={() => toggleSort(colKey)}>{label} {isSort ? (sortDir === "asc" ? "\u25B2" : "\u25BC") : ""}</span>
+        {filterable && (
+          <span onClick={e => { e.stopPropagation(); setOpenFilterCol(openFilterCol === colKey ? null : colKey); }}
+            style={{ marginLeft: 4, cursor: "pointer", fontSize: 8, color: hasFilter ? "#00D4AA" : "#5A6478" }}>
+            {hasFilter ? "\u2726" : "\u25BE"}
+          </span>
+        )}
+        {filterable && renderFilterDrop(colKey, w)}
+      </th>
+    );
+  };
+
+  const selThread = selectedThread;
+  const selMsgId = selThread ? ((selThread.messages || []).filter(m => m.direction === "inbound").slice(-1)[0]?.id) : null;
+  const selFeedback = selMsgId ? feedbackGiven[selMsgId] : null;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 60px)", position: "relative" }} onClick={() => { if (openFilterCol) setOpenFilterCol(null); }}>
+      {/* Header + Tabs + Search */}
+      <div style={{ padding: "12px 16px 0", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "#F0F2F5" }}>Inbox</div>
+          <div style={{ fontSize: 10, color: "#8B95A8" }}>
+            {stats.total_threads || 0} threads
+            {stats.needs_reply > 0 && <> &middot; <span style={{ color: "#EF4444", fontWeight: 600 }}>{stats.needs_reply} need reply</span></>}
+            {stats.unmatched > 0 && <> &middot; <span style={{ color: "#F97316" }}>{stats.unmatched} unmatched</span></>}
+            {stats.high_priority > 0 && <> &middot; {stats.high_priority} high priority</>}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 4, marginBottom: 8, alignItems: "center" }}>
+          {INBOX_TABS.map(tab => {
+            const isActive = activeTab === tab.key;
+            let count = null;
+            if (tab.key === "needs_reply") count = stats.needs_reply;
+            else if (tab.key === "unmatched") count = stats.unmatched;
+            return (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                style={{ padding: "5px 12px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer",
+                  background: isActive ? "rgba(0,212,170,0.12)" : "rgba(255,255,255,0.04)",
+                  color: isActive ? "#00D4AA" : "#8B95A8",
+                  border: isActive ? "1px solid rgba(0,212,170,0.25)" : "1px solid rgba(255,255,255,0.06)" }}>
+                {tab.label}
+                {count > 0 && (
+                  <span style={{ marginLeft: 5, padding: "1px 5px", borderRadius: 8, fontSize: 8, fontWeight: 700,
+                    background: tab.key === "needs_reply" ? "rgba(239,68,68,0.20)" : "rgba(249,115,22,0.20)",
+                    color: tab.key === "needs_reply" ? "#EF4444" : "#F97316" }}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+            <input value={inboxSearch} onChange={e => setInboxSearch(e.target.value)}
+              placeholder="Search subject, sender, EFJ..."
+              style={{ width: 200, padding: "5px 10px", borderRadius: 6, fontSize: 10, background: "rgba(255,255,255,0.04)", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.08)", outline: "none" }} />
+            {Object.keys(colFilters).length > 0 && (
+              <button onClick={() => setColFilters({})}
+                style={{ padding: "4px 8px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(239,68,68,0.08)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.15)" }}>
+                Clear Filters
+              </button>
+            )}
+            <button onClick={() => { setLoading(true); fetchInbox(); }}
+              style={{ padding: "5px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", color: "#8B95A8", border: "1px solid rgba(255,255,255,0.06)" }}>
+              Refresh
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Loading */}
-      {loading && (
-        <div style={{ textAlign: "center", padding: 40, color: "#5A6478" }}>
-          <div style={{ width: 24, height: 24, border: "2px solid rgba(0,212,170,0.2)", borderTop: "2px solid #00D4AA", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
-          Loading inbox...
-        </div>
-      )}
+      {/* Table */}
+      <div style={{ flex: 1, overflow: "auto", position: "relative" }} className="dispatch-table-wrap">
+        {loading ? (
+          <div style={{ textAlign: "center", padding: 40, color: "#5A6478" }}>
+            <div style={{ width: 24, height: 24, border: "2px solid rgba(0,212,170,0.2)", borderTop: "2px solid #00D4AA", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
+            Loading inbox...
+          </div>
+        ) : sorted.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 60, color: "#5A6478", fontSize: 11 }}>No threads found</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+            <thead>
+              <tr>
+                {renderTh("", "priority", 28, false)}
+                {renderTh("Status", "status", 85, true)}
+                {renderTh("Type", "type", 100, true)}
+                <th style={{ ...thStyle, width: "auto", cursor: "pointer" }} onClick={() => toggleSort("subject")}>
+                  Subject {sortCol === "subject" ? (sortDir === "asc" ? "\u25B2" : "\u25BC") : ""}
+                </th>
+                {renderTh("EFJ", "efj", 85, true)}
+                {renderTh("Sender", "sender", 140, true)}
+                {renderTh("Msgs", "msgs", 42, false)}
+                {renderTh("Updated", "time", 65, false)}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((thread, idx) => {
+                const typeColors = EMAIL_TYPE_COLORS[thread.email_type] || EMAIL_TYPE_COLORS.general;
+                const isSelected = selThread?.thread_id === thread.thread_id;
+                const rowBg = isSelected ? "rgba(0,212,170,0.06)" : idx % 2 === 1 ? "rgba(255,255,255,0.015)" : "transparent";
+                return (
+                  <tr key={thread.thread_id} style={{ background: rowBg, cursor: "pointer" }}
+                    onClick={() => setSelectedThread(isSelected ? null : thread)}
+                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+                    onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = idx % 2 === 1 ? "rgba(255,255,255,0.015)" : "transparent"; }}>
+                    {/* Priority */}
+                    <td style={{ ...cellStyle, textAlign: "center" }}>
+                      <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%",
+                        background: thread.max_priority >= 5 ? "#EF4444" : thread.max_priority >= 4 ? "#F97316" : thread.max_priority >= 3 ? "#3B82F6" : "#4D5669" }} />
+                    </td>
+                    {/* Status */}
+                    <td style={cellStyle}>
+                      {thread.needs_reply && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(239,68,68,0.15)", color: "#EF4444", fontWeight: 700 }}>NEEDS REPLY</span>}
+                      {thread.has_csl_reply && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(34,197,94,0.12)", color: "#22C55E", fontWeight: 600 }}>REPLIED</span>}
+                      {!thread.needs_reply && !thread.has_csl_reply && thread.source === "unmatched" && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(249,115,22,0.12)", color: "#F97316", fontWeight: 600 }}>UNMATCHED</span>}
+                    </td>
+                    {/* Type */}
+                    <td style={cellStyle}>
+                      {thread.email_type && (
+                        <span style={{ fontSize: 7, padding: "1px 5px", borderRadius: 3, fontWeight: 700, background: typeColors.bg, color: typeColors.color, letterSpacing: "0.3px" }}>
+                          {INBOX_TYPE_LABELS[thread.email_type] || thread.email_type.replace(/_/g, " ").toUpperCase()}
+                        </span>
+                      )}
+                    </td>
+                    {/* Subject */}
+                    <td style={{ ...cellStyle, maxWidth: 0 }} title={thread.ai_summary || thread.latest_subject}>
+                      <span style={{ fontWeight: 500 }}>{thread.latest_subject || "(no subject)"}</span>
+                      {thread.has_attachments && <span style={{ marginLeft: 4, fontSize: 9, opacity: 0.5 }}>&#128206;</span>}
+                    </td>
+                    {/* EFJ */}
+                    <td style={cellStyle}>
+                      {thread.efj ? (
+                        <span onClick={e => { e.stopPropagation(); openLoad(thread.efj); }}
+                          style={{ padding: "1px 4px", borderRadius: 3, background: "rgba(0,212,170,0.10)", color: "#00D4AA", fontWeight: 600, fontSize: 9, fontFamily: "JetBrains Mono, monospace", cursor: "pointer" }}>
+                          {thread.efj}
+                        </span>
+                      ) : <span style={{ color: "#4D5669", fontSize: 9 }}>--</span>}
+                    </td>
+                    {/* Sender */}
+                    <td style={{ ...cellStyle, fontSize: 9, color: "#8B95A8", maxWidth: 0 }}>
+                      {(thread.latest_sender || "").replace(/<[^>]+>/g, "").trim()}
+                    </td>
+                    {/* Msgs */}
+                    <td style={{ ...cellStyle, textAlign: "center", color: "#8B95A8", fontSize: 9 }}>
+                      {thread.message_count || 1}
+                    </td>
+                    {/* Updated */}
+                    <td style={{ ...cellStyle, textAlign: "right", color: "#5A6478", fontSize: 9 }}>
+                      {_relTime(thread.latest_sent_at)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
 
-      {/* Thread List */}
-      {!loading && threads.length === 0 && (
-        <div style={{ textAlign: "center", padding: 60, color: "#5A6478", fontSize: 12 }}>
-          No threads found
-        </div>
-      )}
+      {/* Thread Detail Slide-Over */}
+      {selThread && (
+        <div style={{ position: "fixed", right: 0, top: 0, height: "100vh", width: 480, zIndex: 35, background: "#0F1420", borderLeft: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", boxShadow: "-8px 0 30px rgba(0,0,0,0.5)", animation: "slideInRight 0.2s ease" }}>
+          {/* Header */}
+          <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <button onClick={() => setSelectedThread(null)}
+                style={{ padding: "2px 6px", borderRadius: 4, fontSize: 12, cursor: "pointer", background: "rgba(255,255,255,0.06)", color: "#8B95A8", border: "none" }}>&#10005;</button>
+              <div style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {selThread.latest_subject || "(no subject)"}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              {selThread.email_type && (() => {
+                const tc = EMAIL_TYPE_COLORS[selThread.email_type] || EMAIL_TYPE_COLORS.general;
+                return <span style={{ fontSize: 8, padding: "2px 6px", borderRadius: 4, fontWeight: 700, background: tc.bg, color: tc.color }}>{INBOX_TYPE_LABELS[selThread.email_type] || selThread.email_type.replace(/_/g," ").toUpperCase()}</span>;
+              })()}
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: selThread.max_priority >= 5 ? "#EF4444" : selThread.max_priority >= 4 ? "#F97316" : selThread.max_priority >= 3 ? "#3B82F6" : "#4D5669" }} />
+              {selThread.efj && (
+                <button onClick={() => openLoad(selThread.efj)}
+                  style={{ padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(0,212,170,0.10)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.20)", fontFamily: "JetBrains Mono, monospace" }}>
+                  {selThread.efj} &rarr; Open Load
+                </button>
+              )}
+              {selThread.lane && <span style={{ fontSize: 9, color: "#8B95A8" }}>{selThread.lane}</span>}
+            </div>
+          </div>
 
-      {!loading && threads.map(thread => {
-        const isExpanded = expandedThread === thread.thread_id;
-        const typeColors = EMAIL_TYPE_COLORS[thread.email_type] || EMAIL_TYPE_COLORS.general;
-        const latestInbound = (thread.messages || []).filter(m => m.direction === "inbound").slice(-1)[0];
-        const firstMsgId = latestInbound?.id;
-        const hasFeedback = feedbackGiven[firstMsgId];
-
-        return (
-          <div key={thread.thread_id} className="glass"
-            style={{ marginBottom: 8, borderRadius: 12, border: thread.needs_reply ? "1px solid rgba(239,68,68,0.20)" : "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
-
-            {/* Thread Row */}
-            <div style={{ padding: "12px 16px", cursor: "pointer", display: "flex", gap: 10, alignItems: "flex-start" }}
-              onClick={() => setExpandedThread(isExpanded ? null : thread.thread_id)}>
-
-              {/* Priority dot */}
-              <span style={{
-                width: 8, height: 8, borderRadius: "50%", flexShrink: 0, marginTop: 4,
-                background: thread.max_priority >= 5 ? "#EF4444" : thread.max_priority >= 4 ? "#F97316" : thread.max_priority >= 3 ? "#3B82F6" : "#4D5669",
-              }} />
-
-              {/* Content */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                    {thread.latest_subject || "(no subject)"}
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+            {(selThread.messages || []).map((msg, idx) => (
+              <div key={idx} style={{ padding: "8px 16px", borderBottom: "1px solid rgba(255,255,255,0.03)", display: "flex", gap: 8 }}>
+                <span style={{ fontSize: 11, color: msg.direction === "sent" ? "#00D4AA" : "#8B95A8", flexShrink: 0, marginTop: 1 }}>
+                  {msg.direction === "sent" ? "\u2191" : "\u2193"}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 10, fontWeight: 500, color: msg.direction === "sent" ? "#00D4AA" : "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                      {msg.direction === "sent" ? "CSL Team" : (msg.sender || "").replace(/<[^>]+>/g, "").trim()}
+                    </span>
+                    <span style={{ fontSize: 8, color: "#5A6478", whiteSpace: "nowrap" }}>
+                      {msg.sent_at ? new Date(msg.sent_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""}
+                    </span>
                   </div>
-                  {thread.email_type && thread.email_type !== "general" && (
-                    <span style={{ fontSize: 8, padding: "2px 6px", borderRadius: 4, fontWeight: 700, background: typeColors.bg, color: typeColors.color, whiteSpace: "nowrap", flexShrink: 0, letterSpacing: "0.5px" }}>
-                      {thread.email_type.replace(/_/g, " ").toUpperCase()}
-                    </span>
+                  {msg.body_preview && (
+                    <div style={{ fontSize: 9, color: "#5A6478", marginTop: 3, lineHeight: 1.5, maxHeight: 60, overflow: "hidden" }}>
+                      {msg.body_preview.slice(0, 300)}
+                    </div>
                   )}
-                  <span style={{ fontSize: 9, color: "#5A6478", whiteSpace: "nowrap", flexShrink: 0 }}>
-                    {_relTime(thread.latest_sent_at)}
-                  </span>
-                </div>
-
-                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9, color: "#8B95A8" }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {(thread.latest_sender || "").replace(/<[^>]+>/g, "").trim()}
-                  </span>
-                  {thread.efj && (
-                    <span style={{ padding: "1px 5px", borderRadius: 4, background: "rgba(0,212,170,0.10)", color: "#00D4AA", fontWeight: 600, fontFamily: "JetBrains Mono, monospace", flexShrink: 0 }}>
-                      {thread.efj}
-                    </span>
-                  )}
-                  {thread.message_count > 1 && (
-                    <span style={{ color: "#5A6478" }}>{thread.message_count} msgs</span>
-                  )}
-                  {thread.lane && (
-                    <span style={{ color: "#5A6478" }}>{thread.lane}</span>
-                  )}
-                  {thread.has_attachments && <span>&#128206;</span>}
-                </div>
-
-                {thread.ai_summary && (
-                  <div style={{ fontSize: 9, color: "#5A6478", marginTop: 3, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {thread.ai_summary}
-                  </div>
-                )}
-
-                {/* Status badges */}
-                <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center" }}>
-                  {thread.needs_reply && (
-                    <span style={{ fontSize: 8, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,0.15)", color: "#EF4444", fontWeight: 700 }}>
-                      NEEDS REPLY
-                    </span>
-                  )}
-                  {thread.has_csl_reply && (
-                    <span style={{ fontSize: 8, padding: "2px 6px", borderRadius: 4, background: "rgba(34,197,94,0.12)", color: "#22C55E", fontWeight: 600 }}>
-                      REPLIED
-                    </span>
-                  )}
-                  {thread.source === "unmatched" && (
-                    <span style={{ fontSize: 8, padding: "2px 6px", borderRadius: 4, background: "rgba(249,115,22,0.12)", color: "#F97316", fontWeight: 600 }}>
-                      UNMATCHED
-                    </span>
+                  {msg.has_attachments && msg.attachment_names && (
+                    <div style={{ fontSize: 8, color: "#8B95A8", marginTop: 3 }}>&#128206; {msg.attachment_names}</div>
                   )}
                 </div>
               </div>
+            ))}
+          </div>
 
-              {/* Expand indicator */}
-              <span style={{ fontSize: 10, color: "#5A6478", transform: isExpanded ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s", flexShrink: 0, marginTop: 4 }}>&#9660;</span>
-            </div>
-
-            {/* Expanded Thread Messages */}
-            {isExpanded && (
-              <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", background: "rgba(0,0,0,0.15)" }}>
-                {(thread.messages || []).map((msg, idx) => (
-                  <div key={idx} style={{ padding: "8px 16px 8px 34px", borderBottom: "1px solid rgba(255,255,255,0.03)", display: "flex", gap: 8, alignItems: "flex-start" }}>
-                    <span style={{ fontSize: 10, color: msg.direction === "sent" ? "#00D4AA" : "#8B95A8", flexShrink: 0, marginTop: 1 }}>
-                      {msg.direction === "sent" ? "\u2191" : "\u2193"}
-                    </span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 10, fontWeight: 500, color: msg.direction === "sent" ? "#00D4AA" : "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                          {msg.direction === "sent" ? "You" : (msg.sender || "").replace(/<[^>]+>/g, "").trim()}
-                        </span>
-                        <span style={{ fontSize: 8, color: "#5A6478", whiteSpace: "nowrap" }}>
-                          {msg.sent_at ? new Date(msg.sent_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : ""}
-                        </span>
-                      </div>
-                      {msg.body_preview && (
-                        <div style={{ fontSize: 9, color: "#5A6478", marginTop: 2, lineHeight: 1.4, maxHeight: 40, overflow: "hidden" }}>
-                          {msg.body_preview.slice(0, 200)}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-
-                {/* Actions bar */}
-                <div style={{ padding: "8px 16px 10px 34px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  {thread.efj && (
-                    <button onClick={(e) => { e.stopPropagation(); openLoad(thread.efj); }}
-                      style={{ padding: "4px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(0,212,170,0.10)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.20)" }}>
-                      Open Load
-                    </button>
-                  )}
-
-                  {thread.source === "unmatched" && assigningId !== firstMsgId && (
-                    <>
-                      <button onClick={(e) => { e.stopPropagation(); setAssigningId(firstMsgId); }}
-                        style={{ padding: "4px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(59,130,246,0.10)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.20)" }}>
-                        Assign to Load
-                      </button>
-                      <button onClick={(e) => { e.stopPropagation(); handleDismiss(firstMsgId); }}
-                        style={{ padding: "4px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(239,68,68,0.08)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.15)" }}>
-                        Dismiss
-                      </button>
-                    </>
-                  )}
-
-                  {assigningId === firstMsgId && (
-                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                      <input value={assignEfj} onChange={e => setAssignEfj(e.target.value)}
-                        placeholder="EFJ#" autoFocus
-                        onKeyDown={e => { if (e.key === "Enter") handleAssign(firstMsgId); if (e.key === "Escape") { setAssigningId(null); setAssignEfj(""); } }}
-                        style={{ width: 90, padding: "3px 8px", borderRadius: 6, fontSize: 10, background: "rgba(255,255,255,0.06)", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.12)", outline: "none", fontFamily: "JetBrains Mono, monospace" }} />
-                      <button onClick={() => handleAssign(firstMsgId)}
-                        style={{ padding: "3px 8px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "#00D4AA", color: "#0A0E17", border: "none" }}>
-                        Assign
-                      </button>
-                      <button onClick={() => { setAssigningId(null); setAssignEfj(""); }}
-                        style={{ padding: "3px 8px", borderRadius: 6, fontSize: 9, cursor: "pointer", background: "rgba(255,255,255,0.06)", color: "#8B95A8", border: "1px solid rgba(255,255,255,0.08)" }}>
-                        Cancel
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Classification feedback */}
-                  <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
-                    {hasFeedback ? (
-                      <span style={{ fontSize: 8, color: hasFeedback === "correct" ? "#22C55E" : "#F97316", fontWeight: 600 }}>
-                        {hasFeedback === "correct" ? "Confirmed" : "Corrected"}
-                      </span>
-                    ) : firstMsgId && correctionId !== firstMsgId ? (
-                      <>
-                        <button onClick={(e) => { e.stopPropagation(); handleFeedback(firstMsgId, "correct"); }}
-                          title="Classification correct"
-                          style={{ padding: "2px 6px", borderRadius: 4, fontSize: 11, cursor: "pointer", background: "rgba(34,197,94,0.08)", color: "#22C55E", border: "1px solid rgba(34,197,94,0.15)" }}>
-                          &#128077;
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); setCorrectionId(firstMsgId); }}
-                          title="Classification incorrect"
-                          style={{ padding: "2px 6px", borderRadius: 4, fontSize: 11, cursor: "pointer", background: "rgba(239,68,68,0.08)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.15)" }}>
-                          &#128078;
-                        </button>
-                      </>
-                    ) : null}
-
-                    {correctionId === firstMsgId && (
-                      <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
-                        <select onChange={e => { handleFeedback(firstMsgId, "incorrect", e.target.value); }}
-                          defaultValue=""
-                          style={{ padding: "2px 6px", borderRadius: 4, fontSize: 9, background: "#141A28", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.12)" }}>
-                          <option value="" disabled>Correct type...</option>
-                          {CORRECTION_TYPES.map(t => (
-                            <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
-                          ))}
-                        </select>
-                        <button onClick={() => setCorrectionId(null)}
-                          style={{ padding: "2px 5px", borderRadius: 4, fontSize: 9, cursor: "pointer", background: "rgba(255,255,255,0.06)", color: "#8B95A8", border: "none" }}>
-                          &#10005;
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
+          {/* Actions */}
+          <div style={{ padding: "10px 16px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", flexShrink: 0 }}>
+            {selThread.source === "unmatched" && assigningId !== selMsgId && (
+              <>
+                <button onClick={() => setAssigningId(selMsgId)}
+                  style={{ padding: "5px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(59,130,246,0.10)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.20)" }}>
+                  Assign to Load
+                </button>
+                <button onClick={() => handleDismiss(selMsgId)}
+                  style={{ padding: "5px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(239,68,68,0.08)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.15)" }}>
+                  Dismiss
+                </button>
+              </>
+            )}
+            {assigningId === selMsgId && (
+              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <input value={assignEfj} onChange={e => setAssignEfj(e.target.value)} placeholder="EFJ#" autoFocus
+                  onKeyDown={e => { if (e.key === "Enter") handleAssign(selMsgId); if (e.key === "Escape") { setAssigningId(null); setAssignEfj(""); } }}
+                  style={{ width: 90, padding: "4px 8px", borderRadius: 6, fontSize: 10, background: "rgba(255,255,255,0.06)", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.12)", outline: "none", fontFamily: "JetBrains Mono, monospace" }} />
+                <button onClick={() => handleAssign(selMsgId)}
+                  style={{ padding: "4px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "#00D4AA", color: "#0A0E17", border: "none" }}>Assign</button>
+                <button onClick={() => { setAssigningId(null); setAssignEfj(""); }}
+                  style={{ padding: "4px 8px", borderRadius: 6, fontSize: 9, cursor: "pointer", background: "rgba(255,255,255,0.06)", color: "#8B95A8", border: "1px solid rgba(255,255,255,0.08)" }}>Cancel</button>
               </div>
             )}
+            <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
+              {selFeedback ? (
+                <span style={{ fontSize: 9, color: selFeedback === "correct" ? "#22C55E" : "#F97316", fontWeight: 600 }}>
+                  {selFeedback === "correct" ? "Confirmed" : "Corrected"}
+                </span>
+              ) : selMsgId && correctionId !== selMsgId ? (
+                <>
+                  <button onClick={() => handleFeedback(selMsgId, "correct")} title="Classification correct"
+                    style={{ padding: "3px 8px", borderRadius: 4, fontSize: 11, cursor: "pointer", background: "rgba(34,197,94,0.08)", color: "#22C55E", border: "1px solid rgba(34,197,94,0.15)" }}>&#128077;</button>
+                  <button onClick={() => setCorrectionId(selMsgId)} title="Classification incorrect"
+                    style={{ padding: "3px 8px", borderRadius: 4, fontSize: 11, cursor: "pointer", background: "rgba(239,68,68,0.08)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.15)" }}>&#128078;</button>
+                </>
+              ) : null}
+              {correctionId === selMsgId && (
+                <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+                  <select onChange={e => handleFeedback(selMsgId, "incorrect", e.target.value)} defaultValue=""
+                    style={{ padding: "3px 8px", borderRadius: 4, fontSize: 9, background: "#141A28", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.12)" }}>
+                    <option value="" disabled>Correct type...</option>
+                    {CORRECTION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
+                  </select>
+                  <button onClick={() => setCorrectionId(null)}
+                    style={{ padding: "2px 6px", borderRadius: 4, fontSize: 9, cursor: "pointer", background: "rgba(255,255,255,0.06)", color: "#8B95A8", border: "none" }}>&#10005;</button>
+                </div>
+              )}
+            </div>
           </div>
-        );
-      })}
+        </div>
+      )}
     </div>
   );
 }
