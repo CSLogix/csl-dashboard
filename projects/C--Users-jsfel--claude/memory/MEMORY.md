@@ -209,6 +209,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - Excel import: `rate_quote_sheet.xlsx` for Directory
 - Warehouse extract: `POST /api/warehouses/extract` handler
 
+## Documents Created
+- **CSLogix Workflow Guide** (`Desktop/CSLogix_Work_flow_v2.pptx`): 8-slide dark-theme PPTX for Janice (JC), billing coordinator. Added Column Filters tip bar to slide 5 (Dispatch View) + split slide 7 (Inbox) bottom row into Unbilled Orders / Live Alerts 2×2 grid. XML-edited via unpack/pack workflow.
+
 ## Completed Integrations
 - **Sentry**: Error tracking + monitoring
 - **Tailwind UI**: Component library + utility-first CSS
