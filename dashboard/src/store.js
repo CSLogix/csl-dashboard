@@ -28,6 +28,8 @@ export const useAppStore = create((set) => ({
   // ── Inbox Command Center ──
   inboxThreads: [],
   inboxStats: { total_threads: 0, needs_reply: 0, unmatched: 0, high_priority: 0 },
+  inboxInitialTab: null,   // set before navigating to inbox to pre-select a tab
+  inboxInitialSearch: null, // set before navigating to inbox to pre-fill search
 
   // ── Data Source Fallback ──
   dataSource: "postgres",  // "postgres" or "sheets"
@@ -69,6 +71,8 @@ export const useAppStore = create((set) => ({
   setApiError: (v) => set({ apiError: v }),
   setInboxThreads: (v) => set({ inboxThreads: Array.isArray(v) ? v : [] }),
   setInboxStats: (v) => set({ inboxStats: v }),
+  setInboxInitialTab: (v) => set({ inboxInitialTab: v }),
+  setInboxInitialSearch: (v) => set({ inboxInitialSearch: v }),
   setDataSource: (v) => set({ dataSource: v }),
   setSystemHealth: (v) => set({ systemHealth: v }),
 

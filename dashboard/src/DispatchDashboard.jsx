@@ -1423,7 +1423,7 @@ export default function DispatchDashboard() {
               repProfiles={repProfiles} onProfileUpdate={fetchProfiles}
               trackingSummary={trackingSummary} docSummary={docSummary}
               inboxThreads={inboxThreads}
-              onNavigateInbox={(tab) => { setActiveView("inbox"); }} />
+              onNavigateInbox={(tab, search) => { useAppStore.getState().setInboxInitialTab(tab || null); useAppStore.getState().setInboxInitialSearch(search || null); setActiveView("inbox"); }} />
           )}
           {activeView === "dispatch" && (
             <DispatchView loaded={loaded} shipments={shipments} filtered={filtered} accounts={accounts}
@@ -2290,7 +2290,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
           { label: "Behind", value: actionBehind.length, c: "#F97316", filter: "behind" },
           { label: "No POD", value: actionNoPod.length, c: "#A855F7", filter: "awaiting_pod" },
           { label: "Needs Reply", value: inboxNeedsReply, c: "#EF4444", filter: null, action: () => onNavigateInbox("needs_reply") },
-          { label: "Rate Responses", value: inboxRateResponses, c: "#00D4AA", filter: null, action: () => onNavigateInbox("rates") },
+          { label: "Rate Responses", value: inboxRateResponses, c: "#00D4AA", filter: null, action: () => onNavigateInbox("rates", "carrier_rate_response") },
         ];
         return (
         <div style={{ display: "flex", gap: 6, marginBottom: 14, marginTop: 8, flexWrap: "wrap" }}>
@@ -2861,8 +2861,8 @@ function _relTime(dateStr) {
 }
 
 function InboxView({ handleLoadClick }) {
-  const { inboxThreads, inboxStats, setInboxThreads, setInboxStats, shipments, setSelectedShipment, setActiveView } = useAppStore();
-  const [activeTab, setActiveTab] = useState("all");
+  const { inboxThreads, inboxStats, setInboxThreads, setInboxStats, shipments, setSelectedShipment, setActiveView, inboxInitialTab, inboxInitialSearch, setInboxInitialTab, setInboxInitialSearch } = useAppStore();
+  const [activeTab, setActiveTab] = useState(() => inboxInitialTab || "all");
   const [loading, setLoading] = useState(true);
   const [assigningId, setAssigningId] = useState(null);
   const [assignEfj, setAssignEfj] = useState("");
@@ -2870,10 +2870,16 @@ function InboxView({ handleLoadClick }) {
   const [correctionId, setCorrectionId] = useState(null);
   const [sortCol, setSortCol] = useState("time");
   const [sortDir, setSortDir] = useState("desc");
-  const [inboxSearch, setInboxSearch] = useState("");
+  const [inboxSearch, setInboxSearch] = useState(() => inboxInitialSearch || "");
   const [selectedThread, setSelectedThread] = useState(null);
   const [colFilters, setColFilters] = useState({});
   const [openFilterCol, setOpenFilterCol] = useState(null);
+
+  // Clear initial navigation state after consuming it
+  useEffect(() => {
+    if (inboxInitialTab) setInboxInitialTab(null);
+    if (inboxInitialSearch) setInboxInitialSearch(null);
+  }, []);
 
   const fetchInbox = useCallback(async () => {
     try {
