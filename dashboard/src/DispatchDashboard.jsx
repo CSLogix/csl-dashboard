@@ -4272,6 +4272,20 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
             ))}
           </div>
 
+          {/* Terminal Status */}
+          {parseTerminalNotes(selectedShipment.notes) && (() => {
+            const t = parseTerminalNotes(selectedShipment.notes);
+            return (
+              <div style={{ padding: "8px 20px 10px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Terminal Status</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <TerminalBadge notes={selectedShipment.notes} />
+                  {t.vessel && <span style={{ fontSize: 9, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>{t.vessel}</span>}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Notes */}
           <div style={{ padding: "8px 20px 14px" }}>
             <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 6, textTransform: "uppercase" }}>Notes</div>
@@ -5545,6 +5559,20 @@ function DispatchView({
                   </div>
                 ))}
               </div>
+
+              {/* Terminal Status */}
+              {parseTerminalNotes(selectedShipment.notes) && (() => {
+                const t = parseTerminalNotes(selectedShipment.notes);
+                return (
+                  <div style={{ padding: "8px 20px 10px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Terminal Status</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <TerminalBadge notes={selectedShipment.notes} />
+                      {t.vessel && <span style={{ fontSize: 9, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>{t.vessel}</span>}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Notes */}
               <div style={{ padding: "8px 20px 14px" }}>
