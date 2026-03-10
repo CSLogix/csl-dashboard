@@ -1070,6 +1070,9 @@ export default function QuoteBuilder() {
                         <div><span style={{ color: "#5A6478" }}>Avg </span><span style={{ color: "#F0F2F5", fontWeight: 700 }}>{fmt(rateIntel.stats.avg)}</span></div>
                         <div><span style={{ color: "#5A6478" }}>Ceiling </span><span style={{ color: "#f59e0b", fontWeight: 700 }}>{fmt(rateIntel.stats.ceiling)}</span></div>
                         <div><span style={{ color: "#5A6478" }}>Carriers </span><span style={{ color: "#8B95A8", fontWeight: 600 }}>{rateIntel.stats.total_carriers}</span></div>
+                        {(() => { const allDates = (rateIntel.lane_groups || []).flatMap(g => (g.quotes || []).map(q => q.date)).concat((rateIntel.matches || []).map(m => m.date)).filter(Boolean).map(d => new Date(d).getTime()); const newest = allDates.length ? Math.max(...allDates) : 0; return newest && (Date.now() - newest) > 30 * 86400000; })() && (
+                          <div style={{ fontSize: 9, color: "#f59e0b", display: "flex", alignItems: "center", gap: 3 }}><span>&#9888;</span> Market data may be aged</div>
+                        )}
                         {rateIntel.stats?.sources && (
                           <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
                             {rateIntel.stats.sources.email > 0 && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: "rgba(0,212,170,0.12)", color: "#00D4AA", fontWeight: 700 }}>EMAIL {rateIntel.stats.sources.email}</span>}
@@ -1116,6 +1119,7 @@ export default function QuoteBuilder() {
                                       <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
                                         {q.rate ? <span style={{ color: "#00D4AA", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{fmt(q.rate)}</span> : <span style={{ color: "#3D4557" }}>—</span>}
                                         {q.date && <span style={{ color: "#3D4557", fontSize: 9 }}>{String(q.date).slice(0, 10)}</span>}
+                                        {q.date && (Date.now() - new Date(q.date).getTime()) > 30 * 86400000 && <span title="Market data may be aged" style={{ fontSize: 9, color: "#f59e0b" }}>&#9888;</span>}
                                         {q.status === "accepted" && <span style={{ color: "#22c55e", fontSize: 9, fontWeight: 700 }}>WON</span>}
                                       </div>
                                     </div>
@@ -1141,6 +1145,7 @@ export default function QuoteBuilder() {
                             <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
                               {m.rate ? <span style={{ color: "#00D4AA", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{fmt(m.rate)}</span> : <span style={{ color: "#3D4557" }}>—</span>}
                               {m.date && <span style={{ color: "#3D4557", fontSize: 9 }}>{m.date.slice(0, 10)}</span>}
+                              {m.date && (Date.now() - new Date(m.date).getTime()) > 30 * 86400000 && <span title="Market data may be aged" style={{ fontSize: 9, color: "#f59e0b" }}>&#9888;</span>}
                               {m.status === "accepted" && <span style={{ color: "#22c55e", fontSize: 9, fontWeight: 700 }}>WON</span>}
                             </div>
                           </div>
