@@ -442,6 +442,11 @@ except ImportError:
     _TERMINAL_NOLA_OK = False
     def _check_nola(_): return {}
 
+try:
+    from terminal_normalizer import normalize_origin as _normalize_origin
+except ImportError:
+    def _normalize_origin(x): return x  # no-op fallback
+
 SHEET_ID         = os.environ["SHEET_ID"]
 CREDENTIALS_FILE = os.environ.get("GOOGLE_CREDENTIALS_FILE", "/root/csl-credentials.json")
 STATUS_FILTER    = "Tracking Waiting for Update"
@@ -538,8 +543,63 @@ ACCOUNT_REPS = {
     "TCR":      {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "Texas International": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "USHA":     {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "MD Metal": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
 }
 
+
+
+
+# ── Dynamic rep lookup (TTL-cached, refreshes every 20 min) ──────────────
+import time as _time
+
+_REP_CACHE = {"data": {}, "ts": 0.0}
+_REP_CACHE_TTL = 20 * 60  # 20 minutes
+
+def _load_account_reps_from_sheet(sh, force=False):
+    """Load ACCOUNT_REPS dynamically from the Account Rep sheet tab."""
+    now = _time.time()
+    if not force and now - _REP_CACHE["ts"] < _REP_CACHE_TTL:
+        return _REP_CACHE["data"]
+    try:
+        ws = sh.worksheet("Account Rep")
+        rows = ws.get_all_values()
+        result = {}
+        for row in rows[1:]:
+            if len(row) >= 3 and row[0].strip():
+                acct = row[0].strip().lower()
+                result[acct] = {
+                    "rep":   row[1].strip(),
+                    "email": row[2].strip() if len(row) > 2 else "",
+                }
+        _REP_CACHE["data"] = result
+        _REP_CACHE["ts"] = now
+        print(f"  [rep_cache] loaded {len(result)} accounts from Account Rep sheet")
+        return result
+    except Exception as e:
+        print(f"  [rep_cache] WARNING: sheet load failed ({e}) — using hardcoded fallback")
+        return {}
+
+def _get_rep_for_account(sh, account_name):
+    """
+    Lookup rep info for an account. Uses TTL-cached sheet data.
+    Falls back to hardcoded ACCOUNT_REPS. Case-insensitive strip match.
+    On cache miss, forces a live re-read before giving up.
+    Returns dict with 'rep' and 'email', or None if not found.
+    """
+    key = account_name.strip().lower()
+    # Try dynamic sheet data first
+    reps = _load_account_reps_from_sheet(sh)
+    if key in reps:
+        return reps[key]
+    # Cache miss: force a live re-read
+    reps = _load_account_reps_from_sheet(sh, force=True)
+    if key in reps:
+        return reps[key]
+    # Fall back to hardcoded ACCOUNT_REPS (normalized key)
+    for acct_key, info in ACCOUNT_REPS.items():
+        if acct_key.strip().lower() == key:
+            return info
+    return None
 
 def _resolve_ssl_pg(vessel, carrier):
     """Resolve SSL code + URL from vessel/carrier text using hardcoded SSL_LINKS."""
@@ -2086,6 +2146,7 @@ def run_once(args):
             print(f"  Loads: {len(loads)}")
 
             dray_jobs = []
+            origin_fixes = []  # (efj, old_origin, new_origin) for write-back
             for row in loads:
                 efj_val = (row["efj"] or "").strip()
                 container = (row["container"] or "").strip()
@@ -2110,9 +2171,10 @@ def run_once(args):
                     "carrier":   carrier,
                     "account":   tab_name,
                     "rep":       (row["rep"] or "").strip(),
+                    "origin":    _normalize_origin(row["origin"] or ""),
                     "row_data":  [
                         efj_val, "Dray Import", container, bol, vessel, carrier,
-                        row["origin"] or "", row["destination"] or "",
+                        _normalize_origin(row["origin"] or ""), row["destination"] or "",
                         row["eta"] or "", row["lfd"] or "",
                         row["pickup_date"] or "", row["delivery_date"] or "",
                         row["status"] or "", "", row["bot_notes"] or "",
@@ -2124,8 +2186,35 @@ def run_once(args):
                     "existing_return": row["return_date"] or "",
                     "existing_status": row["status"] or "",
                 })
+                # Track origin changes for write-back
+                raw_origin = (row["origin"] or "").strip()
+                norm_origin = _normalize_origin(raw_origin)
+                if norm_origin and norm_origin != raw_origin:
+                    origin_fixes.append((efj_val, raw_origin, norm_origin))
 
             print(f"  Dray Import rows: {len(dray_jobs)}")
+
+            # ── Write back normalized origins ─────────────────────────────
+            if origin_fixes and not args.dry_run:
+                print(f"  Normalizing {len(origin_fixes)} origin field(s):")
+                for efj_fix, old_orig, new_orig in origin_fixes:
+                    print(f"    {efj_fix}: {old_orig!r} -> {new_orig!r}")
+                    try:
+                        pg_update_shipment(efj_fix, origin=new_orig)
+                    except Exception as _oe:
+                        print(f"    WARNING: PG origin update failed for {efj_fix}: {_oe}")
+                    try:
+                        from csl_sheet_writer import _get_gc, _find_row_by_efj
+                        import gspread
+                        gc = _get_gc()
+                        if gc:
+                            sh = gc.open_by_key(os.environ.get("SHEET_ID", ""))
+                            ws = sh.worksheet(tab_name)
+                            srow = _find_row_by_efj(ws, efj_fix)
+                            if srow:
+                                ws.update(f"G{srow}", [[new_orig]], value_input_option="RAW")
+                    except Exception as _se:
+                        pass  # sheet write is best-effort
 
             tab_changes  = []
             archive_jobs = []
@@ -2183,13 +2272,16 @@ def run_once(args):
                     write_status = status if (status and job["existing_status"] in BOT_MANAGED_STATUSES) else None
 
                     ts = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
+                    # Preserve terminal data (Avail:...) — only stamp if no structured terminal notes exist
+                    existing_bn = (job.get("row_data", [""] * 15)[14] or "").strip()
+                    write_bot_notes = ts if not existing_bn.startswith("Avail:") else None
                     pg_update_shipment(
                         job["efj"],
                         eta=write_eta,
                         pickup_date=write_pickup,
                         return_date=write_return,
                         status=write_status,
-                        bot_notes=ts,
+                        bot_notes=write_bot_notes,
                         account=tab_name,
                         move_type="Dray Import",
                     )
@@ -2238,7 +2330,8 @@ def run_once(args):
                 nola_jobs = [
                     j for j in dray_jobs
                     if j.get("container") and j.get("efj") and
-                    "new orleans" in (j["row_data"][6] if len(j["row_data"]) > 6 else "").lower()
+                    any(kw in (j["row_data"][6] if len(j["row_data"]) > 6 else "").lower()
+                        for kw in ("new orleans", "napoleon"))
                 ]
                 if nola_jobs:
                     try:
@@ -2282,8 +2375,13 @@ def run_once(args):
             if archive_jobs and not args.dry_run:
                 print(f"\n  Archiving {len(archive_jobs)} completed load(s)...")
                 for aj in archive_jobs:
+                    rep_info = _get_rep_for_account(sh, tab_name)
+                    if not rep_info:
+                        print(f"  WARNING: archive skipped — no rep mapping for '{tab_name}', efj={aj['efj']}. Load remains active.")
+                        print(f"  WARN: Skipping archive {aj['efj']} — no rep mapping for '{tab_name}'")
+                        continue
                     pg_archive_shipment(aj["efj"])
-                    sheet_archive_row(aj["efj"], tab_name, rep=ACCOUNT_REPS.get(tab_name, {}).get("rep"))
+                    sheet_archive_row(aj["efj"], tab_name, rep=rep_info["rep"])
                     print(f"  Archived {aj['efj']} (Returned to Port)")
 
                     # Remove from new_check
@@ -2291,7 +2389,7 @@ def run_once(args):
                     new_check.pop(archived_key, None)
 
                     # Send archive email
-                    rep_info  = ACCOUNT_REPS.get(tab_name, {})
+                    rep_info = _get_rep_for_account(sh, tab_name) or {}
                     rep_email = rep_info.get("email", "")
                     rep_name  = rep_info.get("rep", "")
                     if rep_email:

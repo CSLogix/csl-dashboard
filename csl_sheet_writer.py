@@ -242,7 +242,13 @@ def sheet_archive_row(efj, account, rep=None):
         row_data = ws.row_values(row)
 
         # Determine destination tab
-        dest_tab = f"Completed {rep}" if rep else "Completed Eli"
+        if not rep:
+            log.warning(
+                "sheet_archive_row: no rep mapping for account=%s, efj=%s"
+                " — aborting archive to prevent misrouting", account, efj
+            )
+            return False
+        dest_tab = f"Completed {rep}"
         try:
             dest_ws = sh.worksheet(dest_tab)
         except gspread.WorksheetNotFound:
