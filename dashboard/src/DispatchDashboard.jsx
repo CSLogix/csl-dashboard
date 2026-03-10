@@ -4272,15 +4272,32 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
             ))}
           </div>
 
-          {/* Terminal Status */}
+          {/* Terminal Ground Truth */}
           {parseTerminalNotes(selectedShipment.notes) && (() => {
             const t = parseTerminalNotes(selectedShipment.notes);
+            const hasHold = t.hasHolds;
             return (
-              <div style={{ padding: "8px 20px 10px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Terminal Status</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <TerminalBadge notes={selectedShipment.notes} />
-                  {t.vessel && <span style={{ fontSize: 9, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>{t.vessel}</span>}
+              <div style={{ padding: "10px 20px 12px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                <div style={{
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  background: hasHold ? "rgba(239,68,68,0.08)" : "rgba(56,189,248,0.08)",
+                  border: `1px solid ${hasHold ? "rgba(239,68,68,0.25)" : "rgba(56,189,248,0.25)"}`,
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: hasHold ? "#f87171" : "#38bdf8" }}>
+                      Terminal Ground Truth
+                    </span>
+                    <TerminalBadge notes={selectedShipment.notes} />
+                  </div>
+                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#E5E7EB", lineHeight: 1.5 }}>
+                    {selectedShipment.notes}
+                  </div>
+                  {t.vessel && (
+                    <div style={{ marginTop: 8, fontSize: 10, color: "#9CA3AF" }}>
+                      <strong style={{ color: "#6B7280" }}>Vessel:</strong> {t.vessel}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -5560,15 +5577,32 @@ function DispatchView({
                 ))}
               </div>
 
-              {/* Terminal Status */}
+              {/* Terminal Ground Truth */}
               {parseTerminalNotes(selectedShipment.notes) && (() => {
                 const t = parseTerminalNotes(selectedShipment.notes);
+                const hasHold = t.hasHolds;
                 return (
-                  <div style={{ padding: "8px 20px 10px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Terminal Status</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <TerminalBadge notes={selectedShipment.notes} />
-                      {t.vessel && <span style={{ fontSize: 9, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>{t.vessel}</span>}
+                  <div style={{ padding: "10px 20px 12px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                    <div style={{
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      background: hasHold ? "rgba(239,68,68,0.08)" : "rgba(56,189,248,0.08)",
+                      border: `1px solid ${hasHold ? "rgba(239,68,68,0.25)" : "rgba(56,189,248,0.25)"}`,
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <span style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: hasHold ? "#f87171" : "#38bdf8" }}>
+                          Terminal Ground Truth
+                        </span>
+                        <TerminalBadge notes={selectedShipment.notes} />
+                      </div>
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#E5E7EB", lineHeight: 1.5 }}>
+                        {selectedShipment.notes}
+                      </div>
+                      {t.vessel && (
+                        <div style={{ marginTop: 8, fontSize: 10, color: "#9CA3AF" }}>
+                          <strong style={{ color: "#6B7280" }}>Vessel:</strong> {t.vessel}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
