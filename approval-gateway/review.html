@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Review Diff</title>
+<style>
+:root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --dim: #64748b;
+    --add-bg: rgba(34,197,94,.12);
+    --add: #4ade80;
+    --del-bg: rgba(239,68,68,.12);
+    --del: #f87171;
+    --hunk-bg: rgba(96,165,250,.08);
+    --hunk: #60a5fa;
+    --approve: #22c55e;
+    --reject: #ef4444;
+    --accent: #3b82f6;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding-bottom: 100px;
+}
+
+/* Header */
+.header {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+.header h1 { font-size: 16px; font-weight: 600; margin-bottom: 4px; line-height: 1.3; }
+.meta { font-size: 12px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+.stats-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+.stat {
+    font-size: 12px; padding: 2px 8px; border-radius: 4px; font-weight: 500;
+    white-space: nowrap;
+}
+.stat-files { background: rgba(96,165,250,.15); color: #60a5fa; }
+.stat-add { background: var(--add-bg); color: var(--add); }
+.stat-del { background: var(--del-bg); color: var(--del); }
+.badge {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .5px;
+    padding: 3px 8px; border-radius: 4px;
+}
+.badge-pending { background: rgba(251,191,36,.15); color: #fbbf24; }
+.badge-approved { background: rgba(34,197,94,.15); color: #22c55e; }
+.badge-rejected { background: rgba(239,68,68,.15); color: #ef4444; }
+
+/* Diff */
+.diff-container { padding: 8px; }
+.file-section {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; margin-bottom: 8px; overflow: hidden;
+}
+.file-header {
+    padding: 10px 12px; font-size: 13px; font-weight: 600;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    cursor: pointer; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+.file-header:active { background: rgba(255,255,255,.03); }
+.file-header .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.file-header .fmeta { display: flex; gap: 6px; align-items: center; margin-left: 8px; flex-shrink: 0; }
+.file-header .fstat { font-size: 11px; font-weight: 500; }
+.file-header .fstat-add { color: var(--add); }
+.file-header .fstat-del { color: var(--del); }
+.chevron { transition: transform .2s; font-size: 10px; color: var(--dim); margin-left: 6px; }
+.chevron.collapsed { transform: rotate(-90deg); }
+.file-body { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.file-body.collapsed { display: none; }
+
+.diff-table {
+    width: 100%; border-collapse: collapse;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 12px; line-height: 1.6;
+}
+.diff-table td { padding: 0 8px; white-space: pre; vertical-align: top; }
+.ln {
+    width: 1px; color: var(--dim); text-align: right; padding: 0 6px;
+    user-select: none; -webkit-user-select: none; border-right: 1px solid var(--border);
+    font-size: 11px;
+}
+.line-add { background: var(--add-bg); }
+.line-add .lc { color: var(--add); }
+.line-del { background: var(--del-bg); }
+.line-del .lc { color: var(--del); }
+.line-hunk { background: var(--hunk-bg); }
+.line-hunk td { color: var(--hunk); font-style: italic; }
+.line-ctx .lc { color: var(--muted); }
+
+/* Action bar */
+.action-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--card); border-top: 1px solid var(--border);
+    padding: 12px 16px; display: flex; gap: 12px; z-index: 20;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+.action-bar button {
+    flex: 1; padding: 14px; border: none; border-radius: 10px;
+    font-size: 16px; font-weight: 700; cursor: pointer;
+    transition: opacity .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+}
+.action-bar button:active { opacity: .7; transform: scale(.97); }
+.btn-approve { background: var(--approve); color: #052e16; }
+.btn-reject { background: var(--reject); color: #fff; }
+
+/* Reject modal */
+.modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
+    z-index: 30; align-items: flex-end; justify-content: center;
+}
+.modal-overlay.active { display: flex; }
+.modal {
+    background: var(--card); border-radius: 16px 16px 0 0;
+    width: 100%; max-width: 480px; padding: 20px;
+    animation: slideUp .25s ease-out;
+}
+@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.modal h2 { font-size: 16px; margin-bottom: 12px; }
+.modal textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-size: 14px; padding: 12px;
+    resize: vertical; min-height: 80px; font-family: inherit; outline: none;
+}
+.modal textarea:focus { border-color: var(--accent); }
+.modal-actions { display: flex; gap: 8px; margin-top: 12px; }
+.modal-actions button {
+    flex: 1; padding: 12px; border: none; border-radius: 8px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.btn-cancel { background: var(--border); color: var(--text); }
+.btn-confirm-reject { background: var(--reject); color: #fff; }
+
+/* Result overlay */
+.result-overlay {
+    display: none; position: fixed; inset: 0; z-index: 40;
+    align-items: center; justify-content: center; flex-direction: column;
+    backdrop-filter: blur(8px);
+}
+.result-overlay.active { display: flex; animation: fadeIn .3s; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.result-overlay.approved { background: rgba(34,197,94,.12); }
+.result-overlay.rejected { background: rgba(239,68,68,.12); }
+.result-icon { font-size: 72px; margin-bottom: 16px; }
+.result-text { font-size: 28px; font-weight: 700; }
+.result-sub { font-size: 14px; color: var(--muted); margin-top: 8px; }
+
+/* Resolved banner */
+.resolved-banner {
+    padding: 14px 16px; text-align: center; font-weight: 600; font-size: 14px;
+}
+.resolved-banner.approved { background: rgba(34,197,94,.08); color: var(--approve); }
+.resolved-banner.rejected { background: rgba(239,68,68,.08); color: var(--reject); }
+.resolved-banner .reject-comment { font-weight: 400; color: var(--muted); margin-top: 4px; font-size: 13px; }
+
+/* Loading / empty */
+.loading { text-align: center; padding: 60px 20px; color: var(--muted); }
+.spinner {
+    width: 28px; height: 28px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .8s linear infinite; margin: 0 auto 12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.empty { text-align: center; padding: 40px; color: var(--dim); }
+.error { color: var(--del); }
+</style>
+</head>
+<body>
+
+<div id="loading" class="loading">
+    <div class="spinner"></div>
+    Loading review...
+</div>
+
+<div id="app" style="display:none">
+    <div class="header">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <h1 id="desc">Code Review</h1>
+            <span id="badge" class="badge"></span>
+        </div>
+        <div class="meta">
+            <span id="branch"></span>
+            <span id="time"></span>
+        </div>
+        <div class="stats-row" id="stats"></div>
+    </div>
+
+    <div id="banner"></div>
+    <div class="diff-container" id="diff"></div>
+
+    <div class="action-bar" id="actions" style="display:none">
+        <button class="btn-approve" onclick="doApprove()">Approve</button>
+        <button class="btn-reject" onclick="showReject()">Reject</button>
+    </div>
+</div>
+
+<div class="modal-overlay" id="reject-modal" onclick="if(event.target===this)hideReject()">
+    <div class="modal">
+        <h2>Reject with comment</h2>
+        <textarea id="reject-comment" placeholder="What needs to change? (optional)"></textarea>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="hideReject()">Cancel</button>
+            <button class="btn-confirm-reject" onclick="doReject()">Reject</button>
+        </div>
+    </div>
+</div>
+
+<div class="result-overlay" id="result">
+    <div class="result-icon" id="result-icon"></div>
+    <div class="result-text" id="result-text"></div>
+    <div class="result-sub" id="result-sub"></div>
+</div>
+
+<script>
+const RID = location.pathname.split('/review/')[1];
+const API = location.origin + location.pathname.split('/review/')[0];
+
+async function load() {
+    try {
+        const r = await fetch(API + '/api/review/' + RID);
+        if (!r.ok) throw new Error(r.status === 404 ? 'Review not found' : 'Load failed');
+        render(await r.json());
+    } catch (e) {
+        $('loading').innerHTML = '<p class="error">' + esc(e.message) + '</p>';
+    }
+}
+
+function render(d) {
+    $('loading').style.display = 'none';
+    $('app').style.display = '';
+
+    $('desc').textContent = d.description || 'Code Review';
+    $('badge').textContent = d.status.toUpperCase();
+    $('badge').className = 'badge badge-' + d.status;
+
+    if (d.branch) $('branch').textContent = d.branch;
+    $('time').textContent = fmtTime(d.created_at);
+
+    // Stats
+    const files = d.files_changed ? d.files_changed.split(',').filter(Boolean) : [];
+    const parts = (d.stats || '+0/-0').split('/');
+    $('stats').innerHTML =
+        '<span class="stat stat-files">' + files.length + ' file' + (files.length !== 1 ? 's' : '') + '</span>' +
+        '<span class="stat stat-add">' + parts[0] + '</span>' +
+        '<span class="stat stat-del">' + parts[1] + '</span>';
+
+    // Resolved banner
+    if (d.status !== 'pending') {
+        const b = $('banner');
+        b.className = 'resolved-banner ' + d.status;
+        if (d.status === 'approved') {
+            b.textContent = 'APPROVED';
+        } else {
+            b.innerHTML = 'REJECTED' + (d.reject_comment
+                ? '<div class="reject-comment">' + esc(d.reject_comment) + '</div>' : '');
+        }
+    }
+
+    // Diff
+    renderDiff(d.diff_text || '');
+
+    // Action bar for pending only
+    if (d.status === 'pending') $('actions').style.display = '';
+}
+
+function renderDiff(raw) {
+    const el = $('diff');
+    if (!raw.trim()) { el.innerHTML = '<div class="empty">No diff content</div>'; return; }
+
+    const files = parseDiff(raw);
+    const manyFiles = files.length > 8;
+
+    files.forEach(function(file, i) {
+        const sec = document.createElement('div');
+        sec.className = 'file-section';
+
+        // Header with per-file stats
+        const hdr = document.createElement('div');
+        hdr.className = 'file-header';
+        const adds = file.lines.filter(function(l) { return l.t === '+'; }).length;
+        const dels = file.lines.filter(function(l) { return l.t === '-'; }).length;
+        hdr.innerHTML = '<span class="fname">' + esc(file.name) + '</span>' +
+            '<span class="fmeta">' +
+            (adds ? '<span class="fstat fstat-add">+' + adds + '</span>' : '') +
+            (dels ? '<span class="fstat fstat-del">-' + dels + '</span>' : '') +
+            '<span class="chevron' + (manyFiles ? ' collapsed' : '') + '">&#9660;</span></span>';
+
+        const body = document.createElement('div');
+        body.className = 'file-body' + (manyFiles ? ' collapsed' : '');
+
+        hdr.onclick = function() {
+            body.classList.toggle('collapsed');
+            hdr.querySelector('.chevron').classList.toggle('collapsed');
+        };
+
+        // Build diff table
+        const tbl = document.createElement('table');
+        tbl.className = 'diff-table';
+        var oln = 0, nln = 0;
+
+        file.lines.forEach(function(line) {
+            var tr = document.createElement('tr');
+            if (line.t === '@@') {
+                var m = line.x.match(/@@ -(\d+)(?:,\d+)? \+(\d+)/);
+                if (m) { oln = +m[1] - 1; nln = +m[2] - 1; }
+                tr.className = 'line-hunk';
+                tr.innerHTML = '<td class="ln"></td><td class="ln"></td><td class="lc">' + esc(line.x) + '</td>';
+            } else if (line.t === '+') {
+                nln++;
+                tr.className = 'line-add';
+                tr.innerHTML = '<td class="ln"></td><td class="ln">' + nln + '</td><td class="lc">' + esc(line.x) + '</td>';
+            } else if (line.t === '-') {
+                oln++;
+                tr.className = 'line-del';
+                tr.innerHTML = '<td class="ln">' + oln + '</td><td class="ln"></td><td class="lc">' + esc(line.x) + '</td>';
+            } else {
+                oln++; nln++;
+                tr.className = 'line-ctx';
+                tr.innerHTML = '<td class="ln">' + oln + '</td><td class="ln">' + nln + '</td><td class="lc">' + esc(line.x) + '</td>';
+            }
+            tbl.appendChild(tr);
+        });
+
+        body.appendChild(tbl);
+        sec.appendChild(hdr);
+        sec.appendChild(body);
+        el.appendChild(sec);
+    });
+}
+
+function parseDiff(text) {
+    var files = [];
+    var chunks = text.split(/^diff --git /m);
+    chunks.forEach(function(chunk) {
+        if (!chunk.trim()) return;
+        var lines = chunk.split('\n');
+        var name = '';
+        var m = lines[0].match(/a\/(.+?) b\//);
+        if (m) name = m[1]; else name = lines[0].split(' ')[0];
+
+        var dlines = [];
+        var inHunk = false;
+        lines.forEach(function(ln) {
+            if (ln.startsWith('@@')) {
+                inHunk = true;
+                dlines.push({ t: '@@', x: ln });
+            } else if (inHunk) {
+                if (ln.startsWith('+'))      dlines.push({ t: '+', x: ln.substring(1) });
+                else if (ln.startsWith('-')) dlines.push({ t: '-', x: ln.substring(1) });
+                else if (ln.startsWith(' ')) dlines.push({ t: ' ', x: ln.substring(1) });
+                else if (ln.startsWith('\\')) dlines.push({ t: ' ', x: ln });
+            }
+        });
+        if (dlines.length) files.push({ name: name, lines: dlines });
+    });
+    return files;
+}
+
+// --- Actions ---
+async function doApprove() {
+    if (!confirm('Approve these changes?')) return;
+    try {
+        var r = await fetch(API + '/api/review/' + RID + '/approve', { method: 'POST' });
+        if (!r.ok) { var e = await r.json(); alert(e.detail || 'Failed'); return; }
+        showResult('approved');
+    } catch (e) { alert('Network error'); }
+}
+
+function showReject() {
+    $('reject-modal').classList.add('active');
+    $('reject-comment').focus();
+}
+function hideReject() { $('reject-modal').classList.remove('active'); }
+
+async function doReject() {
+    var comment = $('reject-comment').value;
+    try {
+        var r = await fetch(API + '/api/review/' + RID + '/reject', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comment: comment })
+        });
+        if (!r.ok) { var e = await r.json(); alert(e.detail || 'Failed'); return; }
+        hideReject();
+        showResult('rejected');
+    } catch (e) { alert('Network error'); }
+}
+
+function showResult(status) {
+    var el = $('result');
+    el.className = 'result-overlay active ' + status;
+    $('result-icon').textContent = status === 'approved' ? '\u2713' : '\u2717';
+    $('result-text').textContent = status === 'approved' ? 'Approved' : 'Rejected';
+    $('result-sub').textContent = status === 'approved' ? 'Changes will be merged' : 'Changes will not be applied';
+    $('actions').style.display = 'none';
+    $('badge').textContent = status.toUpperCase();
+    $('badge').className = 'badge badge-' + status;
+}
+
+// --- Util ---
+function $(id) { return document.getElementById(id); }
+function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function fmtTime(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleString('en-US', {
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+    });
+}
+
+load();
+</script>
+</body>
+</html>

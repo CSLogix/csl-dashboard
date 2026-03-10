@@ -36,3 +36,4 @@ csl_gmail_token.json
 csl-credentials.json
 credentials.json
 token.json
+*.db
