@@ -3070,6 +3070,10 @@ async def api_tracking_summary():
             val = stop_times.get(k) or ""
             if "BEHIND" in val.upper():
                 behind = True
+        # Also check schedule_alert text from native MP protocol
+        _sa_text = (entry.get("schedule_alert") or "").upper()
+        if "BEHIND" in _sa_text or "PAST APPOINTMENT" in _sa_text:
+            behind = True
         _ts_disp, _ts_detail = _classify_mp_display_status(entry)
         result[efj] = {
             "behindSchedule": behind,
@@ -8459,6 +8463,15 @@ def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload
             break
 
     # Fallback: look up by container field in Postgres
+    # Gap C: suffix-stripped fallback for _update_tracking_cache_webhook
+    if not matched_key and "-" in load_ref:
+        _base_ref = load_ref.rsplit("-", 1)[0]
+        for key, entry in cache.items():
+            if _base_ref in (entry.get("efj", ""), entry.get("load_num", "") or "",
+                             entry.get("mp_load_id", "") or "", key):
+                matched_key = key
+                break
+
     if not matched_key:
         try:
             with db.get_cursor() as cur:
@@ -8692,6 +8705,14 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
                     load_ref == mp_load_id or load_ref == key):
                 matched_key = key
                 break
+        # Gap C: suffix-stripped fallback (LAX1260308015-1 -> LAX1260308015)
+        if not matched_key and "-" in load_ref:
+            _base_ref = load_ref.rsplit("-", 1)[0]
+            for key, entry in cache.items():
+                if _base_ref in (entry.get("efj", ""), entry.get("load_num", ""),
+                                 entry.get("mp_load_id", ""), key):
+                    matched_key = key
+                    break
 
         if matched_key:
             entry = cache[matched_key]
@@ -8704,6 +8725,10 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
             entry["last_ping_at"] = now
             if not entry.get("last_event_at"):
                 entry["last_event_at"] = now
+            # Gap D: Initialize status if blank — pings prove tracking is active
+            if not (entry.get("status") or "").strip():
+                entry["status"] = "Tracking Started"
+                log.info(f"Webhook: auto-set Tracking Started for {matched_key} (ping received)")
             tmp_path = TRACKING_CACHE_FILE + ".tmp"
             with open(tmp_path, "w") as f:
                 json.dump(cache, f, indent=2)
@@ -8835,6 +8860,14 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
                 if load_ref in (_efj, _ln, _ml, _sk):
                     _sc_matched = _sk
                     break
+            # Gap C: suffix-stripped fallback
+            if not _sc_matched and "-" in load_ref:
+                _base_ref = load_ref.rsplit("-", 1)[0]
+                for _sk, _sv in _sc_cache.items():
+                    if _base_ref in (_sv.get("efj", ""), _sv.get("load_num", ""),
+                                     _sv.get("mp_load_id", ""), _sk):
+                        _sc_matched = _sk
+                        break
 
             if _sc_matched:
                 _sc_entry = _sc_cache[_sc_matched]
@@ -8919,6 +8952,14 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
                                     _sav.get("mp_load_id", ""), _sak):
                         _sa_key = _sak
                         break
+                # Gap C: suffix-stripped fallback
+                if not _sa_key and "-" in load_ref:
+                    _base_ref = load_ref.rsplit("-", 1)[0]
+                    for _sak, _sav in _sa_cache.items():
+                        if _base_ref in (_sav.get("efj", ""), _sav.get("load_num", ""),
+                                         _sav.get("mp_load_id", ""), _sak):
+                            _sa_key = _sak
+                            break
                 if _sa_key:
                     _sa_entry = _sa_cache[_sa_key]
                     _old_alert = _sa_entry.get("schedule_alert", "")
@@ -8928,6 +8969,15 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
                         _sa_entry["distance_to_stop"] = distance_str
                         _sa_entry["eta_to_stop"] = params.get("EtaToStop", "")
                         _sa_entry["schedule_stop_type"] = stop_type
+                        # Gap B: Set cant_make_it from ScheduleAlertCode=3
+                        _alert_code = str(params.get("ScheduleAlertCode", "")).strip()
+                        if _alert_code == "3":
+                            _sa_entry["cant_make_it"] = True
+                            log.info(f"Webhook: cant_make_it=True for {_sa_key} (code=3)")
+                        elif _alert_code in ("1", "2") and _sa_entry.get("cant_make_it"):
+                            # Clear cant_make_it if driver recovered (now ahead/on-time)
+                            _sa_entry["cant_make_it"] = None
+                            log.info(f"Webhook: cant_make_it cleared for {_sa_key} (code={_alert_code})")
                         tmp_path = TRACKING_CACHE_FILE + ".tmp"
                         with open(tmp_path, "w") as f:
                             json.dump(_sa_cache, f, indent=2)
