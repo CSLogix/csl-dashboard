@@ -56,6 +56,12 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ## Recent Dashboard Changes (Deployed)
 
+### Terminal Ground Truth Panel — Mar 10, 2026
+- **Both LoadSlideOver instances** (DispatchView ~line 4275, RepDashboardView ~line 5563) upgraded from minimal "Terminal Status" badge to full Ground Truth card
+- **Red card** (`rgba(239,68,68,0.08)`) when `t.hasHolds` is true; **blue card** (`rgba(56,189,248,0.08)`) when clear
+- Displays raw notes string in JetBrains Mono + vessel line; only renders when `parseTerminalNotes()` returns truthy (requires `Avail:XX | ...` format from NOLA scraper)
+- Commit `11d51c2` in dashboard repo; deployed via SCP to `/root/csl-bot/csl-doc-tracker/static/dist/`
+
 ### Quote Extractor v2 + 30-Day Warning — Mar 10, 2026
 - **quote_extractor.py upgraded**: Basic Haiku → Sonnet 4.6 with Universal Hub Normalization (40+ terminals, 7 FIRMS codes, city centroids), LoadMatch screenshot intelligence (BASE/FSC/TOTAL, market floor/avg/ceiling), carrier email logic
 - **30-day aged data warning**: Rate Intel panel shows ⚠ on individual quotes >30 days old + global "Market data may be aged" banner when all data stale
