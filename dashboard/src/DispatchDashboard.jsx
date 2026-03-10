@@ -77,7 +77,7 @@ function mapShipment(s, idx) {
     pickupDate: s.pickup || "",
     deliveryDate: s.delivery || "",
     macropointUrl: s.container_url || null,
-    driver: null,
+    driver: s.driver || null,
     driverPhone: s.driver_phone || null,
     carrierEmail: s.carrier_email || null,
     trailerNumber: s.trailer || null,
@@ -513,6 +513,26 @@ function formatDDMM(dateStr) {
   // "MM/DD" already
   if (/^\d{2}\/\d{2}$/.test(s)) return s;
   return s.slice(0, 5);
+}
+
+// ─── Format raw date+time for slide-over display → "M/D HH:MM" military ───
+function fmtDateDisplay(s) {
+  if (!s) return "—";
+  // Normalize: insert space between year and time if missing ("3/9/202618:00" → "3/9/2026 18:00")
+  const norm = s.replace(/(\d{4})(\d{1,2}:)/, '$1 $2').trim();
+  // Try to parse "M/D/YYYY HH:MM" or "YYYY-MM-DD HH:MM" variants
+  let m = norm.match(/(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\s+(\d{1,2}:\d{2})/);
+  if (m) return `${m[1]}/${m[2]} ${m[3].padStart(5, '0')}`;
+  // "YYYY-MM-DD HH:MM"
+  m = norm.match(/\d{4}-(\d{2})-(\d{2})\s+(\d{1,2}:\d{2})/);
+  if (m) return `${parseInt(m[1])}/${parseInt(m[2])} ${m[3].padStart(5, '0')}`;
+  // "M/D/YYYY" no time
+  m = norm.match(/^(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?$/);
+  if (m) return `${m[1]}/${m[2]}`;
+  // "M/D HH:MM" already formatted
+  m = norm.match(/^(\d{1,2})\/(\d{1,2})\s+(\d{1,2}:\d{2})/);
+  if (m) return `${m[1]}/${m[2]} ${m[3].padStart(5, '0')}`;
+  return norm;
 }
 
 // ─── Parse 4-digit MMDD input → "YYYY-MM-DD" ───
@@ -4106,8 +4126,8 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                 { label: "ETA", field: "eta", val: selectedShipment.eta },
                 { label: "LFD", field: "lfd", val: selectedShipment.lfd },
               ] : []),
-              { label: "Pickup", field: "pickupDate", val: selectedShipment.pickupDate },
-              { label: "Delivery", field: "deliveryDate", val: selectedShipment.deliveryDate },
+              { label: "Pickup", field: "pickupDate", val: fmtDateDisplay(selectedShipment.pickupDate) },
+              { label: "Delivery", field: "deliveryDate", val: fmtDateDisplay(selectedShipment.deliveryDate) },
               // Driver contact fields (inline with shipment details)
               ...((selectedShipment.moveType === "FTL" || selectedShipment.macropointUrl) ? [
                 { label: "Driver", dField: "driverName", val: driverInfo.driverName, placeholder: "Add name", isDriver: true },
@@ -4176,7 +4196,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
             <textarea
               value={shipments.find(s => s.id === selectedShipment.id)?.notes || ""}
               onChange={e => { const v = e.target.value; setShipments(prev => prev.map(s => s.id === selectedShipment.id ? { ...s, notes: v } : s)); }}
-              onBlur={() => addSheetLog(`Notes updated | ${selectedShipment.loadNumber}`)}
+              onBlur={(e) => handleMetadataUpdate(selectedShipment, "notes", e.target.value)}
               placeholder="Add notes..."
               style={{ width: "100%", minHeight: 50, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "#F0F2F5", padding: 10, fontSize: 11, resize: "vertical", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
           </div>
@@ -5381,8 +5401,8 @@ function DispatchView({
                     { label: "ETA", field: "eta", val: selectedShipment.eta },
                     { label: "LFD", field: "lfd", val: selectedShipment.lfd },
                   ] : []),
-                  { label: "Pickup", field: "pickupDate", val: selectedShipment.pickupDate },
-                  { label: "Delivery", field: "deliveryDate", val: selectedShipment.deliveryDate },
+                  { label: "Pickup", field: "pickupDate", val: fmtDateDisplay(selectedShipment.pickupDate) },
+                  { label: "Delivery", field: "deliveryDate", val: fmtDateDisplay(selectedShipment.deliveryDate) },
                   // Driver contact fields merged inline
                   ...((selectedShipment.moveType === "FTL" || selectedShipment.macropointUrl) ? [
                     { label: "Driver", dField: "driverName", val: driverInfo.driverName, placeholder: "Add name", isDriver: true },
@@ -5445,7 +5465,7 @@ function DispatchView({
                 <textarea
                   value={shipments.find(s => s.id === selectedShipment.id)?.notes || ""}
                   onChange={e => { const v = e.target.value; setShipments(prev => prev.map(s => s.id === selectedShipment.id ? { ...s, notes: v } : s)); }}
-                  onBlur={() => addSheetLog(`Notes updated | ${selectedShipment.loadNumber}`)}
+                  onBlur={(e) => handleMetadataUpdate(selectedShipment, "notes", e.target.value)}
                   placeholder="Add notes..."
                   style={{ width: "100%", minHeight: 50, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "#F0F2F5", padding: 10, fontSize: 11, resize: "vertical", outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
               </div>

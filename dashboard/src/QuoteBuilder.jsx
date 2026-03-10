@@ -182,7 +182,7 @@ function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, te
 
 const STATUS_FILTERS = [
   { key: null, label: "All" },
-  { key: "draft", label: "Drafts" },
+  { key: "draft", label: "Saved" },
   { key: "sent", label: "Sent" },
   { key: "accepted", label: "Won" },
   { key: "lost", label: "Lost" },
@@ -229,7 +229,9 @@ function _sortQuotes(quotes, sortKey) {
 
 const PAGE_SIZE = 25;
 
-function HistoryTab({ onLoadQuote }) {
+const DRAY_MOVE_TYPES = ["Dray", "Dray+Transload", "OTR", "Transload"];
+
+function HistoryTab({ onLoadQuote, moveTypes = DRAY_MOVE_TYPES }) {
   const [quotes, setQuotes] = useState([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState(null);
@@ -255,10 +257,11 @@ function HistoryTab({ onLoadQuote }) {
     const params = new URLSearchParams({ limit: "200", offset: "0" });
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (statusFilter) params.set("status", statusFilter);
+    if (moveTypes && moveTypes.length) params.set("move_types", moveTypes.join(","));
     apiFetch(`/api/quotes?${params}`).then(r => r.json()).then(data => {
       setQuotes(data.quotes || []);
     }).catch(() => {}).finally(() => setLoading(false));
-  }, [debouncedSearch, statusFilter]);
+  }, [debouncedSearch, statusFilter, moveTypes]);
 
   useEffect(() => { fetchQuotes(); }, [fetchQuotes]);
 
@@ -505,9 +508,10 @@ export default function QuoteBuilder() {
   }, [route.pod, route.finalDelivery]);
 
   // ── Rate Intelligence — auto-search when lane is entered ──
-  const [rateIntel, setRateIntel] = useState(null); // { matches, carriers, stats }
+  const [rateIntel, setRateIntel] = useState(null); // { lane_groups, matches, carriers, stats }
   const [rateIntelLoading, setRateIntelLoading] = useState(false);
   const [rateIntelOpen, setRateIntelOpen] = useState(false);
+  const [rateIntelGroups, setRateIntelGroups] = useState(new Set([0]));
   const rateIntelTimer = useRef(null);
   useEffect(() => {
     if (!route.pod && !route.finalDelivery) { setRateIntel(null); return; }
@@ -522,7 +526,8 @@ export default function QuoteBuilder() {
         if (res.ok) {
           const data = await res.json();
           setRateIntel(data);
-          if (data.matches?.length > 0 || data.carriers?.length > 0) setRateIntelOpen(true);
+          setRateIntelGroups(new Set([0]));
+          if (data.lane_groups?.length > 0 || data.matches?.length > 0 || data.carriers?.length > 0) setRateIntelOpen(true);
         }
       } catch { /* lane search not available */ }
       finally { setRateIntelLoading(false); }
@@ -1053,22 +1058,76 @@ export default function QuoteBuilder() {
             {(rateIntel || rateIntelLoading) && (
               <div style={{ marginTop: 6, marginBottom: 2, border: "1px solid rgba(0,212,170,0.15)", borderRadius: 10, overflow: "hidden" }}>
                 <button onClick={() => setRateIntelOpen(o => !o)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(0,212,170,0.05)", border: "none", cursor: "pointer", color: "#00D4AA", fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                  <span>{rateIntelLoading ? "Searching rates..." : `Rate Intel${rateIntel?.stats?.count ? ` — ${rateIntel.stats.count} quotes` : ""}`}</span>
+                  <span>{rateIntelLoading ? "Searching rates..." : `Rate Intel${rateIntel?.lane_groups?.length ? ` — ${rateIntel.lane_groups.length} lane${rateIntel.lane_groups.length > 1 ? "s" : ""}, ${rateIntel.stats?.count || 0} quotes` : rateIntel?.stats?.count ? ` — ${rateIntel.stats.count} quotes` : ""}`}</span>
                   <span style={{ fontSize: 14, transition: "transform 0.15s", transform: rateIntelOpen ? "rotate(180deg)" : "rotate(0)" }}>&#9662;</span>
                 </button>
                 {rateIntelOpen && rateIntel && (
                   <div style={{ padding: "8px 12px 10px" }}>
                     {/* Stats bar */}
                     {rateIntel.stats?.count > 0 && (
-                      <div style={{ display: "flex", gap: 16, marginBottom: 8, fontSize: 11 }}>
+                      <div style={{ display: "flex", gap: 12, marginBottom: 8, fontSize: 11, flexWrap: "wrap", alignItems: "center" }}>
                         <div><span style={{ color: "#5A6478" }}>Floor </span><span style={{ color: "#22c55e", fontWeight: 700 }}>{fmt(rateIntel.stats.floor)}</span></div>
                         <div><span style={{ color: "#5A6478" }}>Avg </span><span style={{ color: "#F0F2F5", fontWeight: 700 }}>{fmt(rateIntel.stats.avg)}</span></div>
                         <div><span style={{ color: "#5A6478" }}>Ceiling </span><span style={{ color: "#f59e0b", fontWeight: 700 }}>{fmt(rateIntel.stats.ceiling)}</span></div>
                         <div><span style={{ color: "#5A6478" }}>Carriers </span><span style={{ color: "#8B95A8", fontWeight: 600 }}>{rateIntel.stats.total_carriers}</span></div>
+                        {rateIntel.stats?.sources && (
+                          <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
+                            {rateIntel.stats.sources.email > 0 && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: "rgba(0,212,170,0.12)", color: "#00D4AA", fontWeight: 700 }}>EMAIL {rateIntel.stats.sources.email}</span>}
+                            {rateIntel.stats.sources.import > 0 && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: "rgba(139,92,246,0.12)", color: "#8b5cf6", fontWeight: 700 }}>IMPORT {rateIntel.stats.sources.import}</span>}
+                            {rateIntel.stats.sources.quote > 0 && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: "rgba(245,158,11,0.12)", color: "#f59e0b", fontWeight: 700 }}>QUOTE {rateIntel.stats.sources.quote}</span>}
+                          </div>
+                        )}
                       </div>
                     )}
-                    {/* Carrier rate rows — click to autofill */}
-                    {rateIntel.matches?.length > 0 ? (
+                    {/* Lane groups accordion (unified API) */}
+                    {rateIntel.lane_groups?.length > 0 ? (
+                      <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                        {rateIntel.lane_groups.map((grp, gi) => {
+                          const isOpen = rateIntelGroups.has(gi);
+                          return (
+                            <div key={gi} style={{ borderRadius: 6, marginBottom: 3, overflow: "hidden", border: "1px solid rgba(255,255,255,0.05)" }}>
+                              <button onClick={() => setRateIntelGroups(prev => { const s = new Set(prev); s.has(gi) ? s.delete(gi) : s.add(gi); return s; })}
+                                style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 8px", background: "rgba(255,255,255,0.03)", border: "none", cursor: "pointer", fontSize: 10.5 }}>
+                                <div style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
+                                  <span style={{ display: "inline-block", transform: isOpen ? "rotate(90deg)" : "rotate(0)", transition: "transform 0.12s", color: "#5A6478", fontSize: 9 }}>▶</span>
+                                  <span style={{ color: "#C8CED8", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 150 }}>{grp.lane}</span>
+                                  <span style={{ color: "#5A6478", fontSize: 9, flexShrink: 0 }}>{grp.count}q</span>
+                                </div>
+                                <div style={{ display: "flex", gap: 3, alignItems: "center", flexShrink: 0 }}>
+                                  {grp.sources?.email > 0 && <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 3, background: "rgba(0,212,170,0.1)", color: "#00D4AA" }}>E{grp.sources.email}</span>}
+                                  {grp.sources?.import > 0 && <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 3, background: "rgba(139,92,246,0.1)", color: "#8b5cf6" }}>I{grp.sources.import}</span>}
+                                  {grp.sources?.quote > 0 && <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 3, background: "rgba(245,158,11,0.1)", color: "#f59e0b" }}>Q{grp.sources.quote}</span>}
+                                  <span style={{ color: "#00D4AA", fontWeight: 700, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", marginLeft: 2 }}>{fmt(grp.floor)}–{fmt(grp.ceiling)}</span>
+                                </div>
+                              </button>
+                              {isOpen && (
+                                <div style={{ background: "rgba(0,0,0,0.15)" }}>
+                                  {grp.quotes.map((q, qi) => (
+                                    <div key={qi} onClick={() => { setCarrierName(q.carrier); if (q.rate) setLinehaul([{ description: `${grp.lane || "Linehaul"}`, rate: String(q.rate), section: defaultSection(route.shipmentType) }]); }}
+                                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 8px 4px 20px", cursor: "pointer", fontSize: 10.5, transition: "background 0.1s" }}
+                                      onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}
+                                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                      <div style={{ display: "flex", gap: 5, alignItems: "center", minWidth: 0 }}>
+                                        <span style={{ color: "#F0F2F5", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 120 }}>{q.carrier}</span>
+                                        {q.source === "email" && <span style={{ fontSize: 8, padding: "1px 3px", borderRadius: 3, background: "rgba(0,212,170,0.08)", color: "#00D4AA" }}>EMAIL</span>}
+                                        {q.source === "import" && <span style={{ fontSize: 8, padding: "1px 3px", borderRadius: 3, background: "rgba(139,92,246,0.08)", color: "#8b5cf6" }}>IMPORT</span>}
+                                        {q.source === "quote" && <span style={{ fontSize: 8, padding: "1px 3px", borderRadius: 3, background: "rgba(245,158,11,0.08)", color: "#f59e0b" }}>QUOTE</span>}
+                                      </div>
+                                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+                                        {q.rate ? <span style={{ color: "#00D4AA", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{fmt(q.rate)}</span> : <span style={{ color: "#3D4557" }}>—</span>}
+                                        {q.date && <span style={{ color: "#3D4557", fontSize: 9 }}>{String(q.date).slice(0, 10)}</span>}
+                                        {q.status === "accepted" && <span style={{ color: "#22c55e", fontSize: 9, fontWeight: 700 }}>WON</span>}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : rateIntel.matches?.length > 0 ? (
+                      /* Fallback: flat list */
                       <div style={{ maxHeight: 160, overflowY: "auto" }}>
                         {rateIntel.matches.slice(0, 10).map((m, i) => (
                           <div key={m.id || i} onClick={() => { setCarrierName(m.carrier); if (m.rate) setLinehaul([{ description: `${m.lane || "Linehaul"}`, rate: String(m.rate), section: defaultSection(route.shipmentType) }]); }}
@@ -1154,7 +1213,7 @@ export default function QuoteBuilder() {
               <button onClick={() => handleSave("draft")} disabled={saving}
                 style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 12.5, cursor: "pointer",
                   background: "linear-gradient(135deg, #00c853, #00b8d4)", color: "#fff", opacity: saving ? 0.6 : 1 }}>
-                {saving ? "Saving..." : editingId ? "Update Quote" : "Save Draft"}
+                {saving ? "Saving..." : editingId ? "Update Quote" : "Save Quote"}
               </button>
               <button onClick={handleCopyToClipboard}
                 style={{ padding: "10px 16px", borderRadius: 8, border: "1px solid rgba(0,212,170,0.3)", background: "rgba(0,212,170,0.08)", color: "#00D4AA", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>
