@@ -53,11 +53,13 @@ CSL_TEAM_SENDERS = re.compile(
 )
 
 KNOWN_CUSTOMER_SENDERS = re.compile(
-    r"dsv\.com|dhl\.com|kripke|allround|cadi|iwsgroup|maogroup|eshipping"
+    r"dsv\.com|dhl\.com|kripke|allround|cadi|iwsgroup|maoinc|maogroup|eshipping"
     r"|mgfusa|rose.?int|boviet|tolead|mamata|sutton|tanera|meiko|kishco"
-    r"|sei.?acq|cnl",
+    r"|sei.?acq|cnl|manitoulin|tcr|texas.?int|md.?metal|usha",
     re.IGNORECASE,
 )
+
+
 
 KNOWN_CARRIER_SENDERS = re.compile(
     r"xpo\.com|jbhunt|schneider|knight.?trans|werner\.com|heartland"
@@ -68,13 +70,34 @@ KNOWN_CARRIER_SENDERS = re.compile(
 )
 
 CUSTOMER_QUOTE_LANGUAGE = re.compile(
-    r"(can\s+I|may\s+I|could\s+(you|we)|please)\s+(get|have|receive|send).*(quote|rate|pricing)"
-    r"|quote.*(below|attached|following)"
-    r"|(20|40)\s*(?:ft|foot|'|hc|gp|st)"
-    r"|port\s+of|rail\s+ramp|intermodal\s+ramp|chassis"
-    r"|memphis.*rail|savannah.*port|norfolk|newark|los\s+angeles.*port",
+    # Polite rate request verbs (broader match)
+    r"(can\s+I|may\s+I|could\s+(you|we)|please)\s+(get|have|receive|send|quote|provide).*(quote|rate|pricing|estimate)"
+    r"|please\s+(send|provide|quote).*(?:rate|quote|dray|pricing|trucking|crossdock|inland)"
+    r"|quote\s+(your\s+best|us|me|the\s+below|below|attached|following)"
+    # Container sizes (20/40/45/53ft + HC/GP/ST variants)
+    r"|(20|40|45|53)\s*(?:ft|foot|'|hc|gp|st|ot|fr|rf)"
+    r"|\d+\s*[x\xd7]\s*(?:20|40|45|53)\s*(?:'|ft|hc|gp|st|ot|fr|rf)?"
+    # Port / ramp / intermodal references
+    r"|port\s+of|rail\s+ramp|intermodal\s+ramp"
+    r"|memphis.*rail|savannah.*port|norfolk|newark|los\s+angeles.*port"
+    # Service types that indicate a quote request
+    r"|(?:send|need|quote).*(?:dray|cross.?dock|transload|stripping|trucking)"
+    r"|(?:dray|cross.?dock|transload|stripping).*(?:quote|rate|pricing)"
+    r"|inland\s+rate|dray.*(?:and|\+|,)\s*(?:cross.?dock|delivery|trucking)"
+    # OOG / specialty equipment
+    r"|flat\s*rack|open\s*top|step\s*deck|flatrack|(?:40|20)\s*(?:'\s*)?(?:fr|ot|rf)"
+    r"|over.?(?:weight|dimension|height|width|size|gauge)|out\s*of\s*gauge|OOG"
+    # Cargo dimensions/weight (strong RFQ signal)
+    r"|\d{2,4}\s*(?:cm|mm|in|kg|lbs|kgs)\s*[x\xd7*]\s*\d{2,4}\s*(?:cm|mm|in|kg|lbs|kgs)?"
+    r"|gross\s+weight\s+\d|(?:\d[.,]\d{3})\s*(?:kg|lb|kgs|lbs)"
+    # Hazmat in quote context
+    r"|(?:IMO|hazmat|haz.?mat|DG\s+cargo|dangerous\s+goods|UN\s*\d{4}).*(?:quote|rate|dray|container|trucking)"
+    r"|(?:quote|rate|dray|container|trucking).*(?:IMO|hazmat|haz.?mat|DG\s+cargo)"
+    r"|\d+\s*(?:'|ft|hc)?\s*IMO",
     re.IGNORECASE,
 )
+
+
 
 CARRIER_RATE_LANGUAGE = re.compile(
     r"MC[#\s-]?\d{4,7}"
@@ -167,54 +190,115 @@ def classify_rate_doc(filename, sender, subject, body):
 
 def extract_rate_from_email(subject, body, sender, lane, email_type):
     """
-    Extract dollar rate and move type from carrier email for Rate IQ scoring.
-    Returns dict or None.
+    Extract rate data from carrier email using AI (Haiku) with regex fallback.
+    Returns dict with rate_amount, rate_unit, move_type, origin, dest, miles.
     """
     if email_type != "carrier_rate":
         return None
 
-    text = f"{subject} {body}"
-    result = {}
+    text = f"{subject} {body[:1500]}"
+    sender_name = sender.split("<")[0].strip().strip('"') if "<" in sender else sender
+    carrier_email = sender.split("<")[-1].replace(">", "").strip() if "<" in sender else sender
 
-    rate_match = re.search(r"\$\s*([\d,]+(?:\.\d{2})?)", text)
-    if rate_match:
-        try:
-            result["rate_amount"] = float(rate_match.group(1).replace(",", ""))
-        except ValueError:
-            pass
+    # AI extraction first
+    result = _ai_extract_rate(subject, body[:1200], sender_name)
 
-    if re.search(r"/\s*mi|per\s+mile|rpm|cpm", text, re.IGNORECASE):
-        result["rate_unit"] = "per_mile"
-    else:
-        result["rate_unit"] = "flat"
-
-    if re.search(r"(20|40)\s*(?:ft|foot|'|hc|gp|st)|drayage|chassis|port|rail\s+ramp", text, re.IGNORECASE):
-        result["move_type"] = "dray"
-    elif re.search(r"ltl|less.than.truck|pallet|cwt", text, re.IGNORECASE):
-        result["move_type"] = "ltl"
-    else:
-        result["move_type"] = "ftl"
-
-    lane_match = LANE_PATTERN.search(subject) or LANE_PATTERN.search(body or "")
-    if lane_match:
-        result["origin"] = lane_match.group(1).strip()
-        result["destination"] = lane_match.group(2).strip()
-        if lane_match.group(3):
+    # Regex fallback for missing fields
+    if not result.get("rate_amount"):
+        m = re.search(r"\$\s*([\d,]+(?:\.\d{2})?)", text)
+        if m:
             try:
-                result["miles"] = int(lane_match.group(3))
+                result["rate_amount"] = float(m.group(1).replace(",", ""))
             except ValueError:
                 pass
 
-    sender_name = sender.split("<")[0].strip().strip('"') if "<" in sender else sender
-    result["carrier_name"] = sender_name
-    result["carrier_email"] = sender.split("<")[-1].replace(">", "").strip() if "<" in sender else sender
+    if not result.get("rate_unit"):
+        result["rate_unit"] = "per_mile" if re.search(r"/\s*mi|per\s+mile|rpm|cpm", text, re.IGNORECASE) else "flat"
 
-    return result if "rate_amount" in result or lane else (result if result else None)
+    if not result.get("move_type"):
+        if re.search(r"(20|40)\s*(?:ft|foot|'|hc|gp|st)|drayage|chassis|port|rail\s+ramp", text, re.IGNORECASE):
+            result["move_type"] = "dray"
+        elif re.search(r"ltl|less.than.truck|pallet|cwt", text, re.IGNORECASE):
+            result["move_type"] = "ltl"
+        else:
+            result["move_type"] = "ftl"
+
+    if not result.get("origin") and not result.get("destination"):
+        lm = LANE_PATTERN.search(subject) or LANE_PATTERN.search(body or "")
+        if lm:
+            result["origin"] = lm.group(1).strip()
+            result["destination"] = lm.group(2).strip()
+            if lm.group(3):
+                try:
+                    result["miles"] = int(lm.group(3))
+                except ValueError:
+                    pass
+
+    result["carrier_name"] = result.get("carrier_name") or sender_name
+    result["carrier_email"] = carrier_email
+    return result if result.get("rate_amount") or result.get("origin") else None
 
 
-# ═══════════════════════════════════════════════════════════════
-# DB HELPERS
-# ═══════════════════════════════════════════════════════════════
+def _ai_extract_rate(subject, body, sender_name):
+    """Use Claude Haiku to extract rate fields from a carrier email. Returns dict."""
+    import json, os
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        env_path = "/root/csl-bot/.env"
+        if os.path.exists(env_path):
+            for line in open(env_path):
+                if line.startswith("ANTHROPIC_API_KEY="):
+                    api_key = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+    if not api_key:
+        return {}
+    prompt = f"""Extract freight rate data from this carrier email. Return ONLY valid JSON.
+
+FROM: {sender_name}
+SUBJECT: {subject}
+BODY: {body}
+
+{{
+  "rate_amount": <flat dollar amount as number, null if not found>,
+  "rate_unit": "<flat or per_mile>",
+  "move_type": "<dray or ftl or ltl>",
+  "origin": "<origin city/port or null>",
+  "destination": "<destination city/state or null>",
+  "miles": <integer or null>,
+  "carrier_name": "<company name from signature or null>"
+}}
+
+rate_amount = all-in or linehaul flat rate. If per-mile rate, set rate_unit=per_mile.
+move_type=dray if mentions port/chassis/drayage/container."""
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001", max_tokens=200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = resp.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        data = json.loads(text)
+        out = {}
+        if data.get("rate_amount") is not None:
+            try:
+                out["rate_amount"] = float(data["rate_amount"])
+            except (TypeError, ValueError):
+                pass
+        for f in ("rate_unit", "move_type", "origin", "destination", "carrier_name"):
+            if data.get(f):
+                out[f] = str(data[f]).strip()
+        if data.get("miles"):
+            try:
+                out["miles"] = int(data["miles"])
+            except (TypeError, ValueError):
+                pass
+        return out
+    except Exception as e:
+        log.debug("AI rate extraction failed: %s", e)
+        return {}
 
 def save_rate_quote(get_conn_fn, put_conn_fn, email_thread_id, efj, lane, rate_data, sent_at):
     """Save extracted rate quote to rate_quotes table."""
@@ -466,9 +550,22 @@ Respond with ONLY valid JSON (no markdown, no extra text):
   "summary": "<one-line operational summary, max 80 chars>"
 }}
 
+CUSTOMER_RATE indicators (classify as customer_rate, priority 4):
+- Customer/broker asking for dray, trucking, crossdock, transload, or inland rates
+- Container quantities (3x40HC, 1x20'STD), cargo dimensions/weights
+- OOG/specialty: flat rack, open top, step deck, overweight, hazmat/IMO
+- Service combos: "dray + crossdock + delivery", "stripping and trucking"
+- Port/ramp/intermodal references with quote language
+- Incoterms (FCA, FOB, CIF), commodity descriptions
+- "Please send rates", "can you quote", "need pricing for"
+
+CARRIER_RATE indicators (classify as carrier_rate):
+- MC#, truck availability, per-mile rates, "can cover", "have a truck"
+- Carrier domains offering capacity or responding to load posts
+
 Priority scale:
 5 = CRITICAL: detention/demurrage charges, customs hold, delivery failure, cargo damage
-4 = HIGH: rate quotes needing response, appointment changes, ETA changes, missing docs
+4 = HIGH: rate quotes needing response (BOTH customer and carrier), appointment changes, ETA changes, missing docs
 3 = NORMAL: routine updates, standard confirmations, POD received
 2 = LOW: informational, FYI, carrier newsletters
 1 = NOISE: marketing, spam, auto-replies, out-of-office"""

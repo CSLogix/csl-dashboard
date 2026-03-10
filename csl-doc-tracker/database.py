@@ -634,7 +634,7 @@ def get_quote(quote_id: int) -> Optional[dict]:
         return dict(row) if row else None
 
 
-def list_quotes(status: str = None, search: str = None, limit: int = 50, offset: int = 0) -> list:
+def list_quotes(status: str = None, search: str = None, move_types: list = None, limit: int = 50, offset: int = 0) -> list:
     with get_cursor() as cur:
         where_clauses = []
         params = []
@@ -647,6 +647,10 @@ def list_quotes(status: str = None, search: str = None, limit: int = 50, offset:
             )
             s = f"%{search}%"
             params.extend([s, s, s, s])
+        if move_types:
+            placeholders = ",".join(["%s"] * len(move_types))
+            where_clauses.append(f"shipment_type IN ({placeholders})")
+            params.extend(move_types)
         where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
         cur.execute(
             f"SELECT * FROM quotes {where} ORDER BY created_at DESC LIMIT %s OFFSET %s",

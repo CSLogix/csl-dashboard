@@ -147,6 +147,51 @@ CARRIER_PAY_SENDERS = re.compile(
     re.IGNORECASE,
 )
 
+# ── POD body-text detection (95% accuracy when carrier + attachment + body keyword) ──
+POD_BODY_PATTERNS = re.compile(
+    r"(?:pfa\s+pod|pod\s+attached|please\s+(?:see|find)\s+attached"
+    r"|attached.*pod|pod.*attached|proof\s+of\s+delivery)",
+    re.IGNORECASE,
+)
+
+# ── Carrier Rate Confirmation detection ──
+RC_PATTERNS = re.compile(
+    r"rate\s*con(?:firmation)?|r/?c\s+attached|updated\s+r/?c|final\s+r/?c"
+    r"|signed\s+r/?c|executed\s+rate",
+    re.IGNORECASE,
+)
+
+# ── Enhanced customer quote patterns ──
+CUSTOMER_QUOTE_PATTERNS = re.compile(
+    # RFQ / rate request language
+    r"(?:rfq|rate\s*request|need\s*rates?|quote\s*request|pricing\s*request)"
+    r"|(?:rate.*(?:from|to|origin|dest))"
+    # Container quantities: 3x40HC, 3×40HC, 1x20'STD etc.
+    r"|(?:\d+\s*[x\xd7]\s*(?:20|40|45|53)\s*(?:'\s*)?(?:hq|hc|gp|st|std|ot|fr|rf|IMO)?)"
+    r"|(?:ramp\s*[-\u2013]\s*\d+[x\xd7])"
+    # Volume / quantity indicators
+    r"|(?:vol(?:ume)?\s*[:=]?\s*\d+\s*(?:container|cntr|ctn|unit|piece|pallet|truck))"
+    r"|(?:\d+\s+containers?\b)"
+    # Service combination requests (strong customer signal)
+    r"|(?:dray(?:age)?\s*(?:and|\+|,|&)\s*(?:cross.?dock|delivery|trucking|warehouse|transload))"
+    r"|(?:(?:cross.?dock|transload|stripping)\s*(?:and|\+|,|&)\s*(?:delivery|trucking))"
+    # Delivery to zip code pattern
+    r"|(?:(?:deliver|delivery|ship|trucking)\s+(?:to|from)\s+[A-Z][a-z]+.*\b\d{5}\b)"
+    # Commodity descriptions (indicate quote request context)
+    r"|(?:commodity\s*:.+(?:quote|rate|dray|truck))"
+    r"|(?:(?:quote|rate|dray|truck).+commodity\s*:)"
+    # Incoterm references (FCA, FOB, CIF etc. signal trade/shipping quote)
+    r"|(?:incoterm\s*:\s*(?:FCA|FOB|CIF|EXW|DDP|DAP|CPT|CIP))"
+    # Crate/pallet dimension patterns: 500cm x 240cm x 270cm
+    r"|(?:\d+\s*(?:cm|mm|in|ft|'|"")?\s*[x\xd7*]\s*\d+\s*(?:cm|mm|in|ft|'|"")?\s*[x\xd7*]\s*\d+\s*(?:cm|mm|in|ft|'|""))"
+    # Weight with gross/net qualifier
+    r"|(?:(?:gross|net)\s+weight\s+\d+\s*(?:kg|lbs|kgs|lb|tons?))"
+    r"|(?:\d{3,6}\s*(?:kg|kgs|lbs|lb)\s+(?:each|per|total|gross))",
+    re.IGNORECASE,
+)
+
+
+
 # ── Smart Quote Classification Patterns ──
 
 # CSL team senders (outgoing emails — skip classification)
@@ -157,9 +202,9 @@ CSL_TEAM_SENDERS = re.compile(
 
 # Known customer/broker domains
 KNOWN_CUSTOMER_SENDERS = re.compile(
-    r"dsv\.com|dhl\.com|kripke|allround|cadi|iwsgroup|maogroup|eshipping"
+    r"dsv\.com|dhl\.com|kripke|allround|cadi|iwsgroup|maoinc|maogroup|eshipping"
     r"|mgfusa|rose.?int|boviet|tolead|mamata|sutton|tanera|meiko|kishco"
-    r"|sei.?acq|cnl",
+    r"|sei.?acq|cnl|manitoulin|tcr|texas.?int|md.?metal|usha",
     re.IGNORECASE,
 )
 
@@ -174,11 +219,30 @@ KNOWN_CARRIER_SENDERS = re.compile(
 
 # Customer drayage quote request language
 CUSTOMER_QUOTE_LANGUAGE = re.compile(
-    r"(can\s+I|may\s+I|could\s+(you|we)|please)\s+(get|have|receive|send).*(quote|rate|pricing)"
-    r"|quote.*(below|attached|following)"
-    r"|(20|40)\s*(?:ft|foot|'|hc|gp|st)"
-    r"|port\s+of|rail\s+ramp|intermodal\s+ramp|chassis"
-    r"|memphis.*rail|savannah.*port|norfolk|newark|los\s+angeles.*port",
+    # Polite rate request verbs (broader match)
+    r"(can\s+I|may\s+I|could\s+(you|we)|please)\s+(get|have|receive|send|quote|provide).*(quote|rate|pricing|estimate)"
+    r"|please\s+(send|provide|quote).*(?:rate|quote|dray|pricing|trucking|crossdock|inland)"
+    r"|quote\s+(your\s+best|us|me|the\s+below|below|attached|following)"
+    # Container sizes (20/40/45/53ft + HC/GP/ST variants)
+    r"|(20|40|45|53)\s*(?:ft|foot|'|hc|gp|st|ot|fr|rf)"
+    r"|\d+\s*[x\xd7]\s*(?:20|40|45|53)\s*(?:'|ft|hc|gp|st|ot|fr|rf)?"
+    # Port / ramp / intermodal references
+    r"|port\s+of|rail\s+ramp|intermodal\s+ramp"
+    r"|memphis.*rail|savannah.*port|norfolk|newark|los\s+angeles.*port"
+    # Service types that indicate a quote request
+    r"|(?:send|need|quote).*(?:dray|cross.?dock|transload|stripping|trucking)"
+    r"|(?:dray|cross.?dock|transload|stripping).*(?:quote|rate|pricing)"
+    r"|inland\s+rate|dray.*(?:and|\+|,)\s*(?:cross.?dock|delivery|trucking)"
+    # OOG / specialty equipment
+    r"|flat\s*rack|open\s*top|step\s*deck|flatrack|(?:40|20)\s*(?:'\s*)?(?:fr|ot|rf)"
+    r"|over.?(?:weight|dimension|height|width|size|gauge)|out\s*of\s*gauge|OOG"
+    # Cargo dimensions/weight (strong RFQ signal)
+    r"|\d{2,4}\s*(?:cm|mm|in|kg|lbs|kgs)\s*[x\xd7*]\s*\d{2,4}\s*(?:cm|mm|in|kg|lbs|kgs)?"
+    r"|gross\s+weight\s+\d|(?:\d[.,]\d{3})\s*(?:kg|lb|kgs|lbs)"
+    # Hazmat in quote context
+    r"|(?:IMO|hazmat|haz.?mat|DG\s+cargo|dangerous\s+goods|UN\s*\d{4}).*(?:quote|rate|dray|container|trucking)"
+    r"|(?:quote|rate|dray|container|trucking).*(?:IMO|hazmat|haz.?mat|DG\s+cargo)"
+    r"|\d+\s*(?:'|ft|hc)?\s*IMO",
     re.IGNORECASE,
 )
 
@@ -527,124 +591,233 @@ def classify_doc_type(filename, sender="", subject="", body=""):
         # Step 3: Can't determine — unclassified for manual review
         return "unclassified"
 
+    # POD body-text fallback: if body mentions POD + has attachments
+    if body and POD_BODY_PATTERNS.search(body[:500]):
+        if not CSL_TEAM_SENDERS.search(sender):
+            return "pod"
+
     for pattern, doc_type in DOC_CLASSIFIERS:
         if pattern.search(filename):
             return doc_type
     return "other"
 
 
-def classify_email_type(sender, subject, body):
+def _extract_lane(subject, body):
+    """Helper to extract lane from subject/body. Returns lane string or None."""
+    lane_match = LANE_PATTERN.search(subject or "") or LANE_PATTERN.search(body or "")
+    if not lane_match:
+        return None
+    origin_city = lane_match.group(1).strip()
+    dest_city = lane_match.group(2).strip()
+    miles = lane_match.group(3)
+    lane = f"{origin_city} → {dest_city}"
+    if miles:
+        lane += f" ({miles} mi)"
+    return lane
+
+
+def classify_email_type(sender, subject, body, has_attachments=False):
     """
-    Classify the email itself (independent of attachments) as a carrier/customer
-    quote based on sender signature, lane patterns, MC#, and content.
-    Returns ('carrier_rate', lane_str) or ('customer_rate', lane_str) or (None, None).
+    Classify the email itself based on sender, subject, body content.
+    Returns (email_type, lane_str) tuple.
+
+    Classification priority:
+    1. Tag override (explicit [CARRIER RATE] etc.)
+    2. CarrierPay escalation (before CSL team skip)
+    3. POD body-text detection (carrier + attachment + POD keywords)
+    4. Carrier rate confirmation (RC patterns)
+    5. CSL team outbound → rate_outreach or skip
+    6. Carrier signal scoring → carrier_rate
+    7. Known customer sender → customer_rate
+    8. Customer quote language → customer_rate
+    9. Enhanced customer patterns → customer_rate
     """
-    # Tag override: explicit tags in subject line take priority
-    tag_match = TAG_PATTERN.search(subject)
+    sender_lower = (sender or "").lower()
+    subject_safe = subject or ""
+    body_safe = body or ""
+    body_lower = body_safe[:500].lower()
+    text = f"{subject_safe} {body_safe}"
+
+    # 1. Tag override: explicit tags in subject line take priority
+    tag_match = TAG_PATTERN.search(subject_safe)
     if tag_match:
         tag_key = tag_match.group(1).lower()
         mapped = TAG_TO_EMAIL_TYPE.get(tag_key)
         if mapped:
-            # Still extract lane if present
-            lane_match = LANE_PATTERN.search(subject) or LANE_PATTERN.search(body or "")
-            lane = None
-            if lane_match:
-                lane = f"{lane_match.group(1).strip()} → {lane_match.group(2).strip()}"
-                if lane_match.group(3):
-                    lane += f" ({lane_match.group(3)} mi)"
-            return mapped, lane
+            return mapped, _extract_lane(subject_safe, body_safe)
 
-    if CSL_TEAM_SENDERS.search(sender):
-        return None, None  # outgoing — skip
+    # 2. CarrierPay escalation — BEFORE CSL team skip
+    if CARRIER_PAY_SENDERS.search(sender_lower):
+        lane = _extract_lane(subject_safe, body_safe)
+        if re.search(r'\bNP\b', text):
+            return 'payment_escalation', lane
+        return 'carrier_invoice', lane
 
-    text = f"{subject} {body}"
+    # 3. POD body-text detection (carrier + attachment + keywords, 95% accurate)
+    if has_attachments and POD_BODY_PATTERNS.search(body_lower):
+        if not CSL_TEAM_SENDERS.search(sender_lower):
+            return 'pod', _extract_lane(subject_safe, body_safe)
 
-    # Extract lane if present
-    lane_match = LANE_PATTERN.search(subject) or LANE_PATTERN.search(body or "")
-    lane = None
-    if lane_match:
-        origin_city = lane_match.group(1).strip()
-        dest_city = lane_match.group(2).strip()
-        miles = lane_match.group(3)
-        lane = f"{origin_city} → {dest_city}"
-        if miles:
-            lane += f" ({miles} mi)"
+    # 4. Carrier rate confirmation (RC patterns, from non-CSL sender)
+    if not CSL_TEAM_SENDERS.search(sender_lower):
+        if RC_PATTERNS.search(text):
+            return 'carrier_rate_confirmation', _extract_lane(subject_safe, body_safe)
 
-    # Carrier detection: MC#, transport in sender, lane+miles, rate language
+    # 5. CSL team outbound — detect rate_outreach or skip
+    if CSL_TEAM_SENDERS.search(sender_lower):
+        subject_lower = (subject_safe).lower()
+        rate_signals = bool(re.search(
+            r'rate|rfq|quote|pricing|need\s+truck|available.*capacity',
+            subject_lower))
+        lane = _extract_lane(subject_safe, body_safe)
+        lane_signal = lane is not None
+        container_signal = bool(re.search(
+            r'\d+\s*x\s*(20|40|45)\s*(hq|hc|gp|st|ot|fr|rf)?',
+            subject_lower + ' ' + body_lower))
+        if rate_signals or (lane_signal and container_signal):
+            return 'rate_outreach', lane
+        return None, None  # Non-rate CSL team email — skip
+
+    # Extract lane for remaining checks
+    lane = _extract_lane(subject_safe, body_safe)
+
+    # 6. Carrier detection: MC#, transport in sender, lane+miles, rate language
     carrier_signals = 0
-    if KNOWN_CARRIER_SENDERS.search(sender):
+    if KNOWN_CARRIER_SENDERS.search(sender_lower):
         carrier_signals += 2
     if re.search(r"MC[#\s-]?\d{4,7}", text):
         carrier_signals += 2
-    if re.search(r"transport|trucking|freight|hauling", sender, re.IGNORECASE):
+    if re.search(r"transport|trucking|freight|hauling", sender_lower):
         carrier_signals += 1
-    if LANE_PATTERN.search(subject):
+    if LANE_PATTERN.search(subject_safe):
         carrier_signals += 1
     if CARRIER_RATE_LANGUAGE.search(text):
         carrier_signals += 1
     if carrier_signals >= 2:
         return "carrier_rate", lane
 
-    # Customer detection
-    if KNOWN_CUSTOMER_SENDERS.search(sender):
+    # 7-8. Customer detection (existing patterns)
+    if KNOWN_CUSTOMER_SENDERS.search(sender_lower):
         return "customer_rate", lane
     if CUSTOMER_QUOTE_LANGUAGE.search(text):
         return "customer_rate", lane
 
+    # 9. Enhanced customer patterns (RFQ, container quantities, ramp references)
+    if CUSTOMER_QUOTE_PATTERNS.search(text):
+        return "customer_rate", lane
+
     return None, None
-
-
 def extract_rate_from_email(subject, body, sender, lane, email_type):
     """
-    Extract dollar rate and move type from carrier email for Rate IQ scoring.
-    Returns dict with rate_amount, rate_unit, move_type, origin, dest, miles or None.
+    Extract rate data from carrier email using AI (Haiku) with regex fallback.
+    Returns dict with rate_amount, rate_unit, move_type, origin, dest, miles.
     """
     if email_type != "carrier_rate":
         return None
 
-    text = f"{subject} {body}"
-    result = {}
+    text = f"{subject} {body[:1500]}"
+    sender_name = sender.split("<")[0].strip().strip('"') if "<" in sender else sender
+    carrier_email = sender.split("<")[-1].replace(">", "").strip() if "<" in sender else sender
 
-    # Extract dollar amount (e.g., "$1,850", "$2.50/mi", "$1850.00")
-    rate_match = re.search(r"\$\s*([\d,]+(?:\.\d{2})?)", text)
-    if rate_match:
-        try:
-            result["rate_amount"] = float(rate_match.group(1).replace(",", ""))
-        except ValueError:
-            pass
+    # AI extraction first
+    result = _ai_extract_rate(subject, body[:1200], sender_name)
 
-    # Detect rate unit
-    if re.search(r"/\s*mi|per\s+mile|rpm|cpm", text, re.IGNORECASE):
-        result["rate_unit"] = "per_mile"
-    else:
-        result["rate_unit"] = "flat"
-
-    # Detect move type
-    if re.search(r"(20|40)\s*(?:ft|foot|'|hc|gp|st)|drayage|chassis|port|rail\s+ramp", text, re.IGNORECASE):
-        result["move_type"] = "dray"
-    elif re.search(r"ltl|less.than.truck|pallet|cwt", text, re.IGNORECASE):
-        result["move_type"] = "ltl"
-    else:
-        result["move_type"] = "ftl"
-
-    # Parse lane components
-    lane_match = LANE_PATTERN.search(subject) or LANE_PATTERN.search(body or "")
-    if lane_match:
-        result["origin"] = lane_match.group(1).strip()
-        result["destination"] = lane_match.group(2).strip()
-        if lane_match.group(3):
+    # Regex fallback for missing fields
+    if not result.get("rate_amount"):
+        m = re.search(r"\$\s*([\d,]+(?:\.\d{2})?)", text)
+        if m:
             try:
-                result["miles"] = int(lane_match.group(3))
+                result["rate_amount"] = float(m.group(1).replace(",", ""))
             except ValueError:
                 pass
 
-    # Extract carrier name from sender
-    sender_name = sender.split("<")[0].strip().strip('"') if "<" in sender else sender
-    result["carrier_name"] = sender_name
-    result["carrier_email"] = sender.split("<")[-1].replace(">", "").strip() if "<" in sender else sender
+    if not result.get("rate_unit"):
+        result["rate_unit"] = "per_mile" if re.search(r"/\s*mi|per\s+mile|rpm|cpm", text, re.IGNORECASE) else "flat"
 
-    return result if "rate_amount" in result or lane else result if result else None
+    if not result.get("move_type"):
+        if re.search(r"(20|40)\s*(?:ft|foot|'|hc|gp|st)|drayage|chassis|port|rail\s+ramp", text, re.IGNORECASE):
+            result["move_type"] = "dray"
+        elif re.search(r"ltl|less.than.truck|pallet|cwt", text, re.IGNORECASE):
+            result["move_type"] = "ltl"
+        else:
+            result["move_type"] = "ftl"
 
+    if not result.get("origin") and not result.get("destination"):
+        lm = LANE_PATTERN.search(subject) or LANE_PATTERN.search(body or "")
+        if lm:
+            result["origin"] = lm.group(1).strip()
+            result["destination"] = lm.group(2).strip()
+            if lm.group(3):
+                try:
+                    result["miles"] = int(lm.group(3))
+                except ValueError:
+                    pass
+
+    result["carrier_name"] = result.get("carrier_name") or sender_name
+    result["carrier_email"] = carrier_email
+    return result if result.get("rate_amount") or result.get("origin") else None
+
+
+def _ai_extract_rate(subject, body, sender_name):
+    """Use Claude Haiku to extract rate fields from a carrier email. Returns dict."""
+    import json, os
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        env_path = "/root/csl-bot/.env"
+        if os.path.exists(env_path):
+            for line in open(env_path):
+                if line.startswith("ANTHROPIC_API_KEY="):
+                    api_key = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+    if not api_key:
+        return {}
+    prompt = f"""Extract freight rate data from this carrier email. Return ONLY valid JSON.
+
+FROM: {sender_name}
+SUBJECT: {subject}
+BODY: {body}
+
+{{
+  "rate_amount": <flat dollar amount as number, null if not found>,
+  "rate_unit": "<flat or per_mile>",
+  "move_type": "<dray or ftl or ltl>",
+  "origin": "<origin city/port or null>",
+  "destination": "<destination city/state or null>",
+  "miles": <integer or null>,
+  "carrier_name": "<company name from signature or null>"
+}}
+
+rate_amount = all-in or linehaul flat rate. If per-mile rate, set rate_unit=per_mile.
+move_type=dray if mentions port/chassis/drayage/container."""
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001", max_tokens=200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = resp.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        data = json.loads(text)
+        out = {}
+        if data.get("rate_amount") is not None:
+            try:
+                out["rate_amount"] = float(data["rate_amount"])
+            except (TypeError, ValueError):
+                pass
+        for f in ("rate_unit", "move_type", "origin", "destination", "carrier_name"):
+            if data.get(f):
+                out[f] = str(data[f]).strip()
+        if data.get("miles"):
+            try:
+                out["miles"] = int(data["miles"])
+            except (TypeError, ValueError):
+                pass
+        return out
+    except Exception as e:
+        log.debug("AI rate extraction failed: %s", e)
+        return {}
 
 def save_rate_quote(email_thread_id, efj, lane, rate_data, sent_at):
     """Save extracted rate quote to rate_quotes table."""
@@ -1063,7 +1236,7 @@ def process_message(service, msg_id):
                 log.error("  Download failed for %s: %s", att["filename"], e)
 
         # Classify the email itself (carrier/customer quote, lane detection)
-        email_type, lane = classify_email_type(sender, subject, body_preview)
+        email_type, lane = classify_email_type(sender, subject, body_preview, has_attachments)
         if email_type:
             log.info("  Email type: %s | Lane: %s", email_type, lane or "none")
 
@@ -1091,7 +1264,8 @@ def process_message(service, msg_id):
                         has_attachments, attachment_names, sent_at,
                         email_type, lane, priority, ai_summary, suggested_rep)
                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                       ON CONFLICT (gmail_message_id) DO NOTHING
+                       ON CONFLICT (gmail_message_id) DO UPDATE
+                         SET gmail_message_id = EXCLUDED.gmail_message_id
                        RETURNING id""",
                     (efj, gmail_thread_id, msg_id, rfc_message_id,
                      subject, sender, recipients, body_preview[:500],
@@ -1107,6 +1281,67 @@ def process_message(service, msg_id):
             log.error("  email_threads insert failed: %s", e)
         finally:
             put_conn(conn)
+
+        # ── Carrier rate response detection (thread-based) ──
+        if final_email_type in (None, 'carrier_rate', 'general') and gmail_thread_id:
+            try:
+                conn2 = get_conn()
+                with conn2.cursor() as cur2:
+                    cur2.execute(
+                        "SELECT 1 FROM email_threads WHERE gmail_thread_id = %s AND email_type = 'rate_outreach' LIMIT 1",
+                        (gmail_thread_id,),
+                    )
+                    if cur2.fetchone():
+                        final_email_type = 'carrier_rate_response'
+                        ai_priority = max(ai_priority or 0, 4)
+                        log.info("  ↑ Upgraded to carrier_rate_response (reply to rate_outreach thread)")
+                        if email_thread_db_id:
+                            with conn2.cursor() as cur3:
+                                cur3.execute(
+                                    "UPDATE email_threads SET email_type = %s, priority = %s WHERE id = %s",
+                                    (final_email_type, ai_priority, email_thread_db_id),
+                                )
+                            conn2.commit()
+                put_conn(conn2)
+            except Exception as e:
+                log.error("  Rate response detection failed: %s", e)
+
+        # ── Immediate email alert for payment_escalation ──
+        if final_email_type == 'payment_escalation' and email_thread_db_id:
+            try:
+                rep_email = _get_rep_email_for_efj(efj)
+                _send_alert_email(
+                    rep_email,
+                    f"⚠ PAYMENT ALERT: {efj} — {subject[:60]}",
+                    f"<h3>Payment Escalation</h3>"
+                    f"<p><b>EFJ:</b> {efj}<br>"
+                    f"<b>From:</b> {sender}<br>"
+                    f"<b>Subject:</b> {subject}<br>"
+                    f"<b>Summary:</b> {ai_summary_text or 'CarrierPay flagged non-payment'}</p>"
+                    f"<p><a href='https://cslogixdispatch.com/app'>Open Dashboard</a></p>",
+                )
+            except Exception as e:
+                log.error("  Payment alert email failed: %s", e)
+
+        # ── Digest queue insert for actionable types ──
+        _DIGEST_TYPES = {'carrier_rate_response', 'carrier_invoice',
+                         'carrier_rate_confirmation', 'pod'}
+        if final_email_type in _DIGEST_TYPES and email_thread_db_id:
+            try:
+                conn3 = get_conn()
+                with conn3.cursor() as cur4:
+                    cur4.execute(
+                        """INSERT INTO inbox_digest_queue
+                           (efj, email_type, sender, subject, summary, rep)
+                           VALUES (%s, %s, %s, %s, %s, %s)
+                           ON CONFLICT DO NOTHING""",
+                        (efj, final_email_type, sender, subject[:200],
+                         ai_summary_text or '', ai_suggested_rep or ''),
+                    )
+                conn3.commit()
+                put_conn(conn3)
+            except Exception as e:
+                log.error("  Digest queue insert failed: %s", e)
 
         # Extract and save rate quote for carrier emails (Rate IQ)
         if email_type == "carrier_rate" and email_thread_db_id:
@@ -1126,7 +1361,7 @@ def process_message(service, msg_id):
 
     else:
         # Classify the email even when unmatched to an EFJ
-        email_type, lane = classify_email_type(sender, subject, body_preview)
+        email_type, lane = classify_email_type(sender, subject, body_preview, has_attachments)
         log.info("UNMATCHED: %s [%s] from %s | type=%s lane=%s",
                  msg_id[:12], subject[:60], sender[:40],
                  email_type or "unknown", lane or "none")
@@ -1154,7 +1389,9 @@ def process_message(service, msg_id):
                         attachment_names, sent_at, email_type, lane,
                         priority, ai_summary, suggested_rep)
                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                       ON CONFLICT (gmail_message_id) DO NOTHING""",
+                       ON CONFLICT (gmail_message_id) DO UPDATE
+                         SET gmail_message_id = EXCLUDED.gmail_message_id
+                       RETURNING id""",
                     (msg_id, gmail_thread_id, subject, sender,
                      recipients, body_preview[:500], has_attachments,
                      ", ".join(attachment_names), sent_at,
@@ -1169,6 +1406,50 @@ def process_message(service, msg_id):
             log.error("  unmatched insert failed: %s", e)
         finally:
             put_conn(conn)
+
+        # ── Carrier rate response detection for unmatched (thread-based) ──
+        if final_email_type in (None, 'carrier_rate', 'general') and gmail_thread_id:
+            try:
+                conn_r = get_conn()
+                with conn_r.cursor() as cur_r:
+                    cur_r.execute(
+                        "SELECT 1 FROM email_threads WHERE gmail_thread_id = %s AND email_type = 'rate_outreach' LIMIT 1",
+                        (gmail_thread_id,),
+                    )
+                    if cur_r.fetchone():
+                        final_email_type = 'carrier_rate_response'
+                        ai_priority = max(ai_priority or 0, 4)
+                        log.info("  ↑ Upgraded unmatched to carrier_rate_response")
+                        if email_thread_db_id:
+                            with conn_r.cursor() as cur_u:
+                                cur_u.execute(
+                                    "UPDATE unmatched_inbox_emails SET email_type = %s, priority = %s WHERE id = %s",
+                                    (final_email_type, ai_priority, email_thread_db_id),
+                                )
+                            conn_r.commit()
+                put_conn(conn_r)
+            except Exception as e:
+                log.error("  Unmatched rate response detection failed: %s", e)
+
+        # ── Digest queue insert for actionable unmatched types ──
+        _DIGEST_TYPES_U = {'carrier_rate_response', 'carrier_invoice',
+                           'carrier_rate_confirmation', 'pod'}
+        if final_email_type in _DIGEST_TYPES_U and email_thread_db_id:
+            try:
+                conn_d = get_conn()
+                with conn_d.cursor() as cur_d:
+                    cur_d.execute(
+                        """INSERT INTO inbox_digest_queue
+                           (efj, email_type, sender, subject, summary, rep)
+                           VALUES (%s, %s, %s, %s, %s, %s)
+                           ON CONFLICT DO NOTHING""",
+                        (None, final_email_type, sender, subject[:200],
+                         ai_summary_text or '', ai_suggested_rep or ''),
+                    )
+                conn_d.commit()
+                put_conn(conn_d)
+            except Exception as e:
+                log.error("  Unmatched digest queue insert failed: %s", e)
 
         # Tag-based actions work even for unmatched emails
         effective_sender = original_sender or sender

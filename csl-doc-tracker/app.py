@@ -388,8 +388,46 @@ def _classify_mp_display_status(cache_entry, shipment=None):
     status_lower = status.lower()
     alert_upper = schedule_alert.upper()
 
+    # ── Compute staleness from last_event_at / last_scraped ──
+    _last_ev = (cache_entry.get("last_event_at") or cache_entry.get("last_scraped") or "").strip()
+    _stale_hours = None
+    if _last_ev:
+        try:
+            _now_s = _dt.now(_ZI("America/New_York"))
+            _ts_s = _last_ev.replace(" ET", "").replace(" EST", "").replace(" EDT", "")
+            for _fmt_s in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%SZ"):
+                try:
+                    _ev_dt = _dt.strptime(_ts_s, _fmt_s)
+                    _ev_dt = _ev_dt.replace(tzinfo=_ZI("America/New_York"))
+                    _stale_hours = (_now_s - _ev_dt).total_seconds() / 3600
+                    break
+                except ValueError:
+                    continue
+        except Exception:
+            pass
+
+    # ── Cross-ref PG shipment status for stale/empty cache ──
+    _ship_status = ""
+    if shipment:
+        _ship_status = (shipment.get("status") or "").strip().lower()
+    _TERMINAL_SHIP = {"delivered", "ready to close", "completed", "billed_closed",
+                      "billed/closed", "canceled", "cancelled"}
+
+    # If cache never got real data (empty stop_times + no last_event_at),
+    # defer to shipment status
+    _has_mp_data = bool(_last_ev) or bool(cache_entry.get("stop_times", {}))
+    if not _has_mp_data and _ship_status in _TERMINAL_SHIP:
+        return ("Delivered", "Per shipment status")
+
+    # If cache is very stale (>48h) and shipment is terminal, auto-classify
+    if _stale_hours is not None and _stale_hours > 48 and _ship_status in _TERMINAL_SHIP:
+        return ("Delivered", f"Per shipment status")
+
     # ── No status at all ──
     if not status:
+        # Even with no MP status, if cache has stop2_departed, it's delivered
+        if cache_entry.get("stop_times", {}).get("stop2_departed"):
+            return ("Delivered", "Departed delivery")
         return ("No MP", "")
 
     if status_lower == "unassigned":
@@ -487,11 +525,21 @@ def _classify_mp_display_status(cache_entry, shipment=None):
             return ("Awaiting Update", "GPS stale")
         return ("On Time", "Tracking active")
 
+    # ── On-Site / stale active statuses ──
+    if "on-site" in status_lower or "on site" in status_lower:
+        if cache_entry.get("stop_times", {}).get("stop2_departed"):
+            return ("Delivered", "Departed delivery")
+        if _stale_hours is not None and _stale_hours > 24 and _ship_status in _TERMINAL_SHIP:
+            return ("Delivered", "Per shipment status")
+        return ("At Delivery", detail or "On site")
+
     # ── Fallback ──
     if is_behind:
         return ("Behind Schedule", detail)
     if is_ahead:
         return ("On Time", detail)
+    if _stale_hours is not None and _stale_hours > 48 and _ship_status in _TERMINAL_SHIP:
+        return ("Delivered", "Per shipment status")
     return (status, "")
 
 
@@ -531,11 +579,13 @@ BOVIET_TAB_CONFIGS = {
     "Piedra":           {"efj_col": 0, "load_id_col": 2, "status_col": 8,
                          "pickup_col": 6, "delivery_col": 7,
                          "phone_col": 11, "trailer_col": 12,
+                         "carrier_email_col": 10, "driver_name_col": 13,
                          "default_origin": "Greenville, NC", "default_dest": "Mexia, TX",
                          "start_row": 45},
     "Hanson":           {"efj_col": 0, "load_id_col": 1, "status_col": 6,
                          "pickup_col": 4, "delivery_col": 5,
-                         "phone_col": 8, "trailer_col": 10},
+                         "phone_col": 8, "trailer_col": 10,
+                         "carrier_email_col": 7, "driver_name_col": 9},
 }
 BOVIET_DONE_STATUSES = {"delivered", "completed", "canceled", "cancelled", "ready to close"}
 
@@ -786,6 +836,12 @@ class SheetCache:
                             bov_phone = row[cfg["phone_col"]].strip() if len(row) > cfg["phone_col"] else ""
                         if "trailer_col" in cfg:
                             bov_trailer = row[cfg["trailer_col"]].strip() if len(row) > cfg["trailer_col"] else ""
+                        bov_carrier_email = ""
+                        bov_driver_name = ""
+                        if "carrier_email_col" in cfg:
+                            bov_carrier_email = row[cfg["carrier_email_col"]].strip() if len(row) > cfg["carrier_email_col"] else ""
+                        if "driver_name_col" in cfg:
+                            bov_driver_name = row[cfg["driver_name_col"]].strip() if len(row) > cfg["driver_name_col"] else ""
 
                         all_shipments.append({
                             "account": "Boviet", "efj": efj, "move_type": "FTL",
@@ -798,6 +854,8 @@ class SheetCache:
                             "container_url": bov_mp_url,
                             "driver": bov_trailer,
                             "driver_phone": bov_phone,
+                            "carrier_email": bov_carrier_email,
+                            "driver_name": bov_driver_name,
                             "hub": tab_name,
                         })
                     _time.sleep(1)
@@ -817,6 +875,8 @@ class SheetCache:
                 hub_sh = gc.open_by_key(hub_cfg["sheet_id"])
                 hub_ws = hub_sh.worksheet(hub_cfg["tab"])
                 hub_rows = hub_ws.get_all_values()
+                # Fetch hyperlinks for MP URLs
+                hub_links = _get_sheet_hyperlinks(_goog_creds, hub_cfg["sheet_id"], hub_cfg["tab"])
                 cols = hub_cfg["cols"]
                 hub_count = 0
                 hub_start = hub_cfg.get("start_row", 1)
@@ -885,6 +945,14 @@ class SheetCache:
                     driver_trailer = _cell(cols.get("driver")) if cols.get("driver") is not None else ""
                     driver_phone = _cell(cols.get("phone")) if cols.get("phone") is not None else ""
 
+                    # Extract MP URL from hyperlinks
+                    _mp_url = ""
+                    _efj_col = cols["efj"]
+                    if hub_links and ri < len(hub_links):
+                        _lr = hub_links[ri]
+                        if _efj_col < len(_lr) and _lr[_efj_col]:
+                            _mp_url = _lr[_efj_col]
+
                     all_shipments.append({
                         "account": "Tolead", "efj": efj or load_id,
                         "move_type": "FTL", "container": load_id, "bol": "",
@@ -895,9 +963,9 @@ class SheetCache:
                         "pickup": pickup, "delivery": delivery,
                         "status": status, "notes": "", "bot_alert": "",
                         "return_port": "", "rep": "Tolead",
-                        "container_url": "",
+                        "container_url": _mp_url,
                         "hub": hub_name,
-                        "driver": driver_trailer,
+                        "driver": "",
                         "driver_phone": driver_phone,
                     })
                     hub_count += 1
@@ -3321,111 +3389,193 @@ async def update_rate_quote(quote_id: int, request: Request):
 @app.get("/api/rate-iq/search-lane")
 async def api_search_lane(origin: str = Query(""), destination: str = Query("")):
     """
-    Search for carrier rates matching an origin/destination lane.
-    Used by QuoteBuilder to show rate intelligence when building a quote.
-    Returns matching carrier quotes ranked by rate, plus carrier directory info.
+    Unified lane rate search: rate_quotes + lane_rates + won quotes.
+    Groups results by normalized lane. Returns lane_groups[] with
+    floor/avg/ceiling per lane, plus flat matches[] for backwards compat.
     """
     if not origin and not destination:
-        return {"matches": [], "carriers": [], "stats": {}}
+        return {"matches": [], "lane_groups": [], "carriers": [], "stats": {}}
 
     origin_q = origin.strip().lower()
     dest_q = destination.strip().lower()
 
+    # Build WHERE conditions for each source
+    def _build_conditions(o_col, d_col, lane_col=None):
+        conds, params = [], []
+        if origin_q:
+            if lane_col:
+                conds.append(f"(LOWER({o_col}) LIKE %s OR LOWER({lane_col}) LIKE %s)")
+                params.extend([f"%{origin_q}%", f"%{origin_q}%"])
+            else:
+                conds.append(f"LOWER({o_col}) LIKE %s")
+                params.append(f"%{origin_q}%")
+        if dest_q:
+            if lane_col:
+                conds.append(f"(LOWER({d_col}) LIKE %s OR LOWER({lane_col}) LIKE %s)")
+                params.extend([f"%{dest_q}%", f"%{dest_q}%"])
+            else:
+                conds.append(f"LOWER({d_col}) LIKE %s")
+                params.append(f"%{dest_q}%")
+        return (" AND ".join(conds) if conds else "TRUE"), params
+
+    rq_where, rq_params = _build_conditions("rq.origin", "rq.destination", "rq.lane")
+    lr_where, lr_params = _build_conditions("lr.port", "lr.destination")
+    # won quotes use pod/final_delivery
+    wq_where, wq_params = _build_conditions("q.pod", "q.final_delivery")
+
     with db.get_cursor() as cur:
-        # Search rate_quotes for matching lanes (fuzzy match on origin/destination)
-        conditions = []
-        params = []
-        if origin_q:
-            conditions.append("(LOWER(rq.origin) LIKE %s OR LOWER(rq.lane) LIKE %s)")
-            params.extend([f"%{origin_q}%", f"%{origin_q}%"])
-        if dest_q:
-            conditions.append("(LOWER(rq.destination) LIKE %s OR LOWER(rq.lane) LIKE %s)")
-            params.extend([f"%{dest_q}%", f"%{dest_q}%"])
-
-        where = " AND ".join(conditions) if conditions else "TRUE"
+        # ── Unified UNION: rate_quotes + lane_rates + won quotes ──
         cur.execute(f"""
-            SELECT rq.id, rq.lane, rq.origin, rq.destination, rq.miles,
-                   rq.carrier_name, rq.carrier_email, rq.rate_amount,
-                   rq.rate_unit, rq.quote_date, rq.status, rq.move_type
-            FROM rate_quotes rq
-            WHERE {where}
-            ORDER BY rq.rate_amount ASC NULLS LAST, rq.quote_date DESC NULLS LAST
-            LIMIT 50
-        """, params)
-        rate_matches = cur.fetchall()
+            SELECT origin, destination,
+                   COALESCE(NULLIF(TRIM(origin),'') || ' \u2192 ' || NULLIF(TRIM(destination),''), lane, '') AS norm_lane,
+                   carrier_name, carrier_email, rate_amount, rate_unit,
+                   quote_date, source, move_type, id, miles, status
+            FROM (
+                -- Email-extracted carrier rates
+                SELECT rq.origin, rq.destination, rq.lane,
+                       rq.carrier_name, rq.carrier_email, rq.rate_amount, rq.rate_unit,
+                       rq.quote_date, 'email' AS source, rq.move_type, rq.id, rq.miles, rq.status
+                FROM rate_quotes rq
+                WHERE {rq_where} AND rq.rate_amount IS NOT NULL
 
-        # Search carriers directory for matching pickup/destination areas
-        carrier_conditions = []
-        carrier_params = []
+                UNION ALL
+
+                -- Excel-imported lane rates
+                SELECT lr.port AS origin, lr.destination,
+                       lr.port || ' \u2192 ' || lr.destination AS lane,
+                       lr.carrier_name, NULL AS carrier_email,
+                       lr.dray_rate AS rate_amount, 'flat' AS rate_unit,
+                       lr.created_at AS quote_date, 'import' AS source,
+                       lr.move_type, lr.id, NULL AS miles, 'import' AS status
+                FROM lane_rates lr
+                WHERE {lr_where} AND lr.dray_rate IS NOT NULL
+
+                UNION ALL
+
+                -- Won/accepted customer quotes (carrier cost only)
+                SELECT q.pod AS origin, q.final_delivery AS destination,
+                       q.pod || ' \u2192 ' || q.final_delivery AS lane,
+                       q.carrier_name, NULL AS carrier_email,
+                       q.carrier_total AS rate_amount, 'flat' AS rate_unit,
+                       q.created_at AS quote_date, 'quote' AS source,
+                       q.shipment_type AS move_type, q.id, NULL AS miles, 'accepted' AS status
+                FROM quotes q
+                WHERE {wq_where} AND q.status = 'accepted' AND q.carrier_total > 0
+            ) combined
+            ORDER BY rate_amount ASC NULLS LAST, quote_date DESC NULLS LAST
+            LIMIT 100
+        """, rq_params + lr_params + wq_params)
+        all_rows = cur.fetchall()
+
+        # ── Directory carriers ──
+        c_conds, c_params = [], []
         if origin_q:
-            carrier_conditions.append("LOWER(c.pickup_area) LIKE %s")
-            carrier_params.append(f"%{origin_q}%")
+            c_conds.append("LOWER(c.pickup_area) LIKE %s")
+            c_params.append(f"%{origin_q}%")
         if dest_q:
-            carrier_conditions.append("LOWER(c.destination_area) LIKE %s")
-            carrier_params.append(f"%{dest_q}%")
-
-        carrier_where = " OR ".join(carrier_conditions) if carrier_conditions else "FALSE"
+            c_conds.append("LOWER(c.destination_area) LIKE %s")
+            c_params.append(f"%{dest_q}%")
+        c_where = " OR ".join(c_conds) if c_conds else "FALSE"
         try:
             cur.execute(f"""
                 SELECT c.id, c.name, c.mc_number, c.email, c.phone,
-                       c.pickup_area, c.destination_area, c.regions, c.equipment,
+                       c.pickup_area, c.destination_area,
                        c.can_dray, c.hazmat, c.overweight, c.date_quoted
-                FROM carriers c
-                WHERE {carrier_where}
-                ORDER BY c.date_quoted DESC NULLS LAST
-                LIMIT 20
-            """, carrier_params)
+                FROM carriers c WHERE {c_where}
+                ORDER BY c.date_quoted DESC NULLS LAST LIMIT 20
+            """, c_params)
             matching_carriers = cur.fetchall()
         except Exception:
             matching_carriers = []
 
-    # Build response
+    # ── Build flat matches (backwards compat) ──
     matches = []
-    for rq in rate_matches:
+    for r in all_rows:
         matches.append({
-            "id": rq["id"],
-            "lane": rq["lane"],
-            "origin": rq["origin"],
-            "destination": rq["destination"],
-            "miles": rq["miles"],
-            "carrier": rq["carrier_name"] or "Unknown",
-            "carrier_email": rq["carrier_email"],
-            "rate": float(rq["rate_amount"]) if rq["rate_amount"] else None,
-            "rate_unit": rq["rate_unit"],
-            "date": rq["quote_date"].isoformat() if rq["quote_date"] else None,
-            "status": rq["status"],
-            "move_type": rq["move_type"],
+            "id": r["id"],
+            "lane": r["norm_lane"],
+            "origin": r["origin"],
+            "destination": r["destination"],
+            "miles": r["miles"],
+            "carrier": r["carrier_name"] or "Unknown",
+            "carrier_email": r["carrier_email"],
+            "rate": float(r["rate_amount"]) if r["rate_amount"] else None,
+            "rate_unit": r["rate_unit"],
+            "date": r["quote_date"].isoformat() if r["quote_date"] else None,
+            "status": r["status"],
+            "source": r["source"],
+            "move_type": r["move_type"],
         })
 
-    carriers = []
-    for c in matching_carriers:
-        carriers.append({
-            "id": c["id"],
-            "name": c["name"],
-            "mc": c["mc_number"],
-            "email": c["email"],
-            "phone": c["phone"],
-            "pickup": c["pickup_area"],
-            "destination": c["destination_area"],
-            "can_dray": c["can_dray"],
-            "hazmat": c["hazmat"],
-            "overweight": c["overweight"],
-            "date_quoted": c["date_quoted"].isoformat() if c["date_quoted"] else None,
+    # ── Group by normalized lane ──
+    from collections import defaultdict
+    lane_map = defaultdict(list)
+    for m in matches:
+        key = (
+            (m["origin"] or "").strip().lower(),
+            (m["destination"] or "").strip().lower(),
+        )
+        lane_map[key].append(m)
+
+    lane_groups = []
+    for (orig_key, dest_key), group in sorted(
+        lane_map.items(),
+        key=lambda kv: min((q["rate"] or 9e9) for q in kv[1])
+    ):
+        rates = [q["rate"] for q in group if q["rate"]]
+        source_counts = {}
+        for q in group:
+            source_counts[q["source"]] = source_counts.get(q["source"], 0) + 1
+        last_date = max((q["date"] or "") for q in group) or None
+        lane_groups.append({
+            "lane": group[0]["lane"],
+            "origin": group[0]["origin"],
+            "destination": group[0]["destination"],
+            "count": len(group),
+            "rated_count": len(rates),
+            "floor": min(rates) if rates else None,
+            "avg": round(sum(rates) / len(rates), 2) if rates else None,
+            "ceiling": max(rates) if rates else None,
+            "carriers": len(set(q["carrier"] for q in group)),
+            "last_quoted": last_date,
+            "sources": source_counts,  # {"email": 3, "import": 2}
+            "quotes": sorted(group, key=lambda q: q["rate"] or 9e9),
         })
 
-    # Stats
-    rates = [m["rate"] for m in matches if m["rate"]]
+    # Sort lane_groups: most quotes first
+    lane_groups.sort(key=lambda g: g["rated_count"], reverse=True)
+
+    # ── Global stats ──
+    all_rates = [m["rate"] for m in matches if m["rate"]]
     stats = {}
-    if rates:
+    if all_rates:
         stats = {
-            "floor": min(rates),
-            "ceiling": max(rates),
-            "avg": round(sum(rates) / len(rates), 2),
-            "count": len(rates),
+            "floor": min(all_rates),
+            "ceiling": max(all_rates),
+            "avg": round(sum(all_rates) / len(all_rates), 2),
+            "count": len(all_rates),
             "total_carriers": len(set(m["carrier"] for m in matches)),
+            "total_lanes": len(lane_groups),
+            "sources": {
+                "email": sum(1 for m in matches if m["source"] == "email"),
+                "import": sum(1 for m in matches if m["source"] == "import"),
+                "quote": sum(1 for m in matches if m["source"] == "quote"),
+            },
         }
 
-    return {"matches": matches, "carriers": carriers, "stats": stats}
+    carriers = [
+        {
+            "id": c["id"], "name": c["name"], "mc": c["mc_number"],
+            "email": c["email"], "phone": c["phone"],
+            "pickup": c["pickup_area"], "destination": c["destination_area"],
+            "can_dray": c["can_dray"], "hazmat": c["hazmat"],
+            "overweight": c["overweight"],
+            "date_quoted": c["date_quoted"].isoformat() if c["date_quoted"] else None,
+        }
+        for c in matching_carriers
+    ]
+
+    return {"matches": matches, "lane_groups": lane_groups, "carriers": carriers, "stats": stats}
 
 
 @app.get("/api/customer-reply-alerts")
@@ -4382,6 +4532,7 @@ async def api_macropoint(efj: str):
         "behindSchedule": behind_schedule,
         "cantMakeIt": cant_make_it,
         "lastScraped": last_scraped,
+        "mpLastUpdated": cached.get("last_event_at") or cached.get("last_ping_at") or last_scraped or None,
         "lastLocation": cached.get("last_location") or None,
         "mpDisplayStatus": _classify_mp_display_status(cached, shipment)[0] if cached else "",
         "mpDisplayDetail": _classify_mp_display_status(cached, shipment)[1] if cached else "",
@@ -5611,15 +5762,75 @@ async def api_quote_extract(request: Request):
 
 # ── CRUD (list, create, get, update) — register AFTER /settings and /distance ──
 
+def _index_quote_to_rate_iq(row: dict, quote_id: int = None):
+    """
+    Write carrier cost from a saved quote into rate_quotes for Rate IQ lane intelligence.
+    Only indexes dray-type quotes with a valid carrier_total and origin+dest.
+    """
+    DRAY_TYPES = {"Dray", "Dray+Transload", "OTR", "Transload"}
+    shipment_type = (row.get("shipment_type") or "").strip()
+    if shipment_type not in DRAY_TYPES:
+        return
+    origin = (row.get("pod") or "").strip()
+    destination = (row.get("final_delivery") or "").strip()
+    carrier_name = (row.get("carrier_name") or "").strip()
+    try:
+        carrier_total = float(row.get("carrier_total") or 0)
+    except (TypeError, ValueError):
+        carrier_total = None
+    if not origin or not destination or not carrier_total:
+        return
+    lane = f"{origin} → {destination}"
+    quote_date = row.get("created_at") or row.get("updated_at")
+    qid = quote_id or row.get("id")
+    try:
+        with db.get_cursor() as cur:
+            if qid:
+                # Update existing rate_quotes entry for this quote
+                cur.execute(
+                    "UPDATE rate_quotes SET origin=%s, destination=%s, lane=%s, "
+                    "carrier_name=%s, rate_amount=%s, move_type=%s, quote_date=%s, status='quoted' "
+                    "WHERE source_quote_id=%s",
+                    (origin, destination, lane, carrier_name, carrier_total,
+                     shipment_type.lower(), quote_date, qid)
+                )
+                if cur.rowcount == 0:
+                    # No existing row — insert
+                    cur.execute(
+                        "INSERT INTO rate_quotes "
+                        "(origin, destination, lane, carrier_name, rate_amount, rate_unit, "
+                        " move_type, quote_date, status, source_quote_id) "
+                        "VALUES (%s,%s,%s,%s,%s,'flat',%s,%s,'quoted',%s) "
+                        "ON CONFLICT DO NOTHING",
+                        (origin, destination, lane, carrier_name, carrier_total,
+                         shipment_type.lower(), quote_date, qid)
+                    )
+            else:
+                cur.execute(
+                    "INSERT INTO rate_quotes "
+                    "(origin, destination, lane, carrier_name, rate_amount, rate_unit, "
+                    " move_type, quote_date, status) "
+                    "VALUES (%s,%s,%s,%s,%s,'flat',%s,%s,'quoted') "
+                    "ON CONFLICT DO NOTHING",
+                    (origin, destination, lane, carrier_name, carrier_total,
+                     shipment_type.lower(), quote_date)
+                )
+    except Exception as e:
+        import logging
+        logging.getLogger("csl-dashboard").warning("rate_quotes index failed: %s", e)
+
+
 @app.get("/api/quotes")
 async def api_list_quotes(
     status: str = Query(default=None),
     search: str = Query(default=None),
+    move_types: str = Query(default=None),
     limit: int = Query(default=50),
     offset: int = Query(default=0),
 ):
-    """List quotes with optional filters."""
-    rows = db.list_quotes(status=status, search=search, limit=limit, offset=offset)
+    """List quotes with optional filters. move_types is comma-separated shipment types."""
+    mt_list = [t.strip() for t in move_types.split(",")] if move_types else None
+    rows = db.list_quotes(status=status, search=search, move_types=mt_list, limit=limit, offset=offset)
     rows = [_sanitize_row(r) for r in rows]
     return JSONResponse({"quotes": rows})
 
@@ -5652,6 +5863,8 @@ async def api_create_quote(request: Request):
         data = await request.json()
 
     row = db.insert_quote(data)
+    # Index carrier cost to rate_quotes for Rate IQ lane intelligence
+    _index_quote_to_rate_iq(row)
     return JSONResponse(_sanitize_row(row), status_code=201)
 
 
@@ -5707,6 +5920,8 @@ async def api_update_quote(quote_id: int, request: Request):
     row = db.update_quote(quote_id, data)
     if not row:
         raise HTTPException(404, "Quote not found")
+    # Re-index carrier cost to rate_quotes for Rate IQ
+    _index_quote_to_rate_iq(row, quote_id=quote_id)
     return JSONResponse(_sanitize_row(row))
 
 
@@ -6419,32 +6634,11 @@ async def get_inbox(request: Request):
         """ % (days, days))
         inbound_rows = cur.fetchall()
 
-        # Fetch all sent messages from the lookback window
-        cur.execute("""
-            SELECT gmail_thread_id, gmail_message_id, recipient, subject, sent_at
-            FROM sent_messages
-            WHERE sent_at >= NOW() - INTERVAL '%s days'
-            ORDER BY sent_at ASC
-        """ % days)
-        sent_rows = cur.fetchall()
+        # No sent_messages query needed — reply detection uses sender patterns in email_threads
+        pass  # Sent messages are detected by sender domain in the thread messages below
 
-    # Build sent lookup: thread_id -> list of sent timestamps
-    sent_by_thread = {}
-    sent_msgs_by_thread = {}
-    for s in sent_rows:
-        tid = s["gmail_thread_id"]
-        if tid not in sent_by_thread:
-            sent_by_thread[tid] = []
-            sent_msgs_by_thread[tid] = []
-        sent_by_thread[tid].append(s["sent_at"])
-        sent_msgs_by_thread[tid].append({
-            "id": None,
-            "sender": "You",
-            "subject": s["subject"],
-            "sent_at": s["sent_at"].isoformat() if s["sent_at"] else None,
-            "body_preview": None,
-            "direction": "sent",
-        })
+    # CSL team domains for reply detection
+    _CSL_DOMAINS = ('evansdelivery', 'commonsenselogistics')
 
     # Group inbound by thread_id
     threads_map = {}
@@ -6467,13 +6661,15 @@ async def get_inbox(request: Request):
             }
 
         thread = threads_map[tid]
+        _sender_lower = (row["sender"] or "").lower()
+        _is_csl = any(d in _sender_lower for d in _CSL_DOMAINS)
         thread["messages"].append({
             "id": row["id"],
             "sender": row["sender"],
             "subject": row["subject"],
             "sent_at": row["sent_at"].isoformat() if row["sent_at"] else None,
             "body_preview": row["body_preview"],
-            "direction": "inbound",
+            "direction": "sent" if _is_csl else "inbound",
             "has_attachments": row["has_attachments"],
             "attachment_names": row["attachment_names"],
             "email_type": row["email_type"],
@@ -6501,32 +6697,29 @@ async def get_inbox(request: Request):
     # Build final thread list with reply detection
     threads = []
     for tid, thread in threads_map.items():
-        # Sort messages chronologically
+        # Sort messages chronologically (sent/inbound already tagged by direction)
         all_msgs = thread["messages"][:]
-        # Add sent messages for this thread
-        if tid in sent_msgs_by_thread:
-            all_msgs.extend(sent_msgs_by_thread[tid])
         all_msgs.sort(key=lambda m: m["sent_at"] or "")
 
         # Determine latest message and reply status
         latest_msg = all_msgs[-1] if all_msgs else None
-        latest_inbound = [m for m in thread["messages"]]
-        latest_inbound.sort(key=lambda m: m["sent_at"] or "")
-        latest_inbound_msg = latest_inbound[-1] if latest_inbound else None
+        # Reply detection is done via external/CSL sender matching below
 
-        # has_csl_reply: any sent message AFTER the latest inbound
+        # has_csl_reply: any CSL team message AFTER the latest external inbound
+        external_msgs = [m for m in all_msgs if m.get("direction") == "inbound"]
+        csl_msgs = [m for m in all_msgs if m.get("direction") == "sent"]
+        latest_external = external_msgs[-1] if external_msgs else None
         has_csl_reply = False
-        if latest_inbound_msg and tid in sent_by_thread:
-            latest_inbound_time = latest_inbound_msg["sent_at"]
-            for st in sent_by_thread[tid]:
-                if st and latest_inbound_time and st.isoformat() > latest_inbound_time:
-                    has_csl_reply = True
-                    break
+        if latest_external and csl_msgs:
+            latest_ext_time = latest_external.get("sent_at") or ""
+            has_csl_reply = any(
+                (m.get("sent_at") or "") > latest_ext_time
+                for m in csl_msgs
+            )
 
-        # needs_reply: latest message is inbound + no CSL reply after it
+        # needs_reply: latest external message exists + no CSL reply after it
         needs_reply = (
-            latest_msg is not None
-            and latest_msg.get("direction") == "inbound"
+            latest_external is not None
             and not has_csl_reply
         )
 
@@ -6564,7 +6757,9 @@ async def get_inbox(request: Request):
     elif tab == "unmatched":
         threads = [t for t in threads if t["source"] == "unmatched"]
     elif tab == "rates":
-        threads = [t for t in threads if t["email_type"] in ("carrier_rate", "customer_rate")]
+        threads = [t for t in threads if t["email_type"] in (
+            "carrier_rate", "customer_rate", "carrier_rate_response",
+            "carrier_rate_confirmation", "rate_outreach")]
 
     # Apply additional filters
     if email_type_filter:
@@ -6655,6 +6850,37 @@ async def get_inbox_reply_alerts():
 
     return JSONResponse({"alerts": alerts, "count": len(alerts)})
 
+
+
+
+@app.get("/api/rate-response-alerts")
+async def rate_response_alerts():
+    """Return recent carrier_rate_response emails for live alert consumption."""
+    with db.get_cursor() as cur:
+        cur.execute("""
+            SELECT id, efj, gmail_thread_id, sender, subject, lane,
+                   ai_summary, sent_at, suggested_rep
+            FROM email_threads
+            WHERE email_type IN ('carrier_rate_response', 'payment_escalation',
+                                 'carrier_invoice', 'carrier_rate_confirmation')
+              AND sent_at > NOW() - INTERVAL '24 hours'
+            ORDER BY sent_at DESC
+        """)
+        rows = cur.fetchall()
+    alerts = []
+    for r in rows:
+        alerts.append({
+            "id": r["id"],
+            "efj": r["efj"],
+            "email_type": r["email_type"],
+            "sender": r["sender"],
+            "subject": r["subject"],
+            "lane": r["lane"],
+            "summary": r["ai_summary"],
+            "sent_at": r["sent_at"].isoformat() if r["sent_at"] else None,
+            "rep": r["suggested_rep"],
+        })
+    return JSONResponse({"alerts": alerts})
 
 
 @app.get("/health")
@@ -7507,6 +7733,9 @@ def _shipment_row_to_dict(row: dict) -> dict:
         "hub": row["hub"] or "",
         "driver": row["driver"] or "",
         "driver_phone": row["driver_phone"] or "",
+        "carrier_email": row.get("carrier_email") or "",
+        "trailer": row.get("trailer") or row.get("driver") or "",
+        "driver_name": row.get("driver_name") or "",
         "source": row["source"] or "sheet",
         "archived": row.get("archived", False),
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else "",
@@ -7580,13 +7809,37 @@ async def api_v2_shipments(request: Request, account: str = None, status: str = 
                 _disp, _detail = _classify_mp_display_status(_ce, s)
                 s["mp_display_status"] = _disp
                 s["mp_display_detail"] = _detail
+                s["mp_last_updated"] = _ce.get("last_event_at") or _ce.get("last_ping_at") or _ce.get("last_scraped") or ""
                 if not s.get("container_url") and _ce.get("macropoint_url"):
                     s["container_url"] = _ce["macropoint_url"]
             else:
                 s["mp_display_status"] = ""
                 s["mp_display_detail"] = ""
+                s["mp_last_updated"] = ""
     except Exception:
         pass
+
+    
+    # Enrich with driver_contacts (carrier_email, trailer_number, driver_name)
+    try:
+        with db.get_cursor() as cur:
+            cur.execute("SELECT efj, carrier_email, trailer_number, driver_name, driver_phone FROM driver_contacts")
+            dc_rows = cur.fetchall()
+        dc_map = {r["efj"]: r for r in dc_rows}
+        for s in shipments:
+            dc = dc_map.get(s["efj"])
+            if dc:
+                if dc.get("carrier_email") and not s.get("carrier_email"):
+                    s["carrier_email"] = dc["carrier_email"]
+                if dc.get("trailer_number"):
+                    s["trailer"] = dc["trailer_number"]
+                if dc.get("driver_name"):
+                    s["driver_name"] = dc["driver_name"]
+                if dc.get("driver_phone") and not s.get("driver_phone"):
+                    s["driver_phone"] = dc["driver_phone"]
+    except Exception as e:
+        import logging
+        logging.getLogger("csl").warning("driver_contacts enrichment failed: %s", e)
 
     return {"shipments": shipments, "total": len(shipments)}
 
@@ -8255,6 +8508,7 @@ def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload
     entry["status"] = status
     entry["last_scraped"] = now
     entry["webhook_updated"] = True
+    entry["last_event_at"] = now
 
     # Auto-populate macropoint_url from MPOrderID if available
     mp_order_id = payload.get("mp_order_id") or payload.get("MPOrderID") or ""
@@ -8447,6 +8701,9 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
                 "timestamp": timestamp,
             }
             entry["last_scraped"] = now
+            entry["last_ping_at"] = now
+            if not entry.get("last_event_at"):
+                entry["last_event_at"] = now
             tmp_path = TRACKING_CACHE_FILE + ".tmp"
             with open(tmp_path, "w") as f:
                 json.dump(cache, f, indent=2)
