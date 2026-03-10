@@ -94,6 +94,7 @@ function mapShipment(s, idx) {
     mpStatus: s.mp_status || "",
     mpDisplayStatus: s.mp_display_status || "",
     mpDisplayDetail: s.mp_display_detail || "",
+    mpLastUpdated: s.mp_last_updated || "",
     email_count: s.email_count || 0,
     email_max_priority: s.email_max_priority || 0,
     synced: true,
@@ -331,6 +332,20 @@ function parseDate(str) {
   if (!isNaN(withYear.getTime())) return withYear;
   return null;
 }
+function relativeTime(str) {
+  if (!str) return "";
+  const ts = str.replace(/ E[SD]?T$/, "").trim();
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return str;
+  const diffMs = Date.now() - d.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
 function isDateToday(str) {
   const d = parseDate(str); if (!d) return false;
   const t = new Date(); return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate();
@@ -547,12 +562,13 @@ function DocIndicators({ docs }) {
 }
 
 // ─── FTL Tracking Badge — shows actual Macropoint status ───
-function TrackingBadge({ tracking, mpStatus, mpDisplayStatus, mpDisplayDetail }) {
+function TrackingBadge({ tracking, mpStatus, mpDisplayStatus, mpDisplayDetail, mpLastUpdated }) {
   // mpDisplayStatus = classified status from server (On Time, Behind Schedule, At Pickup, etc.)
   // Falls back to mpStatus (raw Macropoint status) then tracking summary
   const display = (mpDisplayStatus || "").trim();
   const raw = (mpStatus || tracking?.mpStatus || "").trim();
   const detail = (mpDisplayDetail || tracking?.mpDisplayDetail || "").trim();
+  const lastUp = mpLastUpdated || tracking?.mpLastUpdated || "";
 
   // Use classified display status if available, otherwise fall back to raw
   const label = display || raw;
@@ -594,10 +610,17 @@ function TrackingBadge({ tracking, mpStatus, mpDisplayStatus, mpDisplayDetail })
     color = "#8B95A8"; bg = "rgba(139,149,168,0.12)"; border = "rgba(139,149,168,0.25)";
   }
 
+  // Build tooltip with detail + relative time of last update
+  let tooltip = detail || "";
+  if (lastUp) {
+    const ago = relativeTime(lastUp);
+    tooltip = tooltip ? `${tooltip} | Updated ${ago}` : `Updated ${ago}`;
+  }
+
   return (
     <span
-      title={detail || undefined}
-      style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 12, fontSize: 9, fontWeight: 700, color, background: bg, border: `1px solid ${border}`, whiteSpace: "nowrap", cursor: detail ? "help" : "default" }}
+      title={tooltip || undefined}
+      style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 12, fontSize: 9, fontWeight: 700, color, background: bg, border: `1px solid ${border}`, whiteSpace: "nowrap", cursor: tooltip ? "help" : "default" }}
     >{label}</span>
   );
 }
@@ -2004,7 +2027,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                     <td style={{ ...tdBase, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
                     {/* MP Status */}
                     <td style={tdBase}>
-                      {(s.moveType === "FTL" || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
+                      {(s.moveType === "FTL" || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} mpLastUpdated={s.mpLastUpdated} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
                     </td>
                     {/* Pickup (inline-editable, DD-MM + time) */}
                     <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
@@ -4832,7 +4855,7 @@ function DispatchView({
                   <td style={{ ...cellStyle(colIdx++), fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
                   {/* MP Status (FTL only) */}
                   {hasFTL && <td style={cellStyle(colIdx++)}>
-                    {(isFTL || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
+                    {(isFTL || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} mpLastUpdated={s.mpLastUpdated} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
                   </td>}
                   {/* Pickup (inline-editable, DD-MM) */}
                   <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
@@ -5735,10 +5758,10 @@ function MacropointModal({ shipment, onClose }) {
                   </div>
                 )}
 
-                {/* Last scraped timestamp */}
-                {d.lastScraped && (
-                  <div style={{ marginTop: 8, fontSize: 9, color: "#3D4557", textAlign: "right" }}>
-                    Last updated: {d.lastScraped}
+                {/* Last MP update timestamp */}
+                {(d.mpLastUpdated || d.lastScraped) && (
+                  <div style={{ marginTop: 8, fontSize: 9, color: "#3D4557", textAlign: "right" }} title={d.mpLastUpdated || d.lastScraped}>
+                    Last MP update: {relativeTime(d.mpLastUpdated || d.lastScraped) || d.lastScraped}
                   </div>
                 )}
 
