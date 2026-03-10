@@ -11,6 +11,21 @@ const apiFetch = (url, opts = {}) =>
     return res;
   });
 
+// ─── Z-Index Scale ───
+const Z = {
+  base: 0,           // ambient BG decorations
+  table: 5,          // sticky table headers
+  main: 10,          // main content area
+  sidebar: 20,       // sidebar navigation
+  inlineEdit: 30,    // inline cell status editors
+  threadPanel: 35,   // inbox thread slide-over (no backdrop)
+  panelBackdrop: 50, // slide-over backdrop overlays
+  panel: 60,         // slide-over panels (LoadSlideOver, etc.)
+  dropdown: 80,      // floating column filter dropdowns
+  modal: 200,        // centered modals (AddForm, DocPreview, Macropoint)
+  palette: 300,      // CommandPalette — always on top
+};
+
 // ─── Status Normalization ───
 const STATUS_MAP = {
   // Dray statuses
@@ -693,18 +708,23 @@ function CommandPalette({ open, query, setQuery, index, setIndex, shipments, onS
   const statusColor = (s) => CMD_STATUS_COLORS[s.status] || "#8B95A8";
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", zIndex: 9999, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "15vh" }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 560, background: "#0f1215", border: "1px solid #00b8d4", borderRadius: 12, overflow: "hidden", boxShadow: "0 0 40px rgba(0,184,212,0.15), 0 20px 60px rgba(0,0,0,0.5)", fontFamily: "'Plus Jakarta Sans', sans-serif", animation: "fade-in 0.15s ease" }}>
+    <div role="presentation" onClick={onClose} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", zIndex: Z.palette, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "15vh" }}>
+      <div role="dialog" aria-modal="true" aria-label="Search shipments"
+        onClick={e => e.stopPropagation()} style={{ width: 560, background: "#0f1215", border: "1px solid #00b8d4", borderRadius: 12, overflow: "hidden", boxShadow: "0 0 40px rgba(0,184,212,0.15), 0 20px 60px rgba(0,0,0,0.5)", fontFamily: "'Plus Jakarta Sans', sans-serif", animation: "fade-in 0.15s ease" }}>
         {/* Search input */}
         <div style={{ display: "flex", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid #1e2a30", gap: 10 }}>
-          <span style={{ color: "#00b8d4", fontSize: 13, fontWeight: 700, flexShrink: 0 }}>⌘F</span>
+          <span aria-hidden="true" style={{ color: "#00b8d4", fontSize: 13, fontWeight: 700, flexShrink: 0 }}>⌘F</span>
           <input ref={inputRef} type="text" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={handleKeyDown}
+            aria-label="Search EFJ, container, customer"
+            aria-autocomplete="list"
+            aria-controls="cmdk-results"
+            aria-activedescendant={results[index] ? `cmdk-result-${results[index].id}` : undefined}
             placeholder="Search EFJ, container, customer..."
             style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "rgba(255,255,255,0.9)", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.3px" }} />
-          <span style={{ color: "rgba(255,255,255,0.2)", fontSize: 9, background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 4, flexShrink: 0 }}>ESC</span>
+          <span aria-hidden="true" style={{ color: "rgba(255,255,255,0.2)", fontSize: 9, background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 4, flexShrink: 0 }}>ESC</span>
         </div>
         {/* Results */}
-        <div style={{ maxHeight: 340, overflowY: "auto" }}>
+        <div id="cmdk-results" role="listbox" aria-label="Search results" style={{ maxHeight: 340, overflowY: "auto" }}>
           {query.length >= 2 && results.length === 0 && (
             <div style={{ padding: "20px 18px", textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 12 }}>No results for "{query}"</div>
           )}
@@ -712,7 +732,8 @@ function CommandPalette({ open, query, setQuery, index, setIndex, shipments, onS
             <div style={{ padding: "20px 18px", textAlign: "center", color: "rgba(255,255,255,0.15)", fontSize: 11 }}>Type 2+ characters to search...</div>
           )}
           {results.map((s, i) => (
-            <div key={s.id} onClick={() => { onSelect(s); onClose(); }}
+            <div key={s.id} id={`cmdk-result-${s.id}`} role="option" aria-selected={i === index}
+              onClick={() => { onSelect(s); onClose(); }}
               style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 18px", cursor: "pointer",
                 background: i === index ? "rgba(0,184,212,0.08)" : "transparent",
                 borderLeft: i === index ? "3px solid #00b8d4" : "3px solid transparent",
@@ -1347,13 +1368,13 @@ export default function DispatchDashboard() {
       `}</style>
 
       {/* Ambient BG */}
-      <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0 }}>
+      <div aria-hidden="true" style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: Z.base }}>
         <div style={{ position: "absolute", top: "-20%", left: "-10%", width: "50%", height: "50%", background: "radial-gradient(circle, #00D4AA06 0%, transparent 70%)" }} />
         <div style={{ position: "absolute", bottom: "-20%", right: "-10%", width: "60%", height: "60%", background: "radial-gradient(circle, #0088E806 0%, transparent 70%)" }} />
       </div>
 
       {/* ═══ SIDEBAR ═══ */}
-      <div className="dash-sidebar" style={{ width: sidebarW, minHeight: "100vh", background: "#0D1119", borderRight: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 16, gap: 4, position: "relative", zIndex: 20, flexShrink: 0 }}>
+      <div className="dash-sidebar" style={{ width: sidebarW, minHeight: "100vh", background: "#0D1119", borderRight: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 16, gap: 4, position: "relative", zIndex: Z.sidebar, flexShrink: 0 }}>
         <div style={{ width: 52, height: 52, borderRadius: 12, background: "#0F1A14", border: "1px solid rgba(0,222,180,0.25)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20, animation: "glow-pulse 3s ease infinite", cursor: "pointer", overflow: "hidden", padding: 2, boxShadow: "0 0 20px rgba(0,212,170,0.15)" }}
           onClick={() => { setActiveView("dashboard"); setSelectedRep(null); }}>
           <img src="/logo.svg" alt="CSL" style={{ width: 44, height: 44, objectFit: "contain", filter: "hue-rotate(-15deg) saturate(1.3)" }} />
@@ -1362,13 +1383,15 @@ export default function DispatchDashboard() {
           const isActive = activeView === item.key;
           return (
             <button key={item.key} className="nav-item"
+              aria-label={item.label}
+              aria-current={isActive ? "page" : undefined}
               onClick={() => { setActiveView(item.key); setSelectedRep(null); }}
               style={{ width: sidebarW - 12, padding: "10px 0", borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
                 background: isActive ? "rgba(0,212,170,0.10)" : "transparent",
                 borderLeft: isActive ? "3px solid #00D4AA" : "3px solid transparent",
                 color: isActive ? "#00D4AA" : "#8B95A8" }}>
-              <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d={item.icon} /></svg>
-              {!sidebarCollapsed && <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.5px" }}>{item.label}</span>}
+              <svg aria-hidden="true" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d={item.icon} /></svg>
+              {!sidebarCollapsed && <span aria-hidden="true" style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.5px" }}>{item.label}</span>}
             </button>
           );
         })}
@@ -1380,7 +1403,7 @@ export default function DispatchDashboard() {
         onSelect={(s) => handleLoadClick(s)} onClose={() => setCmdkOpen(false)} />
 
       {/* ═══ MAIN CONTENT ═══ */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative", zIndex: 10 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative", zIndex: Z.main }}>
         {/* Top Bar */}
         <div className="dash-topbar" style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.08)", background: "#0D1119" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1405,7 +1428,7 @@ export default function DispatchDashboard() {
                 <span style={{ color: "#f87171", fontSize: 13 }}>⚠</span>
                 <span style={{ fontSize: 11, color: "#f87171", fontWeight: 600 }}>API Error: {apiError}</span>
               </div>
-              <button onClick={() => setApiError(null)} style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 12, padding: "2px 6px" }}>✕</button>
+              <button onClick={() => setApiError(null)} aria-label="Dismiss error" style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 12, padding: "2px 6px" }}>✕</button>
             </div>
           )}
           {!loaded ? (
@@ -1494,10 +1517,11 @@ export default function DispatchDashboard() {
       </div>
 
       {showAddForm && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, animation: "fade-in 0.2s ease" }}
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal, animation: "fade-in 0.2s ease" }}
           onClick={() => setShowAddForm(false)}>
-          <div onClick={e => e.stopPropagation()} className="glass-strong" style={{ borderRadius: 20, padding: 28, width: 460, maxHeight: "85vh", overflow: "auto", animation: "slide-up 0.3s ease", border: "1px solid rgba(255,255,255,0.08)" }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: "#F0F2F5", marginBottom: 4 }}>New Load</div>
+          <div role="dialog" aria-modal="true" aria-labelledby="add-form-title"
+            onClick={e => e.stopPropagation()} className="glass-strong" style={{ borderRadius: 20, padding: 28, width: 460, maxHeight: "85vh", overflow: "auto", animation: "slide-up 0.3s ease", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <div id="add-form-title" style={{ fontSize: 18, fontWeight: 800, color: "#F0F2F5", marginBottom: 4 }}>New Load</div>
             <div style={{ fontSize: 11, color: "#8B95A8", marginBottom: 20 }}>Create a new shipment</div>
             <AddForm onSubmit={handleAddShipment} onCancel={() => setShowAddForm(false)} accounts={accounts} />
           </div>
@@ -1753,10 +1777,11 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
                     <div style={{ fontSize: 9, color: "#5A6478", marginTop: 1 }}>{alert.detail}{alert.timestamp ? ` \u00B7 ${timeAgo(alert.timestamp)}` : ""}</div>
                   </div>
                   <span style={{ fontSize: 8, fontWeight: 600, padding: "2px 6px", borderRadius: 6, background: `${config.color}18`, color: config.color, border: `1px solid ${config.color}33`, flexShrink: 0, whiteSpace: "nowrap" }}>{config.label}</span>
-                  <span onClick={(e) => { e.stopPropagation(); onDismissAlert(alert.id); }}
-                    style={{ fontSize: 12, color: "#3D4557", cursor: "pointer", flexShrink: 0, padding: "0 2px", transition: "color 0.15s ease" }}
+                  <button onClick={(e) => { e.stopPropagation(); onDismissAlert(alert.id); }}
+                    aria-label="Dismiss alert"
+                    style={{ background: "none", border: "none", fontSize: 12, color: "#3D4557", cursor: "pointer", flexShrink: 0, padding: "0 2px", transition: "color 0.15s ease" }}
                     onMouseEnter={e => e.currentTarget.style.color = "#8B95A8"}
-                    onMouseLeave={e => e.currentTarget.style.color = "#3D4557"}>&times;</span>
+                    onMouseLeave={e => e.currentTarget.style.color = "#3D4557"}>&times;</button>
                 </div>
               );
             })}
@@ -1985,7 +2010,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
 
   // Inline edit styles (reuse dispatch pattern)
   const inlineInputStyle = { background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 4, color: "#F0F2F5", padding: "2px 5px", fontSize: 11, width: 90, outline: "none", fontFamily: "'JetBrains Mono', monospace" };
-  const thStyle = { padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: 5 };
+  const thStyle = { padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: Z.table };
 
   // Total count for toggle badges (both views show same data, different layout)
   const totalCount = displayShipsFiltered.length;
@@ -2003,7 +2028,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
     const isOpen = repOpenFilterCol === label;
     const opts = isFilterable ? (repColFilterOpts[filterKey] || []) : [];
     return (
-      <th key={label} style={{ ...thStyle, ...extraStyle, position: "relative", zIndex: isOpen ? 50 : 5,
+      <th key={label} style={{ ...thStyle, ...extraStyle, position: "relative", zIndex: isOpen ? Z.panelBackdrop : Z.table,
         borderBottom: hasFilter ? "2px solid rgba(0,212,170,0.4)" : thStyle.borderBottom,
         background: hasFilter ? "rgba(0,212,170,0.04)" : thStyle.background,
         color: hasFilter ? "#00D4AA" : thStyle.color }}>
@@ -2020,7 +2045,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
         </div>
         {isOpen && isFilterable && (
           <div className="col-filter-dd" onClick={e => e.stopPropagation()}
-            style={{ position: "fixed", top: filterDropdownPos.top, left: filterDropdownPos.left, zIndex: 9999, background: "#1A2236",
+            style={{ position: "fixed", top: filterDropdownPos.top, left: filterDropdownPos.left, zIndex: Z.dropdown, background: "#1A2236",
               border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, minWidth: 150,
               maxHeight: 300, overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
             <div onClick={() => { setRepColumnFilters(f => { const n = {...f}; delete n[filterKey]; return n; }); setRepOpenFilterCol(null); }}
@@ -2081,7 +2106,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                     <td style={{ ...tdBase, position: "relative" }}
                       onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                       {isEditing && inlineEditField === "status" ? (
-                        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 20, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 220, overflowY: "auto", minWidth: 120 }}>
+                        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 220, overflowY: "auto", minWidth: 120 }}>
                           {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                             const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
                             return (
@@ -3015,14 +3040,14 @@ function InboxView({ handleLoadClick }) {
     else { setSortCol(col); setSortDir("desc"); }
   };
 
-  const thStyle = { padding: "6px 8px", textAlign: "left", fontSize: 8, fontWeight: 600, color: "#8B95A8", letterSpacing: "1px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: 5, cursor: "pointer", whiteSpace: "nowrap", userSelect: "none" };
+  const thStyle = { padding: "6px 8px", textAlign: "left", fontSize: 8, fontWeight: 600, color: "#8B95A8", letterSpacing: "1px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: Z.table, cursor: "pointer", whiteSpace: "nowrap", userSelect: "none" };
   const cellStyle = { padding: "5px 8px", fontSize: 10, color: "#F0F2F5", borderBottom: "1px solid rgba(255,255,255,0.03)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 
   const renderFilterDrop = (colKey, w) => {
     if (openFilterCol !== colKey) return null;
     const options = filterOpts[colKey] || [];
     return (
-      <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 60, background: "#141A28", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: 4, minWidth: w || 120, maxHeight: 200, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}
+      <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.dropdown, background: "#141A28", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: 4, minWidth: w || 120, maxHeight: 200, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}
         onClick={e => e.stopPropagation()}>
         <div style={{ padding: "4px 8px", fontSize: 9, color: "#8B95A8", cursor: "pointer", borderRadius: 4 }}
           onClick={() => { setColFilters(f => { const n = { ...f }; delete n[colKey]; return n; }); setOpenFilterCol(null); }}>
@@ -3211,7 +3236,7 @@ function InboxView({ handleLoadClick }) {
 
       {/* Thread Detail Slide-Over */}
       {selThread && (
-        <div style={{ position: "fixed", right: 0, top: 0, height: "100vh", width: 480, zIndex: 35, background: "#0F1420", borderLeft: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", boxShadow: "-8px 0 30px rgba(0,0,0,0.5)", animation: "slideInRight 0.2s ease" }}>
+        <div style={{ position: "fixed", right: 0, top: 0, height: "100vh", width: 480, zIndex: Z.threadPanel, background: "#0F1420", borderLeft: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", boxShadow: "-8px 0 30px rgba(0,0,0,0.5)", animation: "slideInRight 0.2s ease" }}>
           {/* Header */}
           <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -3844,8 +3869,8 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
 
   return (
     <>
-      <div onClick={() => setSelectedShipment(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 50, animation: "fade-in 0.2s ease" }} />
-      <div className="glass-strong" style={{ position: "fixed", top: 0, right: 0, width: 380, height: "100vh", zIndex: 60, display: "flex", flexDirection: "column", overflow: "hidden", animation: "slide-right 0.3s ease", borderLeft: "1px solid rgba(255,255,255,0.08)" }}>
+      <div aria-hidden="true" onClick={() => setSelectedShipment(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: Z.panelBackdrop, animation: "fade-in 0.2s ease" }} />
+      <div role="dialog" aria-modal="true" aria-label={`Shipment details — ${selectedShipment.loadNumber}`} className="glass-strong" style={{ position: "fixed", top: 0, right: 0, width: 380, height: "100vh", zIndex: Z.panel, display: "flex", flexDirection: "column", overflow: "hidden", animation: "slide-right 0.3s ease", borderLeft: "1px solid rgba(255,255,255,0.08)" }}>
         <div style={{ flex: 1, overflow: "auto" }}>
           {/* Header */}
           <div style={{ padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -3900,7 +3925,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                 );
               })()}
             </div>
-            <button onClick={() => setSelectedShipment(null)} style={{ background: "rgba(255,255,255,0.05)", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 14, width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            <button onClick={() => setSelectedShipment(null)} aria-label="Close shipment details" style={{ background: "rgba(255,255,255,0.05)", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 14, width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
           </div>
 
           {/* Quick Action Strip */}
@@ -4419,7 +4444,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
         <div style={{
           position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", backdropFilter: "blur(12px)",
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          zIndex: 200, padding: 20,
+          zIndex: Z.modal, padding: 20,
         }} onClick={() => setPreviewDoc(null)}>
           <div onClick={e => e.stopPropagation()} style={{
             width: "90%", maxWidth: 900, maxHeight: "90vh", display: "flex", flexDirection: "column",
@@ -4450,6 +4475,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                   Download
                 </button>
                 <button onClick={() => setPreviewDoc(null)}
+                  aria-label="Close document preview"
                   style={{ background: "rgba(255,255,255,0.06)", border: "none", color: "#8B95A8", cursor: "pointer", fontSize: 14, width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   ✕
                 </button>
@@ -4964,7 +4990,7 @@ function DispatchView({
                       borderBottom: hasColFilter ? "2px solid rgba(0,212,170,0.4)" : "1px solid rgba(255,255,255,0.08)",
                       borderRight: ci < DISPATCH_COLS.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none",
                       background: hasColFilter ? "rgba(0,212,170,0.04)" : "#0D1119",
-                      position: "sticky", top: 0, zIndex: isOpen ? 50 : 5, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", maxWidth: col.w }}>
+                      position: "sticky", top: 0, zIndex: isOpen ? Z.panelBackdrop : Z.table, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", maxWidth: col.w }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                       <span style={{ flex: 1 }} onClick={() => {
                         if (sortCol === col.key) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -4983,7 +5009,7 @@ function DispatchView({
                     </div>
                     {isOpen && (
                       <div className="col-filter-dd" onClick={e => e.stopPropagation()}
-                        style={{ position: "absolute", top: "100%", left: 0, marginTop: 2, zIndex: 60, background: "#1A2236",
+                        style={{ position: "absolute", top: "100%", left: 0, marginTop: 2, zIndex: Z.dropdown, background: "#1A2236",
                           border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, minWidth: 150,
                           maxHeight: 300, overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
                         <div onClick={() => { setColumnFilters(f => { const n = {...f}; delete n[col.key]; return n; }); setOpenFilterCol(null); }}
@@ -5036,7 +5062,7 @@ function DispatchView({
                   <td style={{ ...cellStyle(colIdx++), position: "relative" }}
                     onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                     {isInlineEditing && inlineEditField === "status" ? (
-                      <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 20, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 220, overflowY: "auto", minWidth: 120 }}>
+                      <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 220, overflowY: "auto", minWidth: 120 }}>
                         {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                           const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
                           return (
@@ -5233,7 +5259,7 @@ function DispatchView({
                     <span style={{ fontSize: 9, color: selectedShipment.synced ? "#34d399" : "#fbbf24", fontWeight: 600 }}>{selectedShipment.synced ? "Synced" : "Syncing..."}</span>
                   </div>
                 </div>
-                <button onClick={() => setSelectedShipment(null)} style={{ background: "rgba(255,255,255,0.05)", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 14, width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                <button onClick={() => setSelectedShipment(null)} aria-label="Close shipment details" style={{ background: "rgba(255,255,255,0.05)", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 14, width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
               </div>
 
               {/* FTL Tracking Preview Card */}
@@ -5680,7 +5706,7 @@ function DispatchView({
         <div style={{
           position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", backdropFilter: "blur(12px)",
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          zIndex: 200, padding: 20,
+          zIndex: Z.modal, padding: 20,
         }} onClick={() => setPreviewDoc(null)}>
           <div onClick={e => e.stopPropagation()} style={{
             width: "90%", maxWidth: 900, maxHeight: "90vh", display: "flex", flexDirection: "column",
@@ -5711,6 +5737,7 @@ function DispatchView({
                   Download
                 </button>
                 <button onClick={() => setPreviewDoc(null)}
+                  aria-label="Close document preview"
                   style={{ background: "rgba(255,255,255,0.06)", border: "none", color: "#8B95A8", cursor: "pointer", fontSize: 14, width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   ✕
                 </button>
@@ -5791,7 +5818,7 @@ function MacropointModal({ shipment, onClose }) {
     : "#f59e0b";
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, animation: "fade-in 0.2s ease", padding: 20 }}
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal, animation: "fade-in 0.2s ease", padding: 20 }}
       onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 900, maxHeight: "90vh", overflow: "auto",
         background: "linear-gradient(135deg, #0D1119, #141A28)", borderRadius: 20, border: "1px solid rgba(255,255,255,0.08)", animation: "slide-up 0.3s ease" }}>
@@ -6480,9 +6507,9 @@ function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders, unbilledStats
               <thead>
                 <tr>
                   {["Order #", "Container", "Customer", "Rep", "Entered", "Age", "Tracking", "Billing"].map(h => (
-                    <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: 5 }}>{h}</th>
+                    <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: Z.table }}>{h}</th>
                   ))}
-                  <th style={{ padding: "10px 14px", width: 40, background: "#0D1119", position: "sticky", top: 0, zIndex: 5, borderBottom: "1px solid rgba(255,255,255,0.04)" }} />
+                  <th style={{ padding: "10px 14px", width: 40, background: "#0D1119", position: "sticky", top: 0, zIndex: Z.table, borderBottom: "1px solid rgba(255,255,255,0.04)" }} />
                 </tr>
               </thead>
               <tbody>
