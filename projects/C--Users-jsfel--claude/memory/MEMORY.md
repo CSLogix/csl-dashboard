@@ -10,10 +10,12 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [macropoint-integration.md](macropoint-integration.md) — webhook flow, tracking events, GPS inference, timeline
 - [patches-applied.md](patches-applied.md) — full list (65 patches)
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
+- [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 
 ## Git — Mar 10, 2026
 - **Baseline `7c93e8b`** (Mar 9): Clean baseline capturing all production code
 - **Latest `884790e`** (Mar 10): Server patches (49c09d9) + frontend fixes (3c44b59) merged
+- **Delivered flow fix** (Mar 10): Archive routing overhaul — pending commit (see patches below)
 - **Repo**: `CSLogix/CSLogix_Bot` (private), single `master` branch
 - **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
@@ -56,6 +58,13 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ## Recent Dashboard Changes (Deployed)
 
+### Magic Parse Modal + Quick Parse API — Mar 10, 2026
+- **`POST /api/quick-parse`** live on VPS (Claude Sonnet 4.6): extracts `efj_number`, `rate`, `container_number`, `carrier`, `confidence` from freeform text. Returns 422 if extraction fails. Patch: `patch_quick_parse.py`
+- **No `@require_auth` decorator** — auth handled entirely by `AuthMiddleware` middleware class (all `/api/` routes auto-protected). Do NOT use `@require_auth` on new endpoints.
+- **Magic Parse button** in top nav bar (purple sparkle, always visible). Opens modal: textarea → "Extract Fields" → 2×2 color-coded result grid (teal=EFJ, green=rate, blue=container, orange=carrier) + HIGH/MEDIUM/LOW confidence badge + "Open EFJ# →" jump button
+- **State added to DispatchDashboard**: `showParseModal`, `parseText`, `isParsing`, `parseResult`, `parseError`. ESC closes modal (wired into existing keyboard handler dep array).
+- Build 706KB (`index-H-OOiG7c.js`), deployed Mar 10 19:30 → VPS confirmed active
+
 ### Terminal Ground Truth Panel — Mar 10, 2026
 - **Both LoadSlideOver instances** (DispatchView ~line 4275, RepDashboardView ~line 5563) upgraded from minimal "Terminal Status" badge to full Ground Truth card
 - **Red card** (`rgba(239,68,68,0.08)`) when `t.hasHolds` is true; **blue card** (`rgba(56,189,248,0.08)`) when clear
@@ -68,6 +77,16 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - Both server Python + frontend JS built & deployed
 - See [rateiq.md](rateiq.md) for full details
 
+### Delivered Flow / Archive Routing Overhaul — Mar 10, 2026
+- **Bug fixed**: EFJ107405 (MD Metal) was routing to Completed Eli — missing rep mapping + silent fallback
+- **`csl_sheet_writer.py`**: `sheet_archive_row()` now aborts with WARNING if rep=None (no longer falls to Eli)
+- **`csl_bot.py`**: MD Metal added to `ACCOUNT_REPS`; replaced hardcoded dict with `_get_rep_for_account(sh, name)` + TTL-cached `_load_account_reps_from_sheet()` (20-min TTL, force-refresh on cache miss, case-insensitive)
+- **Archive is atomic**: Rep lookup happens BEFORE `pg_archive_shipment()` — if rep not found, BOTH PG + sheet skip (no ghost records)
+- **`app.py`**: Removed `billed_closed` auto-archive from old status endpoint. Added billing gate to v2 endpoint: if `billed_closed` with active unbilled order → 409 "Cannot close: Active billing record found."
+- **Billing gate rule**: Archive ONLY fires via `_archive_shipment_on_close()` (unbilled order closed) OR `billed_closed` with no unbilled record. Bot "Returned to Port" path also atomic.
+- **Patch files**: `fix_efj107405_recovery.py`, `patch_archive_routing_fix.py`, `fix_log_calls.py`
+- **Schema doc**: `memory/unbilled-orders.md` — full data dictionary
+
 ### Tolead MP URL + Ghost Cleanup + Daily Summary Fix — Mar 10, 2026
 - **Tolead MP URLs now populate**: `_get_sheet_hyperlinks()` added to both `csl_sheet_sync.py` and `app.py` Tolead readers — extracts Macropoint visibility URLs from EFJ column hyperlinks
 - **Ghost record cleanup**: Fixed `sync_tolead()` ghost cleanup (was `conn.cursor()` NameError → proper `db.get_conn()`), now migrates `tracking_events` FK + `container_url` before DELETE
@@ -78,91 +97,17 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Daily summary fixed**: Was crashing since ~Mar 2 with `ImportError: cannot import name 'scrape_macropoint' from 'ftl_monitor'` (function removed from ftl_monitor, daily_summary has its own copy now). Added `_is_this_week()` date filter — only scrapes loads picking up/delivering this week
 - **Patches**: `patch_tolead_sync_fix.py`, `fix_app_tolead_container_url.py`, `fix_ghost_and_driver.py`, `patch_daily_summary_datefilter.py`
 
-### Tester Bug Fixes & New Statuses — Mar 9, 2026
-- **7 new dray statuses**: On Hold (`on_hold`), Returned to Port (`returned_to_port`), Released (`released`), At Yard (`at_yard`), Rail (`rail`), Transload (`transload`), On Site Loading (`on_site_loading`)
-- STATUS_MAP changes: `"hold"→on_hold` (was pending), `"returned to port"→returned_to_port` (was empty_return), `"discharged"→released` (was at_port)
-- **SSL/Vessel field** added to LoadSlideOver for dray loads (editable, maps to PG `vessel` column)
-- **Container/Load# and BOL/Booking** added as editable fields in slide-over
-- **Edit persistence fix**: `fetchData` now merges with local state — shipments with `synced: false` are preserved across poll cycles (was fully replacing, wiping mid-edit values)
-- **Polling reduced** from 60s → 90s to reduce sync churn
-- **FIELD_TO_PG** expanded: `ssl→"vessel"`, `container→"container"`
-- **SLIDE_FIELD_MAP** expanded: `ssl`, `container`, `bol`
-- **MD Metal** account tab already existed in Master Tracker sheet
+### Mar 9, 2026 (condensed)
+- **7 new dray statuses** + STATUS_MAP fixes. SSL/Vessel + Container + BOL editable in slide-over. Edit persistence fix (`synced:false` preserved across polls). Polling 60s→90s.
+- **MP Status Classifier**: `_classify_mp_display_status()` server-side. `TrackingBadge` rewritten. Schedule alert banners. See [macropoint-integration.md](macropoint-integration.md)
+- **Column header filter dropdowns**: DispatchView + RepDashboardView (date presets, stacked filters). Helper fns: `applyColFilters()`, `buildColFilterOptions()` etc.
+- **Tracking Events + GPS proximity**: `tracking_events` PG table, 0.5mi arrival / 2.0mi departure inference. Fixed ET timestamp + cache fallback bugs.
+- **Unbilled reconciliation**: LEFT JOIN + auto-archive on close. `db.get_cursor()` is context manager → `with db.get_cursor() as cursor:` (RealDictCursor)
+- **Inbox overhaul**: Reply detection (sender-pattern), smart classification (P2–P5), InboxView table rewrite, live alert polling, daily digest. See [inbox-command-center.md](inbox-command-center.md)
+- **Rate IQ overhaul**: Lane groups accordion, UNION search, Quote→Rate IQ feedback, AI extraction (Claude Haiku→Sonnet 4.6). See [rateiq.md](rateiq.md)
 
-### MP Status Classifier — Mar 9, 2026
-- Server-side `_classify_mp_display_status()` function computes user-friendly status from raw MP status + schedule alert + GPS staleness
-- Webhook handler now stores `schedule_alert`, `schedule_alert_code`, `distance_to_stop`, `eta_to_stop` in tracking cache
-- All 3 API endpoints enriched: `/api/v2/shipments` (mp_display_status/mp_display_detail), `/api/macropoint/{efj}` (mpDisplayStatus/mpDisplayDetail/scheduleAlert/distanceToStop), `/api/shipments/tracking-summary`
-- Frontend `TrackingBadge` rewritten with classified statuses: On Time (green), Behind Schedule (red), In Transit (blue), At Pickup (amber), At Delivery (purple), Awaiting Update (orange), No Signal (red), Assigned (gray), Delivered (green)
-- Hover tooltip shows detail (e.g. "4.2h ahead", "GPS stale")
-- Column filter, sort, search, CSV export all use `mpDisplayStatus`
-- Schedule alert banners in MacropointModal and LoadSlideOver
-- See [macropoint-integration.md](macropoint-integration.md)
-
-### Column Header Filter Dropdowns — Mar 9, 2026
-- Excel/Google Sheets style column filtering added to DispatchView and RepDashboardView tables
-- **DispatchView**: Account, Status, MP Status, Pickup, Origin, Destination, Delivery columns filterable via dropdown; uses `position: absolute`
-- **RepDashboardView Ops/Master tables**: Account, Carrier, PU, DEL, Status filterable
-- **RepDashboardView FTL table**: Account, Status, MP Status, Pickup, Origin, Destination, Delivery filterable; uses `position: fixed` to escape `overflow:hidden` clipping
-- Date columns use presets: Today, Tomorrow, This Week, Past Due
-- Active filter indicated by green icon; column filters stack with existing filter bar
-- Helper functions at top of file: `isDateThisWeek()`, `COL_FILTER_KEY_MAP`, `DATE_FILTER_PRESETS`, `matchesDatePreset()`, `applyColFilters()`, `buildColFilterOptions()`
-
-### Tracking Events Fix — Mar 9, 2026
-- Fixed 3 bugs preventing GPS-inferred events from reaching dashboard: "ET" timestamp rejected by PG, cache fallback short-circuited, `fmtTs()` NaN on "ET" suffix
-- `_persist_tracking_event()` now converts ET→offset, `/api/macropoint` merges cache into PG timeline, frontend uses `/\dT\d/` ISO check
-- See [macropoint-integration.md](macropoint-integration.md)
-
-### Tracking Events + GPS Proximity Inference — Mar 9, 2026
-- `tracking_events` PG table, `_build_timeline_from_pg()`, GPS proximity stop detection (0.5mi arrival / 2.0mi departure)
-- Compact Schedule & Tracking table in both slide-overs: 4-col grid (Stop | Sched | Arrived | Departed)
-- See [macropoint-integration.md](macropoint-integration.md)
-
-### Macropoint Sync Fix — Mar 8, 2026
-- 5 bugs fixed (stop_times, Tracking Completed→Delivered, MP URLs, container_url PG, v2 enrichment)
-
-### Unbilled ↔ Shipments Reconciliation — Mar 9, 2026
-- LEFT JOIN unbilled_orders↔shipments, auto-archive on close, bulk-close-delivered
-- `db.get_cursor()` is context manager — use `with db.get_cursor() as cursor:`. Returns `RealDictCursor` (dict rows)
-
-### Tolead Fixes + Email Spam + Date Format — Mar 8, 2026
-- Email spam fix (skip None-all-around comparisons), MM/DD date format, Tolead dedup, sync overwrite protection
-
-### Sheet Dual-Write + Fallback Toggle — Mar 6, 2026
-- `csl_sheet_writer.py` fire-and-forget module. `/api/health` endpoint. DataSourceToggle in AnalyticsView
-
-### Macropoint Webhook — Mar 6, 2026
-- Real-time alerts via BackgroundTasks + `csl_ftl_alerts.py`. GET handler (native protocol). See [macropoint-integration.md](macropoint-integration.md)
-
-### Inbox Overhaul: Smart Classification + Table Redesign — Mar 9, 2026
-- **Reply detection fixed**: Replaced empty `sent_messages` table with sender-pattern matching (evansdelivery/commonsenselogistics domains). 12/333 threads need reply (was 352/352)
-- **Scanner INSERT bug fixed**: `ON CONFLICT DO NOTHING` → `DO UPDATE RETURNING id` (was causing 153 errors/3 days)
-- **Smart classification**: CarrierPay NP→payment_escalation (P5), carrier_invoice (P4), carrier_rate_confirmation (P4), POD body-detect (P3), rate_outreach (P2), carrier_rate_response (P4, thread-based)
-- **InboxView rewritten**: Compact table (36-40px rows, full width), sorting, column filters, search, 480px slide-over detail panel
-- **Live alerts**: rate_response (teal), payment_escalation (red), send_final_charges (amber) — polled via `/api/rate-response-alerts`
-- **Rep dashboard pills**: "Needs Reply" (red) + "Rate Responses" (teal) per rep
-- **Daily digest**: `csl_inbox_digest.py` at 7 AM ET Mon-Fri — 3 emails: master reps (by account), Boviet (by project), Tolead (by hub) + unbilled orders
-- **Immediate email**: payment_escalation only, sent in real-time
-- See [inbox-command-center.md](inbox-command-center.md)
-
-### Rate IQ Overhaul — Mar 9, 2026
-- **Customer rate detection**: KNOWN_CUSTOMER_SENDERS + CUSTOMER_QUOTE_LANGUAGE massively expanded in both scanner + classifier (maoinc, manitoulin, OOG, dims, unicode×, hazmat, 53ft, inland rate, service combos, IMO)
-- **AI rate extraction**: Both `csl_inbox_scanner.py` and `csl_email_classifier.py` now use Claude Haiku for carrier rate extraction (`_ai_extract_rate()` → JSON, regex fallback for missing fields)
-- **Lane groups accordion**: Rate Intel panel now shows grouped lanes with floor/avg/ceiling/source badges per lane (EMAIL/IMPORT/QUOTE); accordion expand/collapse; header shows "N lanes, M quotes"
-- **search-lane UNION**: Queries `rate_quotes` + `lane_rates` (243 rows) + won `quotes` together; groups by normalized origin/destination; returns `lane_groups[]` + per-group stats + sources breakdown
-- **Quote → Rate IQ feedback**: `_index_quote_to_rate_iq()` called on save/update — dray quotes with carrier_total get written to `rate_quotes` with `source_quote_id` FK
-- **Save Quote**: Renamed from "Save Draft"; Dray IQ History filter locked to Dray/Dray+Transload/OTR/Transload move types; "Saved" chip replaces "Drafts"
-- **Frontend**: QuoteBuilder.jsx updated + built + deployed
-
-### Inbox Command Center — Mar 6, 2026
-- Initial InboxView nav tab, thread grouping, classification feedback, email badges. See [inbox-command-center.md](inbox-command-center.md)
-
-### Older (Mar 5-6)
-- AddForm camelCase→snake_case fix, status filter dropdowns
-- Rep Dashboard (Dray/FTL views, MM/DD dates, carrier info)
-- Platform Audit v2: 12/12 DONE
-- Design Spec Color Upgrade, Rate IQ, SlideOver Panel enhancements
-- Live Alerts, Cron Cards, Email Classification, Add Load, Auto-archive
+### Mar 5-8, 2026 (condensed)
+- Macropoint sync fix (5 bugs), webhook, GPS tracking. Sheet dual-write + fallback toggle. Tolead dedup + date fixes. AddForm snake_case. Rep Dashboard. Live Alerts, Cron Cards.
 
 ## Key Technical Patterns
 - **State dedup**: JSON files (`ftl_sent_alerts.json`) prevent duplicate bot alerts. Thread-safe `fcntl.flock()`
