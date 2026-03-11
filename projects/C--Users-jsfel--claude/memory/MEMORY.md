@@ -42,12 +42,23 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Health Check**: every 15 min, 6AM-7PM
 - **Macropoint Screenshots**: every 30 min, 7AM-7PM Mon-Fri
 - **Vessel Schedules**: 6:00 AM & 12:00 PM Mon-Fri
-- **Sheet→PG Sync**: every 10 min, 6AM-8PM (Tolead+Boviet only)
+- **Sheet→PG Sync**: every 10 min, 6AM-8PM (Tolead+Boviet+Master)
 
 ### Monitoring
 - `cron_log_parser.py` + `health_check.py` + dashboard "Scheduled Jobs" cron cards
 
 ## Recent Bot Changes (Deployed)
+
+### Date Normalizer + LFD Fix — Mar 10, 2026
+- **`/root/csl-bot/date_normalizer.py`**: `clean_date(raw) -> str | None` — normalizes all date formats to `MM-DD` or `MM-DD HH:MM` (military time)
+- **Handles**: Excel serial numbers (46101→03-20), `M/D/YYYY HH:MM:SS`, `MM/DD/YY`, `YYYY-MM-DD`, `DD-Mon`, AM/PM, midnight stripping (00:00 → date only)
+- **Gate approach**: `csl_pg_writer.py` normalizes `eta/lfd/pickup_date/delivery_date/return_date` in `pg_update_shipment()` before every write — all callers benefit automatically
+- **Sheet sync**: `csl_sheet_sync.py` normalizes dates in `_upsert_shipment()`, `_upsert_master_shipment()`, and `_merge_master_shipment()`
+- **LFD/pickup fix**: `csl_bot.py` line ~1422 changed from `if lfd: pickup = lfd` (destructive overwrite) to `if lfd and not pickup: pickup = lfd` (fallback only). LFD now preserved as distinct field
+- **LFD in PG write**: Bot main loop now passes `lfd=` to `pg_update_shipment()` (was missing — LFD column was empty for most records)
+- **Backfill**: 114 shipments, 177 date fields cleaned (Excel serials, format soup, midnight times)
+- **Patches**: `date_normalizer.py` (new), `patch_date_normalizer.py`, `backfill_clean_dates.py`
+- **Sheet sync already mapped LFD** (col J → `lfd` in PG) but only worked for accounts where reps entered data manually
 
 ### Terminal Normalizer — Mar 10, 2026
 - **`/root/csl-bot/terminal_normalizer.py`**: `normalize_origin(raw) -> str` — maps messy terminal strings to canonical "Name, STATE" format

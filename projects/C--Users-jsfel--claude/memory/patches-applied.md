@@ -62,3 +62,6 @@
 | `fix_app_tolead_container_url.py` | app.py: Tolead legacy reader MP URL extraction from hyperlinks + clear driver field |
 | `fix_ghost_and_driver.py` | One-off: Migrate DFW1260308010→EFJ107432 (tracking_events + container_url), clean 4 additional ghosts, clear 47 trailer-data driver fields |
 | `patch_daily_summary_datefilter.py` | daily_summary.py: `_is_this_week()` date filter — only scrape loads picking up/delivering this week |
+| `date_normalizer.py` | Shared date normalizer: `clean_date()` → MM-DD / MM-DD HH:MM. Handles Excel serials, all date formats, midnight stripping |
+| `patch_date_normalizer.py` | Gate normalization in csl_pg_writer + LFD/pickup separation in csl_bot + sheet sync normalization |
+| `backfill_clean_dates.py` | One-time PG backfill: 114 shipments, 177 fields normalized (Excel serials, format soup, midnight) |
