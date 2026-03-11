@@ -877,6 +877,11 @@ export default function DispatchDashboard() {
   const prevRateAlertsRef = useRef(new Set());
   const [inboxThreads, setInboxThreads] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showParseModal, setShowParseModal] = useState(false);
+  const [parseText, setParseText] = useState("");
+  const [isParsing, setIsParsing] = useState(false);
+  const [parseResult, setParseResult] = useState(null);
+  const [parseError, setParseError] = useState(null);
   const [editField, setEditField] = useState(null);
   const [editValue, setEditValue] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -1090,12 +1095,13 @@ export default function DispatchDashboard() {
       if (e.key === "Escape") {
         if (cmdkOpen) { setCmdkOpen(false); return; }
         if (selectedShipment) { setSelectedShipment(null); return; }
+        if (showParseModal) { setShowParseModal(false); setParseResult(null); setParseError(null); return; }
         if (showAddForm) { setShowAddForm(false); return; }
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [selectedShipment, showAddForm, cmdkOpen]);
+  }, [selectedShipment, showAddForm, showParseModal, cmdkOpen]);
 
   const addSheetLog = useCallback((msg) => {
     setSheetLog(prev => [{ time: new Date().toLocaleTimeString(), msg }, ...prev].slice(0, 25));
@@ -1302,6 +1308,31 @@ export default function DispatchDashboard() {
     }
   };
 
+  const handleQuickParse = async () => {
+    if (!parseText.trim()) return;
+    setIsParsing(true);
+    setParseResult(null);
+    setParseError(null);
+    try {
+      const res = await apiFetch("/api/quick-parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: parseText.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setParseError(err.error || `Parse failed (${res.status})`);
+        return;
+      }
+      const data = await res.json();
+      setParseResult(data);
+    } catch (e) {
+      setParseError("Network error — try again");
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
   const handleAddShipment = async (data) => {
     const { pendingDocs, ...loadData } = data;
     try {
@@ -1469,6 +1500,16 @@ export default function DispatchDashboard() {
                 SHEETS MODE
               </div>
             )}
+            <button onClick={() => { setShowParseModal(true); setParseResult(null); setParseError(null); }}
+              title="Magic Parse — paste any logistics text to extract load data"
+              style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, fontSize: 10, fontWeight: 700, cursor: "pointer", background: "rgba(139,92,246,0.10)", color: "#A78BFA", border: "1px solid rgba(139,92,246,0.25)", letterSpacing: "0.3px", transition: "all 0.15s" }}
+              onMouseEnter={e => { e.currentTarget.style.background = "rgba(139,92,246,0.18)"; e.currentTarget.style.borderColor = "rgba(139,92,246,0.45)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "rgba(139,92,246,0.10)"; e.currentTarget.style.borderColor = "rgba(139,92,246,0.25)"; }}>
+              <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                <path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5z" />
+              </svg>
+              Magic Parse
+            </button>
             <ClockDisplay lastSyncTime={lastSyncTime} apiError={apiError} />
           </div>
         </div>
@@ -1577,6 +1618,99 @@ export default function DispatchDashboard() {
             <div id="add-form-title" style={{ fontSize: 18, fontWeight: 800, color: "#F0F2F5", marginBottom: 4 }}>New Load</div>
             <div style={{ fontSize: 11, color: "#8B95A8", marginBottom: 20 }}>Create a new shipment</div>
             <AddForm onSubmit={handleAddShipment} onCancel={() => setShowAddForm(false)} accounts={accounts} />
+          </div>
+        </div>
+      )}
+
+      {showParseModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal, animation: "fade-in 0.2s ease" }}
+          onClick={() => { setShowParseModal(false); setParseResult(null); setParseError(null); }}>
+          <div role="dialog" aria-modal="true" aria-label="Magic Parse"
+            onClick={e => e.stopPropagation()} className="glass-strong"
+            style={{ borderRadius: 20, padding: 28, width: 520, maxHeight: "85vh", overflow: "auto", animation: "slide-up 0.3s ease", border: "1px solid rgba(139,92,246,0.25)" }}>
+            {/* Header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg width="16" height="16" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                    <path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5z" />
+                  </svg>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: "#F0F2F5" }}>Magic Parse</span>
+                </div>
+                <div style={{ fontSize: 11, color: "#8B95A8", marginTop: 3 }}>Paste any email, note, or dispatch text — AI extracts the key fields</div>
+              </div>
+              <button onClick={() => { setShowParseModal(false); setParseResult(null); setParseError(null); }}
+                style={{ background: "none", border: "none", color: "#8B95A8", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "2px 6px" }}>✕</button>
+            </div>
+
+            {/* Text Input */}
+            <textarea value={parseText} onChange={e => setParseText(e.target.value)}
+              placeholder={"Paste email body, dispatch note, or any freight text here...\n\nExample: EFJ107405 pickup LBCT, carrier Ace Drayage, all-in $1,850, container MSCU1234567"}
+              rows={7}
+              style={{ width: "100%", padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#F0F2F5", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", resize: "vertical", outline: "none", boxSizing: "border-box", lineHeight: 1.6 }} />
+
+            {/* Action */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10, marginBottom: parseResult || parseError ? 16 : 0 }}>
+              <button onClick={handleQuickParse} disabled={isParsing || !parseText.trim()}
+                style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 18px", borderRadius: 10, fontSize: 11, fontWeight: 700, cursor: isParsing || !parseText.trim() ? "not-allowed" : "pointer", background: isParsing || !parseText.trim() ? "rgba(139,92,246,0.08)" : "rgba(139,92,246,0.18)", color: isParsing || !parseText.trim() ? "#6B7280" : "#A78BFA", border: "1px solid rgba(139,92,246,0.25)", transition: "all 0.15s" }}>
+                {isParsing ? (
+                  <><div style={{ width: 11, height: 11, border: "2px solid rgba(167,139,250,0.3)", borderTop: "2px solid #A78BFA", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} /> Extracting...</>
+                ) : (
+                  <><svg width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5z" /></svg> Extract Fields</>
+                )}
+              </button>
+            </div>
+
+            {/* Error */}
+            {parseError && (
+              <div style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#F87171", fontSize: 11, marginBottom: 12 }}>⚠ {parseError}</div>
+            )}
+
+            {/* Results */}
+            {parseResult && (
+              <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 12 }}>
+                  Extracted Fields
+                  {parseResult.confidence && (
+                    <span style={{ marginLeft: 8, padding: "1px 6px", borderRadius: 4, fontSize: 9, background: parseResult.confidence === "high" ? "rgba(34,197,94,0.12)" : parseResult.confidence === "medium" ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.10)", color: parseResult.confidence === "high" ? "#22C55E" : parseResult.confidence === "medium" ? "#F59E0B" : "#EF4444" }}>
+                      {parseResult.confidence.toUpperCase()} CONFIDENCE
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {[
+                    { label: "EFJ #", val: parseResult.efj_number, color: "#00D4AA" },
+                    { label: "Rate", val: parseResult.rate != null ? `$${Number(parseResult.rate).toLocaleString("en-US", { minimumFractionDigits: 2 })}` : null, color: "#22C55E" },
+                    { label: "Container", val: parseResult.container_number, color: "#3B82F6" },
+                    { label: "Carrier", val: parseResult.carrier, color: "#F97316" },
+                  ].map(({ label, val, color }) => (
+                    <div key={label} style={{ padding: "10px 12px", borderRadius: 8, background: val ? `rgba(${color === "#00D4AA" ? "0,212,170" : color === "#22C55E" ? "34,197,94" : color === "#3B82F6" ? "59,130,246" : "249,115,22"},0.06)` : "rgba(255,255,255,0.02)", border: `1px solid ${val ? `${color}22` : "rgba(255,255,255,0.04)"}`, transition: "all 0.3s ease", animation: val ? "fade-in 0.4s ease" : "none" }}>
+                      <div style={{ fontSize: 9, color: "#6B7280", fontWeight: 600, letterSpacing: "0.5px", marginBottom: 4, textTransform: "uppercase" }}>{label}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: val ? color : "#3A4255", fontFamily: val ? "'JetBrains Mono', monospace" : "inherit" }}>
+                        {val || "—"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {parseResult.efj_number && (
+                  <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+                    <button onClick={() => {
+                      setShowParseModal(false);
+                      const match = shipments.find(s => s.efj && s.efj.toUpperCase() === parseResult.efj_number.toUpperCase());
+                      if (match) { handleLoadClick(match); }
+                      else { setCmdkQuery(parseResult.efj_number); setCmdkOpen(true); }
+                    }}
+                      style={{ flex: 1, padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: "rgba(0,212,170,0.10)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.2)" }}>
+                      Open {parseResult.efj_number} →
+                    </button>
+                    <button onClick={() => { setParseText(""); setParseResult(null); setParseError(null); }}
+                      style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.03)", color: "#8B95A8", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      Parse Another
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3709,6 +3843,8 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
   const [reclassDocId, setReclassDocId] = useState(null);
   const [loadEmails, setLoadEmails] = useState([]);
   const [copiedEfj, setCopiedEfj] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [linkGenerating, setLinkGenerating] = useState(false);
 
   // Driver contact state
   const [driverInfo, setDriverInfo] = useState({ driverName: "", driverPhone: "", driverEmail: "", carrierEmail: "", trailerNumber: "", macropointUrl: "" });
@@ -3819,6 +3955,28 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
       }
     } catch (e) { /* ignore */ }
     setNoteSubmitting(false);
+  };
+
+  const handleShareLink = async () => {
+    if (linkGenerating) return;
+    setLinkGenerating(true);
+    try {
+      const r = await apiFetch(`/api/shipments/${selectedShipment.efj}/generate-token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ show_driver: false }),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        navigator.clipboard.writeText(data.url);
+        setCopiedLink(true);
+        setTimeout(() => setCopiedLink(false), 2000);
+      }
+    } catch (e) {
+      console.error("Share link failed", e);
+    } finally {
+      setLinkGenerating(false);
+    }
   };
 
   const requestAiSummary = async () => {
@@ -4016,6 +4174,9 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
               { icon: "✦", label: aiSummaryLoading ? "Thinking..." : "AI Summary",
                 color: aiSummaryLoading ? "#fbbf24" : "#00D4AA",
                 onClick: requestAiSummary, enabled: !aiSummaryLoading },
+              { icon: "🔗", label: linkGenerating ? "Generating..." : copiedLink ? "Copied!" : "Share Link",
+                color: copiedLink ? "#34d399" : linkGenerating ? "#fbbf24" : "#a78bfa",
+                onClick: handleShareLink, enabled: !linkGenerating },
             ].map((btn, i) => (
               <button key={i} onClick={btn.enabled ? btn.onClick : undefined}
                 style={{ background: btn.enabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.02)", border: `1px solid ${btn.enabled ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.04)"}`,
