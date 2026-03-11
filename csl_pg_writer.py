@@ -13,6 +13,7 @@ Usage:
 """
 import os
 import logging
+from date_normalizer import clean_date
 
 log = logging.getLogger("pg_writer")
 
@@ -97,6 +98,15 @@ def pg_update_shipment(efj: str, **fields) -> bool:
         "equipment_type",
     }
     updates = {k: v for k, v in fields.items() if k in VALID and v is not None}
+
+    # Normalize date fields to MM-DD / MM-DD HH:MM at the gate
+    DATE_FIELDS = {"eta", "lfd", "pickup_date", "delivery_date", "return_date"}
+    for df in DATE_FIELDS:
+        if df in updates and updates[df]:
+            cleaned = clean_date(updates[df])
+            if cleaned:
+                updates[df] = cleaned
+
     if not updates:
         return True  # nothing to do
 

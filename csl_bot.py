@@ -1417,8 +1417,8 @@ def _parse_smline_detail(page):
             if not ret:
                 ret = evt["date"]
 
-    # LFD overrides gate-out date as pickup if available
-    if lfd:
+    # LFD as pickup fallback — only when no actual gate-out event
+    if lfd and not pickup:
         pickup = lfd
 
     # Determine status from latest ACTUAL event
@@ -2275,9 +2275,13 @@ def run_once(args):
                     # Preserve terminal data (Avail:...) — only stamp if no structured terminal notes exist
                     existing_bn = (job.get("row_data", [""] * 15)[14] or "").strip()
                     write_bot_notes = ts if not existing_bn.startswith("Avail:") else None
+                    # Preserve existing LFD from PG/sheet (row_data[9])
+                    existing_lfd = (job.get("row_data", [""] * 16)[9] or "").strip()
+                    write_lfd = existing_lfd if existing_lfd else None
                     pg_update_shipment(
                         job["efj"],
                         eta=write_eta,
+                        lfd=write_lfd,
                         pickup_date=write_pickup,
                         return_date=write_return,
                         status=write_status,

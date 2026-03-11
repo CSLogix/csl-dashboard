@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Track Shipment | Evans Delivery</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 font-sans text-slate-900">
+    <div class="max-w-xl mx-auto p-4 sm:p-6">
+
+        <div class="flex flex-col mb-8">
+            <div class="flex items-center justify-between">
+                <h1 class="text-xl font-bold text-slate-900 uppercase tracking-tight">Evans Delivery</h1>
+                <span class="px-3 py-1 bg-blue-100 text-blue-800 text-xs font-bold rounded-full uppercase">
+                    {{ data.status }}
+                </span>
+            </div>
+            <p class="text-xs text-slate-400 font-mono mt-1">LOAD REF: {{ data.efj }}</p>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
+            <div class="flex justify-between items-center text-sm font-semibold">
+                <div class="text-left">
+                    <p class="text-xs text-slate-400 uppercase">Origin</p>
+                    <p>{{ data.origin }}</p>
+                </div>
+                <div class="h-[1px] flex-grow mx-4 bg-slate-200 relative">
+                    <div class="absolute -top-1 right-0 w-2 h-2 rounded-full bg-slate-300"></div>
+                </div>
+                <div class="text-right">
+                    <p class="text-xs text-slate-400 uppercase">Destination</p>
+                    <p>{{ data.destination }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4">
+            <div class="bg-white p-4 rounded-lg border border-gray-100 shadow-sm">
+                <p class="text-xs text-slate-400 uppercase font-bold mb-1">Estimated Arrival</p>
+                <p class="text-lg font-semibold">{{ data.eta }}</p>
+            </div>
+
+            <div class="bg-white p-4 rounded-lg border border-gray-100 shadow-sm">
+                <p class="text-xs text-slate-400 uppercase font-bold mb-1">Latest Update</p>
+                <p class="text-sm text-slate-600 italic">{{ data.last_ping }}</p>
+            </div>
+
+            {% if data.driver_name %}
+            <div class="bg-white p-4 rounded-lg border border-gray-100 shadow-sm border-l-4 border-l-blue-500">
+                <p class="text-xs text-slate-400 uppercase font-bold mb-1">Assigned Driver</p>
+                <p class="text-sm font-medium text-slate-800">{{ data.driver_name }}</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="text-center text-slate-400 text-[10px] mt-12 uppercase tracking-widest">
+            <p>&copy; 2026 Evans Delivery Company</p>
+            <p class="mt-1">Confidential Logistics Data</p>
+        </div>
+
+    </div>
+</body>
+</html>

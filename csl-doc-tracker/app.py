@@ -19,6 +19,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Form, Request, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse, Response
+from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 import uvicorn
@@ -271,17 +272,18 @@ def _build_macropoint_progress(status_str: str):
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="CSL AI Dispatch")
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 # ---------------------------------------------------------------------------
 # Authentication middleware
 # ---------------------------------------------------------------------------
-PUBLIC_PATHS = {"/login", "/setup", "/health", "/logo.svg", "/app", "/assets", "/", "/macropoint-webhook", "/webhook-test"}
+PUBLIC_PATHS = {"/login", "/setup", "/health", "/logo.svg", "/app", "/assets", "/", "/macropoint-webhook", "/webhook-test", "/track"}
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         # Public paths: static assets, login/setup pages, React app shell
-        if path in PUBLIC_PATHS or path.startswith("/static") or path.startswith("/app") or path.startswith("/assets") or path.endswith((".png", ".svg", ".ico", ".jpg", ".webp")):
+        if path in PUBLIC_PATHS or path.startswith("/static") or path.startswith("/app") or path.startswith("/assets") or path.startswith("/track") or path.endswith((".png", ".svg", ".ico", ".jpg", ".webp")):
             return await call_next(request)
         # API routes require session auth (return 401 JSON, not redirect)
         if path.startswith("/api/"):
@@ -327,6 +329,73 @@ if _react_dist.exists():
 
 # ── Serve public assets (images in dist root) ──
 from fastapi.responses import FileResponse as _FileResponse
+
+
+# ── Quick Parse: AI extraction helper ─────────────────────────────────────────
+def _ai_quick_parse(text: str) -> dict:
+    """Extract freight details from freeform text using Claude Sonnet 4.6."""
+    import json, os
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        env_path = "/root/csl-bot/.env"
+        if os.path.exists(env_path):
+            for line in open(env_path):
+                if line.startswith("ANTHROPIC_API_KEY="):
+                    api_key = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+    if not api_key:
+        return {}
+
+    prompt = f"""Extract freight logistics details from this text. Return ONLY valid JSON — no markdown, no explanation.
+
+TEXT:
+{text[:3000]}
+
+Return exactly this structure (use null for missing fields):
+{{
+  "efj_number": "<EFJ##### or EFJ####### format, null if not found>",
+  "rate": <total dollar amount as number, null if not found>,
+  "container_number": "<ISO container like MSKU1234567 or null>",
+  "carrier": "<trucking company / carrier name or null>",
+  "confidence": "<high|medium|low>"
+}}
+
+Rules:
+- efj_number: look for patterns like EFJ107405, EFJ-107405, or standalone 6-7 digit job numbers preceded by EFJ
+- rate: extract all-in flat rate (ignore per-mile rates unless that is the only option)
+- container_number: 4 letters + 7 digits format (MAEU1234567, etc.)
+- carrier: the trucking company name, not the shipping line
+- confidence: high if multiple fields found with clear formatting, low if guessing"""
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text_out = resp.content[0].text.strip()
+        if text_out.startswith("```"):
+            text_out = text_out.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        data = json.loads(text_out)
+        out = {}
+        if data.get("efj_number"):
+            out["efj_number"] = str(data["efj_number"]).strip()
+        if data.get("rate") is not None:
+            try:
+                out["rate"] = float(data["rate"])
+            except (TypeError, ValueError):
+                pass
+        for f in ("container_number", "carrier", "confidence"):
+            if data.get(f):
+                out[f] = str(data[f]).strip()
+        return out
+    except Exception as e:
+        import logging
+        logging.getLogger("app").debug("Quick parse extraction failed: %s", e)
+        return {}
+# ── end Quick Parse helper ─────────────────────────────────────────────────────
 
 @app.get("/rateiq-bot.png")
 async def _serve_rateiq_bot():
@@ -9137,6 +9206,126 @@ async def macropoint_webhook(request: Request, background_tasks: BackgroundTasks
 
 
 # ═══ End of v2 endpoints ═══
+
+
+@app.post("/api/quick-parse")
+async def quick_parse(request: Request):
+    """Extract freight details from freeform text using Claude Sonnet 4.6."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    text = (body.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"error": "text field is required"}, status_code=422)
+    if len(text) > 10000:
+        return JSONResponse({"error": "text too long (max 10000 chars)"}, status_code=422)
+
+    result = _ai_quick_parse(text)
+    if not result:
+        return JSONResponse(
+            {"error": "Could not extract freight details from provided text"},
+            status_code=422
+        )
+    return JSONResponse(result)
+
+
+
+# ── Public Customer Tracking ──────────────────────────────────────────────
+
+@app.post("/api/shipments/{efj}/generate-token")
+async def generate_tracking_token(efj: str, request: Request):
+    """Generate (or return existing active) public tracking link for a load."""
+    try:
+        body = await request.json()
+        show_driver = bool(body.get("show_driver", False))
+    except Exception:
+        show_driver = False
+
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            # Return existing non-expired token if one exists
+            cur.execute("""
+                SELECT token::text FROM public_tracking_tokens
+                WHERE efj = %s AND expires_at > now()
+                ORDER BY created_at DESC LIMIT 1
+            """, (efj,))
+            row = cur.fetchone()
+            if row:
+                token = row["token"]
+            else:
+                cur.execute("""
+                    INSERT INTO public_tracking_tokens (efj, show_driver)
+                    VALUES (%s, %s)
+                    RETURNING token::text
+                """, (efj, show_driver))
+                token = cur.fetchone()["token"]
+        conn.commit()
+
+    base_url = str(request.base_url).rstrip("/")
+    return {"token": token, "url": f"{base_url}/track/{token}"}
+
+
+@app.get("/track/{token}", response_class=HTMLResponse)
+async def public_tracking_page(token: str, request: Request):
+    """Public shipment tracking page — no auth required."""
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute("""
+                SELECT
+                    s.efj,
+                    s.status,
+                    s.eta,
+                    s.origin,
+                    s.destination,
+                    te.event_time AS last_ping,
+                    CASE WHEN ptt.show_driver THEN d.driver_name ELSE NULL END AS driver_name
+                FROM public_tracking_tokens ptt
+                JOIN shipments s ON ptt.efj = s.efj
+                LEFT JOIN LATERAL (
+                    SELECT event_time FROM tracking_events
+                    WHERE efj = s.efj ORDER BY event_time DESC LIMIT 1
+                ) te ON true
+                LEFT JOIN driver_contacts d ON d.efj = s.efj
+                WHERE ptt.token = %s::uuid
+                  AND ptt.expires_at > now()
+            """, (token,))
+            row = cur.fetchone()
+
+    if not row:
+        expired_html = """<!DOCTYPE html>
+<html><head><title>Link Expired | Evans Delivery</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-gray-50 flex items-center justify-center min-h-screen">
+<div class="text-center p-8">
+<p class="text-2xl font-bold text-slate-700">Link Expired</p>
+<p class="text-slate-400 mt-2 text-sm">This tracking link is no longer active.<br>
+Contact Evans Delivery for an updated link.</p>
+</div></body></html>"""
+        return HTMLResponse(expired_html, status_code=404)
+
+    # Format timestamp for display
+    last_ping = "Awaiting GPS signal"
+    if row.get("last_ping"):
+        try:
+            last_ping = row["last_ping"].strftime("%-m/%-d %H:%M") + " UTC"
+        except Exception:
+            last_ping = str(row["last_ping"])
+
+    data = {
+        "efj":        row["efj"],
+        "status":     row["status"] or "In Transit",
+        "eta":        row["eta"] or "TBD",
+        "origin":     row["origin"] or "—",
+        "destination": row["destination"] or "—",
+        "last_ping":  last_ping,
+        "driver_name": row.get("driver_name"),
+    }
+    return templates.TemplateResponse(
+        "public_track.html", {"request": request, "data": data}
+    )
 
 if __name__ == "__main__":
     main()

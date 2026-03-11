@@ -15,6 +15,7 @@ Designed to run as cron or systemd service.
 import argparse
 import json
 import logging
+from date_normalizer import clean_date
 import os
 import re
 import sys
@@ -152,7 +153,13 @@ def _get_pg_shipments(account: str, hub: str = None) -> dict:
 
 
 def _upsert_shipment(data: dict):
-    """Insert or update a shipment in Postgres."""
+    """Insert or update a Tolead/Boviet shipment in Postgres."""
+
+    # Normalize date fields to MM-DD / MM-DD HH:MM
+    for _df in ("eta", "lfd", "pickup_date", "delivery_date", "return_date"):
+        if data.get(_df):
+            data[_df] = clean_date(data[_df]) or data[_df]
+
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
             cur.execute("""
@@ -495,6 +502,12 @@ def _get_rep_map(sh):
 
 def _upsert_master_shipment(data: dict):
     """Insert a new shipment from Master Sheet into Postgres."""
+
+    # Normalize date fields to MM-DD / MM-DD HH:MM
+    for _df in ("eta", "lfd", "pickup_date", "delivery_date", "return_date"):
+        if data.get(_df):
+            data[_df] = clean_date(data[_df]) or data[_df]
+
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
             cur.execute("""
@@ -531,6 +544,11 @@ def _merge_master_shipment(pg_row: dict, sheet_data: dict):
     pg_is_newer = False
     if pg_updated and pg_synced and pg_updated > pg_synced:
         pg_is_newer = True
+
+    # Pre-normalize sheet dates before merge comparison
+    for _df in ("eta", "lfd", "pickup_date", "delivery_date", "return_date"):
+        if sheet_data.get(_df):
+            sheet_data[_df] = clean_date(sheet_data[_df]) or sheet_data[_df]
 
     updates = {}
     for field in MASTER_SYNCABLE_FIELDS:
