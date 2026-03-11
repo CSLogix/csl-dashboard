@@ -98,7 +98,8 @@ function mapShipment(s, idx) {
     trailerNumber: s.trailer || null,
     notes: s.notes || "",
     truckType: s.truck_type || "",
-    customerRate: s.customer_rate || "",
+    customerRate: s.customer_rate != null ? String(s.customer_rate) : "",
+    carrierPay: s.carrier_pay != null ? String(s.carrier_pay) : "",
     botAlert: s.bot_alert || "",
     rep: s.rep || "",
     bol: s.bol || "",
@@ -1266,7 +1267,7 @@ export default function DispatchDashboard() {
   };
 
   // Inline metadata update — writes to Postgres via POST /api/v2/load/{efj}/update
-  const META_TO_PG = { truckType: "equipment_type", customerRate: "customer_rate", notes: "notes" };
+  const META_TO_PG = { truckType: "equipment_type", customerRate: "customer_rate", carrierPay: "carrier_pay", notes: "notes" };
   const handleMetadataUpdate = async (shipment, field, value) => {
     const stateKey = field;
     setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, [stateKey]: value, synced: false } : s));
@@ -3447,6 +3448,21 @@ function InboxView({ handleLoadClick }) {
               <div style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {selThread.latest_subject || "(no subject)"}
               </div>
+              {(() => {
+                const raw = selThread.latest_sender || "";
+                const match = raw.match(/<([^>]+)>/) || raw.match(/[\w.+-]+@[\w.-]+\.\w+/);
+                const toEmail = match ? (match[1] || match[0]) : null;
+                if (!toEmail) return null;
+                const subj = encodeURIComponent("Re: " + (selThread.latest_subject || ""));
+                const href = `mailto:${toEmail}?subject=${subj}&cc=efj-operations%40evansdelivery.com`;
+                return (
+                  <a href={href}
+                    style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(59,130,246,0.15)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.3)", textDecoration: "none", flexShrink: 0 }}
+                    title={`Reply to ${toEmail}`}>
+                    ↩ Reply
+                  </a>
+                );
+              })()}
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               {selThread.email_type && (() => {
@@ -4474,6 +4490,60 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
               </div>
             );
           })()}
+
+          {/* Financials */}
+          <div style={{ padding: "8px 20px 12px" }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Financials</div>
+            <div style={{ display: "flex", gap: 10 }}>
+              {[
+                { key: "customerRate", label: "CX Rate", color: "#22C55E" },
+                { key: "carrierPay",   label: "RC Pay",  color: "#F97316" },
+              ].map(({ key, label, color }) => {
+                const live = shipments.find(s => s.id === selectedShipment.id)?.[key] || "";
+                const margin = (() => {
+                  const cx = parseFloat(shipments.find(s => s.id === selectedShipment.id)?.customerRate);
+                  const rc = parseFloat(shipments.find(s => s.id === selectedShipment.id)?.carrierPay);
+                  if (!cx || !rc || cx === 0) return null;
+                  return ((cx - rc) / cx * 100).toFixed(1);
+                })();
+                return (
+                  <div key={key} style={{ flex: 1 }}>
+                    <div style={{ fontSize: 9, color: "#5A6478", marginBottom: 4, fontWeight: 600 }}>{label}</div>
+                    <div style={{ position: "relative" }}>
+                      <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#5A6478", fontSize: 11, pointerEvents: "none" }}>$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        defaultValue={live}
+                        key={live}
+                        onBlur={e => { const v = e.target.value.trim(); handleMetadataUpdate(selectedShipment, key, v || null); }}
+                        placeholder="0.00"
+                        style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: `1px solid rgba(255,255,255,0.08)`, borderRadius: 8, color: live ? color : "#5A6478", padding: "7px 10px 7px 20px", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, outline: "none", boxSizing: "border-box" }}
+                        onFocus={e => e.target.style.borderColor = color + "66"}
+                        onBlurCapture={e => e.target.style.borderColor = "rgba(255,255,255,0.08)"}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              {(() => {
+                const cx = parseFloat(shipments.find(s => s.id === selectedShipment.id)?.customerRate);
+                const rc = parseFloat(shipments.find(s => s.id === selectedShipment.id)?.carrierPay);
+                if (!cx || !rc) return null;
+                const margin = ((cx - rc) / cx * 100);
+                const color = margin < 0 ? "#EF4444" : margin < 10 ? "#F97316" : "#22C55E";
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", minWidth: 52 }}>
+                    <div style={{ fontSize: 9, color: "#5A6478", marginBottom: 4, fontWeight: 600 }}>MARGIN</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color, fontFamily: "'JetBrains Mono', monospace" }}>
+                      {margin.toFixed(1)}%
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
 
           {/* Notes */}
           <div style={{ padding: "8px 20px 14px" }}>
@@ -5785,6 +5855,46 @@ function DispatchView({
                 );
               })()}
 
+              {/* Financials */}
+              <div style={{ padding: "8px 20px 12px" }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Financials</div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  {[
+                    { key: "customerRate", label: "CX Rate", color: "#22C55E" },
+                    { key: "carrierPay",   label: "RC Pay",  color: "#F97316" },
+                  ].map(({ key, label, color }) => {
+                    const live = shipments.find(s => s.id === selectedShipment.id)?.[key] || "";
+                    return (
+                      <div key={key} style={{ flex: 1 }}>
+                        <div style={{ fontSize: 9, color: "#5A6478", marginBottom: 4, fontWeight: 600 }}>{label}</div>
+                        <div style={{ position: "relative" }}>
+                          <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#5A6478", fontSize: 11, pointerEvents: "none" }}>$</span>
+                          <input type="number" step="0.01" min="0" defaultValue={live} key={live}
+                            onBlur={e => { const v = e.target.value.trim(); handleMetadataUpdate(selectedShipment, key, v || null); }}
+                            placeholder="0.00"
+                            style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, color: live ? color : "#5A6478", padding: "7px 10px 7px 20px", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, outline: "none", boxSizing: "border-box" }}
+                            onFocus={e => e.target.style.borderColor = color + "66"}
+                            onBlurCapture={e => e.target.style.borderColor = "rgba(255,255,255,0.08)"} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {(() => {
+                    const cx = parseFloat(shipments.find(s => s.id === selectedShipment.id)?.customerRate);
+                    const rc = parseFloat(shipments.find(s => s.id === selectedShipment.id)?.carrierPay);
+                    if (!cx || !rc) return null;
+                    const margin = ((cx - rc) / cx * 100);
+                    const color = margin < 0 ? "#EF4444" : margin < 10 ? "#F97316" : "#22C55E";
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", minWidth: 52 }}>
+                        <div style={{ fontSize: 9, color: "#5A6478", marginBottom: 4, fontWeight: 600 }}>MARGIN</div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color, fontFamily: "'JetBrains Mono', monospace" }}>{margin.toFixed(1)}%</div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
               {/* Notes */}
               <div style={{ padding: "8px 20px 14px" }}>
                 <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 6, textTransform: "uppercase" }}>Notes</div>
@@ -6941,20 +7051,23 @@ function RateIQView() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedCarrier, setExpandedCarrier] = useState(null);
-  const [tab, setTab] = useState("dray"); // dray | ftl | oog | scorecard
+  const [tab, setTab] = useState("dray"); // dray | ftl | oog | scorecard | lanes
   const [replyAlerts, setReplyAlerts] = useState([]);
   const [scorecardPerf, setScorecardPerf] = useState([]);
+  const [laneStats, setLaneStats] = useState([]);
 
   const fetchData = useCallback(async () => {
     try {
-      const [rateRes, alertRes, perfRes] = await Promise.all([
+      const [rateRes, alertRes, perfRes, laneRes] = await Promise.all([
         apiFetch(`${API_BASE}/api/rate-iq`).then(r => r.json()),
         apiFetch(`${API_BASE}/api/customer-reply-alerts`).then(r => r.json()).catch(() => []),
         apiFetch(`${API_BASE}/api/carriers/scorecard`).then(r => r.json()).catch(() => ({ carriers: [] })),
+        apiFetch(`${API_BASE}/api/lane-stats`).then(r => r.json()).catch(() => ({ lanes: [] })),
       ]);
       setData(rateRes);
       setReplyAlerts(alertRes);
       setScorecardPerf(perfRes.carriers || []);
+      setLaneStats(laneRes.lanes || []);
     } catch (e) { console.error("Rate IQ fetch:", e); }
     setLoading(false);
   }, []);
@@ -7002,6 +7115,7 @@ function RateIQView() {
           { key: "ftl", label: "FTL IQ" },
           { key: "oog", label: "OOG IQ" },
           { key: "scorecard", label: `Scorecard (${scorecardPerf.length})` },
+          { key: "lanes", label: `Top Lanes (${laneStats.length})` },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             style={{ padding: "6px 16px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid " + (tab === t.key ? "rgba(0,212,170,0.4)" : "rgba(255,255,255,0.06)"), background: tab === t.key ? "rgba(0,212,170,0.08)" : "transparent", color: tab === t.key ? "#00D4AA" : "#8B95A8", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s ease" }}>
@@ -7093,6 +7207,57 @@ function RateIQView() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Top Lanes Tab */}
+      {tab === "lanes" && (
+        <div>
+          <div style={{ marginBottom: 12, fontSize: 11, color: "#5A6478" }}>
+            Top freight corridors by load volume · rate averages populate once customer_rate fields are entered
+          </div>
+          {laneStats.length === 0 ? (
+            <div style={{ padding: 40, textAlign: "center", color: "#5A6478", fontSize: 12 }}>No lane data available.</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                  {["#", "Origin", "Destination", "Loads", "Avg Rate"].map(h => (
+                    <th key={h} style={{ padding: "6px 12px", textAlign: h === "Loads" || h === "Avg Rate" || h === "#" ? "center" : "left", color: "#5A6478", fontWeight: 700, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {laneStats.map((lane, i) => {
+                  const barW = Math.round((lane.load_count / laneStats[0].load_count) * 100);
+                  return (
+                    <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.025)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <td style={{ padding: "8px 12px", textAlign: "center", color: "#4D5669", fontSize: 10, fontWeight: 700 }}>{i + 1}</td>
+                      <td style={{ padding: "8px 12px", fontWeight: 600, color: "#F0F2F5" }}>
+                        {lane.origin_city}{lane.origin_state ? `, ${lane.origin_state}` : ""}
+                      </td>
+                      <td style={{ padding: "8px 12px", color: "#C8D0DC" }}>
+                        {lane.dest_city}{lane.dest_state ? `, ${lane.dest_state}` : ""}
+                      </td>
+                      <td style={{ padding: "8px 12px", textAlign: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                          <div style={{ width: 60, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                            <div style={{ width: `${barW}%`, height: "100%", background: i === 0 ? "#00D4AA" : i < 3 ? "#3B82F6" : "#4D5669", borderRadius: 2 }} />
+                          </div>
+                          <span style={{ fontWeight: 700, color: i === 0 ? "#00D4AA" : "#F0F2F5", minWidth: 20, textAlign: "right" }}>{lane.load_count}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: "8px 12px", textAlign: "center", color: lane.avg_customer_rate ? "#34d399" : "#4D5669", fontWeight: lane.avg_customer_rate ? 700 : 400 }}>
+                        {lane.avg_customer_rate ? `$${lane.avg_customer_rate.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
 
