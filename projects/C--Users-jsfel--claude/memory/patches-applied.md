@@ -65,3 +65,6 @@
 | `date_normalizer.py` | Shared date normalizer: `clean_date()` → MM-DD / MM-DD HH:MM. Handles Excel serials, all date formats, midnight stripping |
 | `patch_date_normalizer.py` | Gate normalization in csl_pg_writer + LFD/pickup separation in csl_bot + sheet sync normalization |
 | `backfill_clean_dates.py` | One-time PG backfill: 114 shipments, 177 fields normalized (Excel serials, format soup, midnight) |
+| `patch_sync_guard.py` | csl_sheet_sync.py: TOLEAD_BOVIET_SYNCABLE_FIELDS + sheet_synced_at stamp + syncable_fields param + Tolead/Boviet use _merge not _upsert + PG trigger trg_shipments_updated_at + cron bumped */10→*/3 |
+| `patch_writeback.py` | csl_sheet_sync.py: _a1() + _batch_writeback() helpers + Tolead LAX + all Boviet tabs write PG edits back to sheet when updated_at > sheet_synced_at |
+| `boviet_invoice_writer.py` | New script: Fills Boviet Piedra Invoice tab — MP stop times→G/I/L/N + detention calc→J/O. PM heuristic for bare time strings. Cron: every 2 hrs 6AM-8PM Mon-Fri |

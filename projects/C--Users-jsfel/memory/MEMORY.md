@@ -18,7 +18,9 @@
 - LA/LB cluster: any of LAX, LBCT, APM Terminals, Port of LA, TraPac, SSA Marine → "LA/LB Ports"
 - LoadMatch screenshots: BASE + FSC% = TOTAL; market_floor/average/ceiling/data_points extracted as separate fields
 - Backup at `/root/csl-bot/csl-doc-tracker/quote_extractor.py.bak`
-- Rate Intel accordion shows "No rate history" until quotes are saved — self-populates from `lane_rates` table over time
+- Rate Intel accordion: auto-opens after extraction; shows market floor/avg/ceiling + gradient range bar when `market_floor/average/ceiling` fields returned by extractor
+- "No rate history" fallback only shows when no DB history AND no market data from extraction
+- Stale ANTHROPIC_API_KEY removed from `.env` — key lives exclusively in systemd service file
 
 ## Phase 3 — Port Terminal Scraping
 
@@ -89,11 +91,22 @@ Full plan (in order, all systems stay running):
 - Bot notes column is **Col O** in Master Tracker (CLAUDE.md says O=Bot Notes, N=Driver/Truck)
 - State test: set Col O to `Avail:YES | Loc:In Yard | Carrier:RELEASED | Misc:None` → row goes green after cache expires
 
+## LFD Watchdog — DEPLOYED (2026-03-10)
+- Script: `/root/csl-bot/lfd_watchdog.py`
+- Cron: `30 6 * * 1-5` (6:30 AM ET Mon–Fri) → logs to `/var/log/lfd_watchdog.log`
+- State file: `/root/csl-bot/lfd_sent_alerts.json` — key `"{efj}_{lfd_date}"`, prevents duplicate sends
+- Emails account reps when LFD = today (🚨), tomorrow (⚠️), or in 2 days (📋)
+- LFD column in DB is `text` with many formats — Python `parse_lfd()` handles ISO, MM/DD, MM/DD/YY, DD-Mon, Excel serials (5-digit 40000–55000 range)
+- SQL column is `container` (NOT `container_num` or `container_url`)
+- SMTP: loads from `/root/csl-bot/.env` (SMTP_USER=jfeltzjr@gmail.com) — App Password required (16 lowercase letters from myaccount.google.com/apppasswords)
+- ACCOUNT_REPS dict in watchdog mirrors csl_bot.py mapping
+
 ## Patches Applied (recent)
 - `patch_webhook_gaps.py` (2026-03-10) — Fixed 4 data flow gaps between MacroPoint webhook and React dashboard. See [webhook-details.md](webhook-details.md)
 - `quote_extractor.py` rewrite (2026-03-10) — Sonnet upgrade, hub normalization, LoadMatch prompt
 - `terminal_nola.py` deployed (2026-03-10) — PA terminal API scraper, no auth, pure requests
 - `TerminalBadge` + `parseTerminalNotes` (2026-03-10) — Frontend parser for Col O bot notes, visual hold badges + row tinting + LoadSlideOver Terminal Status section
+- `lfd_watchdog.py` deployed (2026-03-10) — LFD demurrage email watchdog, cron 6:30 AM Mon–Fri
 
 ## Server Auth Notes
 - Dev key in systemd: `CSL_DEV_KEY=114d9df820d6c9c8aff380208a555b5e5d163e76a213518f`

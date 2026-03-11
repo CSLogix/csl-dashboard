@@ -12,7 +12,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 
-## Git — Mar 10-11, 2026
+## Git — Mar 11, 2026
 - **Latest `cc55669`** (Mar 11): Public tracker portal + date normalizer + LFD fix + Share Link button
 - **Repo**: `CSLogix/CSLogix_Bot` (private), single `master` branch
 - **VPS, GitHub, Local** all in sync
@@ -40,12 +40,39 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Health Check**: every 15 min, 6AM-7PM
 - **Macropoint Screenshots**: every 30 min, 7AM-7PM Mon-Fri
 - **Vessel Schedules**: 6:00 AM & 12:00 PM Mon-Fri
-- **Sheet→PG Sync**: every 10 min, 6AM-8PM (Tolead+Boviet+Master)
+- **Sheet→PG Sync**: every **3** min, 6AM-8PM (Tolead+Boviet+Master) — bumped from 10
+- **Boviet Invoice Writer**: every 2 hrs on even hours, 6AM-8PM Mon-Fri → `/tmp/boviet_invoice.log`
 
 ### Monitoring
 - `cron_log_parser.py` + `health_check.py` + dashboard "Scheduled Jobs" cron cards
 
 ## Recent Bot Changes (Deployed)
+
+### Sync Guard + PG→Sheet Write-back — Mar 11, 2026
+- **`patch_sync_guard.py`** applied to `csl_sheet_sync.py`:
+  - Added `TOLEAD_BOVIET_SYNCABLE_FIELDS` constant (excludes customer_rate, carrier_pay, notes, equipment_type)
+  - `_upsert_shipment` INSERT + ON CONFLICT now stamp `sheet_synced_at = NOW()`
+  - `_merge_master_shipment` gets `syncable_fields=None` param (defaults to `MASTER_SYNCABLE_FIELDS`)
+  - `sync_tolead` + `sync_boviet` existing-row paths now call `_merge_master_shipment(syncable_fields=TOLEAD_BOVIET_SYNCABLE_FIELDS)` — no longer blindly overwrites PG with sheet data
+  - PG trigger `trg_shipments_updated_at` created — BEFORE UPDATE auto-stamps `updated_at`
+  - Sheet→PG sync cron bumped from `*/10` to `*/3` (6AM-8PM)
+- **`patch_writeback.py`** applied: Added `_a1()` + `_batch_writeback()` helpers; `sync_tolead` LAX + all `sync_boviet` tabs now write PG dashboard edits back to sheet when `updated_at > sheet_synced_at` (status/pickup_date/delivery_date fields only). ORD/JFK/DFW excluded (client-shared).
+
+### Boviet Invoice Writer — Mar 11, 2026
+- **`/root/csl-bot/boviet_invoice_writer.py`** (new script): Fills Piedra Invoice tab from Macropoint stop times
+  - Scrapes MP stop1/stop2 arrived+departed timestamps → writes G/I (whse) + L/N (site) in HH:MM 24-hr
+  - Calculates detention (J/O): `max(0, (departure - appt) - 3.0 hrs)` at $50/hr, rounded 2dp
+  - Only writes to empty cells — never overwrites existing data
+  - **PM heuristic**: bare `H:MM` with hour 1–6 treated as PM (trucking appts are never 1-6 AM)
+  - Imports `scrape_macropoint` from `daily_summary.py`; gets MP URLs from col AA hyperlinks via Sheets API v4
+  - **Cron**: `0 */2 6-20 * * 1-5` → `/tmp/boviet_invoice.log`
+  - **First run**: 81 cells written across 24 rows; 4 rows pending (no MP data yet)
+  - **Notable**: J66=7.37 whse detention hrs (EFJ107313) = $368 billable
+
+### Margin Guard — Mar 11, 2026
+- **`calcMarginPct(customerRate, carrierPay)`** helper added to DispatchDashboard.jsx
+- **DispatchView `<tr>`**: Red bg `rgba(239,68,68,0.10)` when margin < 10% and both rates entered
+- **RepDashboardView Dray + FTL `<tr>`**: Same treatment; takes priority over terminal status bg
 
 ### Date Normalizer + LFD Fix — Mar 10, 2026
 - **`/root/csl-bot/date_normalizer.py`**: `clean_date(raw) -> str | None` — normalizes all date formats to `MM-DD` or `MM-DD HH:MM` (military time)
@@ -66,6 +93,37 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Patches**: `terminal_normalizer.py` (new file), `patch_terminal_normalizer.py`
 
 ## Recent Dashboard Changes (Deployed)
+
+### Financials + Margin Guard — Mar 11, 2026
+- **`carrier_pay NUMERIC(10,2)`** added to `shipments` table; `customer_rate` cast from TEXT → NUMERIC(10,2)
+- **Financials section** in both LoadSlideOver instances (DispatchView ~4494, RepDashboardView ~5858): CX Rate + RC Pay inputs with live margin % badge (green ≥10%, orange <10%, red <0%)
+- **`carrierPay`** added to `mapShipment()` and `META_TO_PG` — saves to PG on blur via existing `handleMetadataUpdate`
+- **`carrier_pay` in ALLOWED** fields for v2 PATCH endpoint
+- **Lane-stats query** updated: `AVG(NULLIF(...)::numeric)` → `AVG(customer_rate)` (column is now native NUMERIC)
+- **Margin Guard deployed**: `calcMarginPct()` helper + red row bg `rgba(239,68,68,0.10)` in DispatchView, Rep Dray, Rep FTL tables when margin < 10% and both rates entered
+
+### pg_dump Backup Cron — Mar 11, 2026
+- **DB**: `csl_doc_tracker` (not `csl_bot`) on PG 17
+- **Cron**: `0 3 * * * sudo -u postgres pg_dump csl_doc_tracker | gzip > /root/backups/csl_$(date +\%Y\%m\%d).sql.gz`
+- **Cleanup**: `30 3 * * * find /root/backups -name "*.sql.gz" -mtime +14 -delete`
+- **Backup dir**: `/root/backups/` — verified 4.5MB on first run
+
+### Auto-Token on Load Creation — Mar 11, 2026
+- **`csl_pg_writer.py`**: After INSERT, checks `xmax=0` (true insert vs conflict update) → auto-inserts row into `public_tracking_tokens` with `ON CONFLICT DO NOTHING`
+- **Backfill**: 177 active shipments all have tokens now
+- Existing manual Share Link tokens untouched
+
+### Reply Button + Email Routing — Mar 11, 2026
+- **`↩ Reply` button** in InboxView thread slide-over header — extracts sender email via regex, opens `mailto:` with `Re:` subject + `cc=efj-operations@evansdelivery.com`
+- **`Reply-To` header** on all outbound delivery emails via `_get_reply_to(account)`:
+  - `tolead` → `tolead-efj@evansdelivery.com`
+  - `boviet` → `boviet-efj@evansdelivery.com`
+  - default → `efj-operations@evansdelivery.com` (= `DISPATCH_EMAIL`)
+- **`_REPLY_TO_MAP` dict** + `_get_reply_to()` function defined at top of `app.py` after `DISPATCH_EMAIL`
+
+### Top Lanes Heatmap — Mar 11, 2026
+- **`GET /api/lane-stats`**: Top 20 corridors by load count, city/state split via `SPLIT_PART`, `AVG(customer_rate)` (NULL until rates entered). Inserted before `/api/customer-reply-alerts`
+- **Rate IQ "Top Lanes" tab**: Load count bars (teal #1, blue top-3, gray rest), Avg Rate column ready for data. `laneStats` state fetched alongside existing Rate IQ calls
 
 ### Public Customer Tracking Portal — Mar 11, 2026
 - **`public_tracking_tokens` table**: UUID PK, `efj` FK → shipments, `show_driver` bool, 60-day `expires_at`
@@ -163,9 +221,11 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 ## Remaining Work
 
 ### Large Items
-- **Tolead/Boviet full PG migration**: Move off Google Sheets entirely
-- **Customer Tracking Portal**: ✅ DONE — `/track/{token}` live, Share Link button in LoadSlideOver
-- **Inbox polish**: Mailto reply button, thread detail slide-over assign/correction UI
+- **Tolead/Boviet full PG migration**: Resolved as non-issue — data originates from client sheets. Sync guard + write-back deployed instead (see above). ORD/JFK/DFW remain client-shared (no write-back).
+- **Customer Tracking Portal**: ✅ DONE
+- **Inbox polish**: ✅ Reply button done. Thread detail assign/correction UI still unbuilt
+- **Margin Guard**: ✅ DONE — deployed Mar 11
+- **Weekly profit report**: Unblocked once reps start entering rates consistently
 
 ### Rate IQ
 - Lane search mode, Phase 2 OOG IQ (real data), Phase 2 FTL IQ (not built)
