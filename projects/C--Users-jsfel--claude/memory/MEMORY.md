@@ -13,7 +13,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 
 ## Git — Mar 11, 2026
-- **Latest `e1c4ab5`** (Mar 11): Quote-action inbox + weekly profit report + dray daily summary + boviet invoice writer
+- **Latest `ee1488a`** (Mar 11): Margin bridge + unbilled digest + team feedback fixes
 - **Repo**: `CSLogix/CSLogix_Bot` (private), single `master` branch
 - **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
@@ -82,6 +82,19 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ### Boviet Invoice Writer — Mar 11, 2026
 - `boviet_invoice_writer.py`: Fills Piedra Invoice tab from MP stop times. Cron: every 2 hrs 6AM-8PM Mon-Fri
+
+### No-Reply Alert Fix — Mar 11, 2026
+- **`patch_noreply_fix.py`** applied to `csl_inbox_scanner.py`: Fixed `check_unreplied_customer_emails()` and re-enabled in `run_loop`
+  - **Removed "Open Dashboard" link** — IT was blocking emails with external links
+  - **Self-email filter** — bot's own alert emails (`jfeltzjr`, `CSL Alert` subject) excluded from triggering new alerts (was causing 10x spam loop)
+  - **EFJ-level dedup** — same EFJ can only fire once per 2 hours (prevents multiple threads from same customer triggering separate alerts)
+  - **4hr lookback cap** — won't alert on ancient emails
+  - **Lane fix** — if `email_threads.lane` contains body text garbage (e.g. "dont want → proceed if he"), falls back to `shipments.origin → destination` from PG
+- **DB table**: `customer_reply_alerts` (email_thread_id, efj, sender, subject, alerted_at, dismissed)
+
+### Macropoint Alert Subject Rename — Mar 11, 2026
+- **`patch_alert_subject.py`** applied to `csl_ftl_alerts.py`: Renamed email subject "FTL Alert" → "CSL Tracking" and body header "FTL Status Update" → "Tracking Update" — generic across all move types (dray, FTL, etc.)
+- **Macropoint webhook delay analysis**: Arrived/Delivered events come 60-80 min late from Macropoint's side. Departed events are near-instant. Our server processes + emails within 1-2 seconds of webhook receipt.
 
 ### Margin Guard + Date Normalizer + Terminal Normalizer — Mar 10-11, 2026
 - `calcMarginPct()` + red row bg when margin < 10%. `date_normalizer.py` gate in pg_update_shipment(). `terminal_normalizer.py` in csl_bot.py dray import loop. LFD/pickup fix (fallback only)
