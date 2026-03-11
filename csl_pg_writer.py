@@ -131,6 +131,20 @@ def pg_update_shipment(efj: str, **fields) -> bool:
         params = [efj] + list(updates.values())
 
         cur.execute(sql, params)
+
+        # Auto-create tracking token on new shipment INSERT (not on update)
+        # xmax=0 means the row was freshly inserted (no previous version)
+        cur.execute(
+            "SELECT xmax FROM shipments WHERE efj = %s",
+            (efj,)
+        )
+        row = cur.fetchone()
+        if row and row[0] == 0:
+            cur.execute(
+                "INSERT INTO public_tracking_tokens (efj) VALUES (%s) ON CONFLICT DO NOTHING",
+                (efj,)
+            )
+
         cur.close()
         return True
     except Exception as exc:

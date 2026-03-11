@@ -194,6 +194,7 @@ def run_watchdog():
               'Returned to Port','Billed/Closed','Cancelled'
           )
           AND COALESCE(archived, false) = false
+          AND COALESCE(move_type, '') NOT ILIKE '%ftl%'
         ORDER BY efj ASC
     """)
     rows = cur.fetchall()

@@ -164,7 +164,8 @@ def send_ftl_email(efj: str, load_num: str, status: str, tab_name: str,
             if stop_times.get(k) and "BEHIND" in stop_times[k].upper():
                 behind = True
                 break
-    hdr_color = "#c62828" if behind else "#1b5e20"
+    is_failure = any(k in status for k in ("Can't Make It", "Phone Unresponsive", "Unresponsive"))
+    hdr_color = "#c62828" if (behind or is_failure) else "#1b5e20"
 
     subject = f"FTL Alert \u2014 {tab_name} \u2014 {load_display} \u2014 {status}"
 

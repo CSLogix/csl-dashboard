@@ -803,7 +803,7 @@ def _build_rows(loads, category, has_lane=False):
     return rows
 
 
-def build_summary_body(sheet_label, tab_name, summaries, skipped=0):
+def build_summary_body(sheet_label, tab_name, summaries, skipped=0, needs_cover_html="", needs_cover_count=0):
     now = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
     on_time  = [s for s in summaries if classify_load(s) == "on_time"]
     behind   = [s for s in summaries if classify_load(s) == "behind"]
@@ -819,6 +819,21 @@ def build_summary_body(sheet_label, tab_name, summaries, skipped=0):
     sections += _section(_G, "On Time", len(on_time), hdrs, _build_rows(on_time, "on_time", has_lane=has_lane))
     sections += _section(_R, "Behind Schedule / Can't Make It", len(behind), hdrs, _build_rows(behind, "behind", has_lane=has_lane))
     sections += _section(_P, "Tracking Issues", len(tracking), hdrs, _build_rows(tracking, "tracking", has_lane=has_lane))
+    sections += needs_cover_html
+
+    # Status ribbon
+    ribbon_parts = []
+    if on_time:
+        ribbon_parts.append(f'<span style="color:#2e7d32;font-weight:bold;">{len(on_time)} On Time</span>')
+    if behind:
+        ribbon_parts.append(f'<span style="color:#c62828;font-weight:bold;">{len(behind)} Behind</span>')
+    if needs_cover_count:
+        ribbon_parts.append(f'<span style="color:#e65100;font-weight:bold;">{needs_cover_count} Needs Cover</span>')
+    if tracking:
+        ribbon_parts.append(f'<span style="color:#6a1b9a;font-weight:bold;">{len(tracking)} Tracking Issues</span>')
+    if skipped:
+        ribbon_parts.append(f'<span style="color:#ff8f00;font-weight:bold;">{skipped} Skipped</span>')
+    ribbon_html = ' &nbsp;|&nbsp; '.join(ribbon_parts) if ribbon_parts else '&mdash;'
 
     warn = ""
     if skipped > 0:
@@ -832,8 +847,9 @@ def build_summary_body(sheet_label, tab_name, summaries, skipped=0):
     return (
         f'<div style="font-family:Arial,sans-serif;max-width:900px;">'
         f'<h2 style="margin:0 0 4px 0;color:#333;">{sheet_label} &mdash; {tab_name}</h2>'
-        f'<p style="color:#888;font-size:12px;margin:0 0 4px 0;">'
-        f'{now} &mdash; {len(summaries)} Active Load(s)</p>'
+        f'<p style="color:#888;font-size:12px;margin:0 0 8px 0;">{now}</p>'
+        f'<div style="background:#f5f5f5;border-left:4px solid #1565c0;padding:8px 14px;'
+        f'border-radius:0 6px 6px 0;font-size:13px;margin-bottom:12px;">{ribbon_html}</div>'
         f'{warn}'
         f'{sections}'
         f'</div>'
@@ -1101,6 +1117,11 @@ def scrape_and_summarize(browser, entries):
 
         if not mp_status:
             print(f"      SCRAPE SKIP [{item['efj']}]: no status returned")
+            skipped += 1
+            continue
+
+        if mp_status and mp_status.lower() in {"delivered", "completed", "tracking completed"}:
+            print(f"      SKIP DELIVERED [{item['efj']}]: mp_status={mp_status}")
             skipped += 1
             continue
 

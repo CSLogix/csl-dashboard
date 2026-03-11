@@ -34,6 +34,19 @@ import database as db
 TRACKING_PHONE = os.getenv("MACROPOINT_TRACKING_PHONE", "4437614954")
 DISPATCH_EMAIL = os.getenv("EMAIL_CC", "efj-operations@evansdelivery.com")
 
+# Account-specific Reply-To routing
+_REPLY_TO_MAP = {
+    "tolead": "tolead-efj@evansdelivery.com",
+    "boviet": "boviet-efj@evansdelivery.com",
+}
+
+def _get_reply_to(account: str) -> str:
+    acct = (account or "").lower()
+    for key, addr in _REPLY_TO_MAP.items():
+        if key in acct:
+            return addr
+    return DISPATCH_EMAIL
+
 # ── Delivery Email Notification ──────────────────────────────────────────
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -127,6 +140,7 @@ def send_delivery_email(shipment: dict):
             msg["From"] = SMTP_USER
             msg["To"] = JANICE_EMAIL
             msg["Cc"] = DISPATCH_EMAIL
+            msg["Reply-To"] = _get_reply_to(account)
             msg.attach(MIMEText(body, "html"))
 
             recipients = [JANICE_EMAIL, DISPATCH_EMAIL]
@@ -3459,6 +3473,67 @@ async def update_rate_quote(quote_id: int, request: Request):
             "carrier": row["carrier_name"], "rate": float(row["rate_amount"]) if row["rate_amount"] else None}
 
 
+@app.get("/api/rate-iq/outbound-quotes")
+async def api_outbound_quotes(
+    customer: str = Query(""),
+    origin:   str = Query(""),
+    dest:     str = Query(""),
+    limit:    int = Query(50),
+):
+    """
+    Quote archive — Evans outbound customer rate quotes indexed from sent mail.
+    Searchable by customer name, origin, destination.
+    """
+    conditions = ["rq.quote_direction = 'outbound'", "rq.total_estimate IS NOT NULL"]
+    params: list = []
+    if customer.strip():
+        conditions.append("(LOWER(rq.customer_name) LIKE %s OR LOWER(rq.carrier_email) LIKE %s)")
+        params += [f"%{customer.strip().lower()}%", f"%{customer.strip().lower()}%"]
+    if origin.strip():
+        conditions.append("(LOWER(rq.origin) LIKE %s OR LOWER(rq.lane) LIKE %s)")
+        params += [f"%{origin.strip().lower()}%", f"%{origin.strip().lower()}%"]
+    if dest.strip():
+        conditions.append("(LOWER(rq.destination) LIKE %s OR LOWER(rq.lane) LIKE %s)")
+        params += [f"%{dest.strip().lower()}%", f"%{dest.strip().lower()}%"]
+    where = " AND ".join(conditions)
+    params.append(limit)
+    with db.get_cursor() as cur:
+        cur.execute(f"""
+            SELECT rq.id, rq.efj, rq.lane, rq.origin, rq.destination,
+                   rq.customer_name, rq.carrier_email AS customer_email,
+                   rq.move_type, rq.linehaul, rq.chassis_per_day,
+                   rq.accessorials, rq.total_estimate,
+                   rq.quote_date, rq.indexed_at
+            FROM rate_quotes rq
+            WHERE {where}
+            ORDER BY rq.quote_date DESC NULLS LAST
+            LIMIT %s
+        """, params)
+        rows = cur.fetchall()
+    return {
+        "quotes": [
+            {{
+                "id":            r["id"],
+                "efj":           r["efj"],
+                "lane":          r["lane"],
+                "origin":        r["origin"],
+                "destination":   r["destination"],
+                "customer":      r["customer_name"],
+                "customer_email":r["customer_email"],
+                "move_type":     r["move_type"],
+                "linehaul":      float(r["linehaul"]) if r["linehaul"] else None,
+                "chassis_per_day": float(r["chassis_per_day"]) if r["chassis_per_day"] else None,
+                "accessorials":  r["accessorials"],
+                "total":         float(r["total_estimate"]) if r["total_estimate"] else None,
+                "quote_date":    r["quote_date"].isoformat() if r["quote_date"] else None,
+                "indexed_at":    r["indexed_at"].isoformat() if r["indexed_at"] else None,
+            }}
+            for r in rows
+        ],
+        "count": len(rows),
+    }
+
+
 @app.get("/api/rate-iq/search-lane")
 async def api_search_lane(origin: str = Query(""), destination: str = Query("")):
     """
@@ -3537,7 +3612,7 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
             ) combined
             ORDER BY rate_amount ASC NULLS LAST, quote_date DESC NULLS LAST
             LIMIT 100
-        """, rq_params + lr_params + wq_params)
+        """, rq_params + lr_params + wq_params + rq_params)
         all_rows = cur.fetchall()
 
         # ── Directory carriers ──
@@ -3649,6 +3724,43 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
     ]
 
     return {"matches": matches, "lane_groups": lane_groups, "carriers": carriers, "stats": stats}
+
+
+
+@app.get("/api/lane-stats")
+async def api_lane_stats():
+    """Top freight corridors by load volume. Future-proof for avg carrier_pay once rate fields exist."""
+    with db.get_cursor() as cur:
+        cur.execute("""
+            SELECT
+                TRIM(SPLIT_PART(origin, ',', 1))                           AS origin_city,
+                TRIM(SPLIT_PART(TRIM(SPLIT_PART(origin, ',', 2)), ' ', 1)) AS origin_state,
+                TRIM(SPLIT_PART(destination, ',', 1))                      AS dest_city,
+                TRIM(SPLIT_PART(TRIM(SPLIT_PART(destination, ',', 2)), ' ', 1)) AS dest_state,
+                COUNT(*)                                                     AS load_count,
+                AVG(customer_rate)                     AS avg_customer_rate
+            FROM shipments
+            WHERE archived = false
+              AND origin    IS NOT NULL AND origin    != ''
+              AND destination IS NOT NULL AND destination != ''
+              AND origin    LIKE '%,%'
+              AND destination LIKE '%,%'
+            GROUP BY 1, 2, 3, 4
+            ORDER BY load_count DESC
+            LIMIT 20
+        """)
+        rows = cur.fetchall()
+    lanes = []
+    for r in rows:
+        lanes.append({
+            "origin_city":  r["origin_city"],
+            "origin_state": r["origin_state"],
+            "dest_city":    r["dest_city"],
+            "dest_state":   r["dest_state"],
+            "load_count":   r["load_count"],
+            "avg_customer_rate": float(r["avg_customer_rate"]) if r["avg_customer_rate"] else None,
+        })
+    return {"lanes": lanes}
 
 
 @app.get("/api/customer-reply-alerts")
@@ -6669,7 +6781,8 @@ async def get_inbox(request: Request):
                 e.sent_at, e.email_type, e.lane, e.priority, e.ai_summary,
                 e.classification_feedback, e.corrected_type,
                 e.efj, NULL as review_status, NULL as suggested_rep,
-                'matched' as source
+                'matched' as source,
+                e.quote_status, e.quote_status_at, e.quote_status_rep
             FROM email_threads e
             WHERE e.sent_at >= NOW() - INTERVAL '%s days'
             UNION ALL
@@ -6679,7 +6792,8 @@ async def get_inbox(request: Request):
                 u.sent_at, u.email_type, u.lane, u.priority, u.ai_summary,
                 u.classification_feedback, u.corrected_type,
                 NULL as efj, u.review_status, u.suggested_rep,
-                'unmatched' as source
+                'unmatched' as source,
+                NULL as quote_status, NULL as quote_status_at, NULL as quote_status_rep
             FROM unmatched_inbox_emails u
             WHERE u.sent_at >= NOW() - INTERVAL '%s days'
               AND u.review_status = 'pending'
@@ -6711,6 +6825,9 @@ async def get_inbox(request: Request):
                 "review_status": row["review_status"],
                 "suggested_rep": row["suggested_rep"],
                 "classification_feedback": row["classification_feedback"],
+                "quote_status": row.get("quote_status"),
+                "quote_status_at": row["quote_status_at"].isoformat() if row.get("quote_status_at") else None,
+                "quote_status_rep": row.get("quote_status_rep"),
             }
 
         thread = threads_map[tid]
@@ -6876,6 +6993,41 @@ async def inbox_classification_feedback(email_id: int, request: Request):
     return JSONResponse({"status": "ok", "feedback": feedback})
 
 
+@app.patch("/api/inbox/{email_id}/quote-action")
+async def patch_quote_action(email_id: int, request: Request):
+    """Set quote_status on an inbox thread (quoted/won/lost/pass/clear).
+    Also allows re-linking to a different EFJ."""
+    data = await request.json()
+    status = data.get("quote_status")   # quoted | won | lost | pass | None (clear)
+    new_efj = data.get("efj")           # optional EFJ re-link
+    rep = data.get("rep", "")
+
+    valid = {None, "quoted", "won", "lost", "pass"}
+    if status not in valid:
+        return JSONResponse({"error": f"Invalid status '{status}'"}, status_code=422)
+
+    with db.get_cursor() as cur:
+        # Update email_threads
+        if new_efj:
+            cur.execute(
+                """UPDATE email_threads
+                   SET quote_status=%s, quote_status_at=NOW(), quote_status_rep=%s, efj=%s
+                   WHERE id=%s""",
+                (status, rep or None, new_efj.strip().upper(), email_id)
+            )
+        else:
+            cur.execute(
+                """UPDATE email_threads
+                   SET quote_status=%s, quote_status_at=NOW(), quote_status_rep=%s
+                   WHERE id=%s""",
+                (status, rep or None, email_id)
+            )
+        if cur.rowcount == 0:
+            # Try unmatched_inbox_emails (no quote_status col there, just log)
+            pass
+    return {"ok": True, "quote_status": status}
+
+
 @app.get("/api/inbox/reply-alerts")
 async def get_inbox_reply_alerts():
     """Return unreplied customer quote emails (threads needing reply)."""
@@ -6911,7 +7063,7 @@ async def rate_response_alerts():
     """Return recent carrier_rate_response emails for live alert consumption."""
     with db.get_cursor() as cur:
         cur.execute("""
-            SELECT id, efj, gmail_thread_id, sender, subject, lane,
+            SELECT id, efj, email_type, gmail_thread_id, sender, subject, lane,
                    ai_summary, sent_at, suggested_rep
             FROM email_threads
             WHERE email_type IN ('carrier_rate_response', 'payment_escalation',
@@ -8118,7 +8270,7 @@ async def api_v2_update_field(efj: str, request: Request, background_tasks: Back
         "origin", "destination", "eta", "lfd", "pickup_date", "delivery_date",
         "status", "notes", "driver", "bot_notes", "return_date",
         "rep", "customer_ref", "equipment_type", "container_url",
-        "driver_phone", "hub", "archived", "customer_rate",
+        "driver_phone", "hub", "archived", "customer_rate", "carrier_pay",
     }
     updates = {k: v for k, v in body.items() if k in ALLOWED}
     if not updates:

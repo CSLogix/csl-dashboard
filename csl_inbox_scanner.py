@@ -204,7 +204,8 @@ CSL_TEAM_SENDERS = re.compile(
 KNOWN_CUSTOMER_SENDERS = re.compile(
     r"dsv\.com|dhl\.com|kripke|allround|cadi|iwsgroup|maoinc|maogroup|eshipping"
     r"|mgfusa|rose.?int|boviet|tolead|mamata|sutton|tanera|meiko|kishco"
-    r"|sei.?acq|cnl|manitoulin|tcr|texas.?int|md.?metal|usha",
+    r"|sei.?acq|cnl|manitoulin|tcr|texas.?int|md.?metal|usha"
+    r"|prologshipping|mdmetalrecycling|bovietsolarusa",
     re.IGNORECASE,
 )
 
@@ -213,7 +214,7 @@ KNOWN_CARRIER_SENDERS = re.compile(
     r"xpo\.com|jbhunt|schneider|knight.?trans|werner\.com|heartland"
     r"|usxpress|saia\.com|estes|odfl\.com|landstar|echo\.com|coyote"
     r"|ch\.?robinson|ryder\.com|penske|averitt|roadrunner"
-    r"|@.*(?:trucking|transport|freight|drayage|cartage|dispatch|hauling)\.com",
+    r"|railtransfer.com|@.*(?:trucking|transport|freight|drayage|cartage|dispatch|hauling|logistics|transfer|carriers|express|lines).com",
     re.IGNORECASE,
 )
 
@@ -243,6 +244,34 @@ CUSTOMER_QUOTE_LANGUAGE = re.compile(
     r"|(?:IMO|hazmat|haz.?mat|DG\s+cargo|dangerous\s+goods|UN\s*\d{4}).*(?:quote|rate|dray|container|trucking)"
     r"|(?:quote|rate|dray|container|trucking).*(?:IMO|hazmat|haz.?mat|DG\s+cargo)"
     r"|\d+\s*(?:'|ft|hc)?\s*IMO",
+    re.IGNORECASE,
+)
+
+# RFQ attachment filename patterns
+RFQ_ATTACHMENT_NAMES = re.compile(
+    r"rfq|rate.?quote|quote.?request|rate.?request|lane.?rate|rate.?sheet|"
+    r"drayage.?rate|freight.?quote|bid.?request|pricing.?request",
+    re.IGNORECASE,
+)
+
+# Strong quote-intent signals (content-first, catches unknown senders)
+STRONG_QUOTE_INTENT = re.compile(
+    # Direct rate asks
+    r"please\s+provide\s+(your\s+)?(current\s+)?rate"
+    r"|please\s+quote\s+(?:pickup|delivery|drayage|the\s+below|this)"
+    r"|(?:hi|hello)\s+carrier"                    # addressed to Evans as carrier
+    r"|drayage\s+request"                          # subject/body keyword
+    r"|requesting\s+(a\s+)?(?:rate|quote|pricing)"
+    r"|(?:rate|quote)\s+for\s+(?:the\s+)?below\s+route"
+    r"|new\s+(?:lane|request|rfq|opportunity).*(?:rate|quote|dray)"
+    # Lane in subject (City ST to City ST or ZIP-based)
+    r"|\b(?:pick\s*up|pu|p/?u)\s+from\s+.{5,40}\s+(?:and\s+)?deliver"
+    r"|\d{5}\s+to\s+(?:[A-Z][a-z]+\s+)?[A-Z]{2}\s+\d{5}"  # ZIP to ZIP
+    # Full address signals (pickup/delivery with street address)
+    r"|(?:pick\s*up|ship\s*to|deliver\s*to)\s*:\s*\d+\s+[A-Z]"
+    r"|loading\s+dock\s+hours"
+    r"|commodity\s*:\s*\S"                       # "Commodity: GDSM..."
+    r"|(?:40|20|45|53)\s*'?\s*(?:hq|hc|gp|st|ot|fr|rf)\b",  # container type
     re.IGNORECASE,
 )
 
@@ -288,6 +317,10 @@ TAG_TO_DOC_TYPE = {
 }
 FW_PREFIX = re.compile(r"^(?:FW|Fwd)\s*:\s*", re.IGNORECASE)
 ORIGINAL_FROM = re.compile(r"From:\s*(.+?)(?:\n|$)", re.IGNORECASE)
+
+# PTD reference pattern (DSV / Apple bids: PTD//XXXXXXXXXX-XX or PTD-XXXXX)
+PTD_PATTERN = re.compile(r'PTD[\-/]{1,2}(\d{5,}(?:[\-/]\w+)*)', re.IGNORECASE)
+
 
 # ── DB Pool ──
 _pool = None
@@ -392,6 +425,19 @@ def ensure_tables():
                 CREATE INDEX IF NOT EXISTS idx_rate_quotes_efj
                     ON rate_quotes(efj);
             """)
+            # Outbound quote columns (Evans → customer quotes)
+            for col_def in [
+                ("quote_direction",  "TEXT DEFAULT 'inbound'"),
+                ("customer_name",    "TEXT"),
+                ("linehaul",         "DECIMAL(10,2)"),
+                ("chassis_per_day",  "DECIMAL(10,2)"),
+                ("accessorials",     "JSONB"),
+                ("total_estimate",   "DECIMAL(10,2)"),
+            ]:
+                try:
+                    cur.execute(f"ALTER TABLE rate_quotes ADD COLUMN IF NOT EXISTS {col_def[0]} {col_def[1]}")
+                except Exception:
+                    conn.rollback()
             # Customer reply alerts for 15-min follow-up
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS customer_reply_alerts (
@@ -602,9 +648,19 @@ def classify_doc_type(filename, sender="", subject="", body=""):
     return "other"
 
 
+_SIG_STRIP = re.compile(
+    r'(?:^|\n)\s*(?:-{3,}|\*{3,}|_{3,}|Insurance Notice|Best regards?|Sincerely|'
+    r'Regards,|Thanks,|Thank you|Sent from|CONFIDENTIAL|DISCLAIMER|'
+    r'This email|The information).*',
+    re.IGNORECASE | re.DOTALL,
+)
+
 def _extract_lane(subject, body):
-    """Helper to extract lane from subject/body. Returns lane string or None."""
-    lane_match = LANE_PATTERN.search(subject or "") or LANE_PATTERN.search(body or "")
+    """Helper to extract lane from subject/body. Returns lane string or None.
+    Strips email signatures and disclaimers before parsing to avoid false matches."""
+    # Strip signature/disclaimer content — only parse first 400 chars of body
+    clean_body = _SIG_STRIP.sub("", body or "")[:400] if body else ""
+    lane_match = LANE_PATTERN.search(subject or "") or LANE_PATTERN.search(clean_body)
     if not lane_match:
         return None
     origin_city = lane_match.group(1).strip()
@@ -616,7 +672,7 @@ def _extract_lane(subject, body):
     return lane
 
 
-def classify_email_type(sender, subject, body, has_attachments=False):
+def classify_email_type(sender, subject, body, has_attachments=False, attachment_names=None):
     """
     Classify the email itself based on sender, subject, body content.
     Returns (email_type, lane_str) tuple.
@@ -698,6 +754,16 @@ def classify_email_type(sender, subject, body, has_attachments=False):
 
     # 7-8. Customer detection (existing patterns)
     if KNOWN_CUSTOMER_SENDERS.search(sender_lower):
+        # Don't fire customer_rate if this is clearly an operational/POD acknowledgment
+        _body_lower_full = (body_safe or "").lower()
+        _is_operational = bool(re.search(
+            r"well noted|noted with thanks|share the pod|send.*pod|"
+            r"pod.*once available|please.*keep.*posted|duly noted|"
+            r"acknowledged|thank you for the update|received with thanks",
+            _body_lower_full,
+        ))
+        if _is_operational:
+            return "tracking", lane
         return "customer_rate", lane
     if CUSTOMER_QUOTE_LANGUAGE.search(text):
         return "customer_rate", lane
@@ -706,7 +772,136 @@ def classify_email_type(sender, subject, body, has_attachments=False):
     if CUSTOMER_QUOTE_PATTERNS.search(text):
         return "customer_rate", lane
 
+    # 9.5 Strong quote intent — content-first catch for unknown senders
+    # Lane in subject + any rate/quote signal = high confidence quote request
+    subject_has_lane = bool(LANE_PATTERN.search(subject_safe))
+    strong_intent = STRONG_QUOTE_INTENT.search(text)
+    if strong_intent:
+        # Exclude if clearly operational/acknowledgment
+        _body_lower_full = (body_safe or "").lower()
+        _is_operational = bool(re.search(
+            r"well noted|noted with thanks|share the pod|send.*pod|"
+            r"pod.*once available|please.*keep.*posted|duly noted|"
+            r"acknowledged|thank you for the update|received with thanks",
+            _body_lower_full,
+        ))
+        if not _is_operational:
+            return "customer_rate", _extract_lane(subject_safe, body_safe)
+
+    if subject_has_lane and re.search(r"rate|quote|dray|rfq|pricing", text, re.I):
+        return "customer_rate", _extract_lane(subject_safe, body_safe)
+
+    # 9.6 Thin-body RFQ: "please quote the attached" + attachment with RFQ filename
+    if has_attachments:
+        _thin_quote = bool(re.search(
+            r"please\s+(quote|rate|price)\s+(?:the\s+)?attached"
+            r"|see\s+attached.*(?:rfq|rate|quote|lane)"
+            r"|(?:rate|quote|rfq).*see\s+attached"
+            r"|attached.*(?:rate\s+request|rfq|quote\s+request)"
+            r"|rates?\s+attached|quote\s+attached",
+            text, re.IGNORECASE,
+        ))
+        _rfq_filename = any(
+            RFQ_ATTACHMENT_NAMES.search(name)
+            for name in (attachment_names or [])
+        )
+        if _thin_quote or _rfq_filename:
+            return "customer_rate", _extract_lane(subject_safe, body_safe)
+
     return None, None
+def extract_outbound_quote(subject, body, recipient, lane):
+    """
+    Extract Evans' own outbound customer rate quote using AI.
+    Handles the Evans Network rate table format (linehaul+fuel, chassis, accessorials).
+    Returns dict or None.
+    """
+    import anthropic as _ant
+    client = _ant.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    prompt = f"""Extract the rate quote from this Evans outbound email.
+Subject: {subject}
+Recipient: {recipient}
+Lane: {lane or 'unknown'}
+
+Email body:
+{body[:2000]}
+
+Return JSON only with these fields (use null if not found):
+{{
+  "origin": "city, ST",
+  "destination": "city, ST",
+  "move_type": "dray|ftl|transload|crossdock",
+  "linehaul": <number or null>,
+  "chassis_per_day": <number or null>,
+  "total_estimate": <number or null>,
+  "accessorials": {{
+    "detention": <number or null>,
+    "prepull": <number or null>,
+    "pier_pass": <string or null>,
+    "dry_run": <number or null>,
+    "chassis_split": <number or null>,
+    "storage_per_night": <number or null>,
+    "other": []
+  }},
+  "customer_name": "company name or null",
+  "notes": "brief note about FSC or special conditions"
+}}"""
+    try:
+        resp = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = resp.content[0].text.strip()
+        import json, re as _re
+        m = _re.search(r'\{.*\}', text, _re.DOTALL)
+        if m:
+            return json.loads(m.group(0))
+    except Exception as e:
+        log.error("  outbound quote extraction failed: %s", e)
+    return None
+
+
+def save_outbound_quote(email_thread_id, efj, lane, recipient, quote_data, sent_at):
+    """Save Evans outbound customer rate quote to rate_quotes table."""
+    if not quote_data:
+        return
+    import json
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO rate_quotes
+                    (email_thread_id, efj, lane, origin, destination,
+                     move_type, customer_name, carrier_email,
+                     rate_amount, total_estimate,
+                     linehaul, chassis_per_day, accessorials,
+                     quote_direction, quote_date)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'outbound',%s)
+                ON CONFLICT DO NOTHING
+            """, (
+                email_thread_id, efj, lane,
+                quote_data.get("origin"), quote_data.get("destination"),
+                quote_data.get("move_type", "dray"),
+                quote_data.get("customer_name"),
+                recipient,
+                quote_data.get("total_estimate"),   # rate_amount = total
+                quote_data.get("total_estimate"),
+                quote_data.get("linehaul"),
+                quote_data.get("chassis_per_day"),
+                json.dumps(quote_data.get("accessorials") or {}),
+                sent_at,
+            ))
+        conn.commit()
+        log.info("  Outbound quote saved: %s → %s @ $%s",
+                 lane or "?", quote_data.get("customer_name", recipient[:30]),
+                 quote_data.get("total_estimate") or "?")
+    except Exception as e:
+        conn.rollback()
+        log.error("  outbound quote save failed: %s", e)
+    finally:
+        put_conn(conn)
+
+
 def extract_rate_from_email(subject, body, sender, lane, email_type):
     """
     Extract rate data from carrier email using AI (Haiku) with regex fallback.
@@ -1017,6 +1212,11 @@ def check_unreplied_customer_emails():
                       AND reply.sent_at > et.sent_at
                   )
                   AND NOT EXISTS (
+                    SELECT 1 FROM email_threads outreach
+                    WHERE outreach.gmail_thread_id = et.gmail_thread_id
+                      AND outreach.email_type = 'rate_outreach'
+                  )
+                  AND NOT EXISTS (
                     SELECT 1 FROM customer_reply_alerts cra
                     WHERE cra.email_thread_id = et.id
                   )
@@ -1034,10 +1234,16 @@ def check_unreplied_customer_emails():
 
                 # Send email alert to assigned rep
                 rep_email = _get_rep_email_for_efj(email["efj"])
-                lane_info = f" | Lane: {email['lane']}" if email.get("lane") else ""
+                # Extract customer name from sender string
+                _raw_sender = email.get("sender", "")
+                _cust_name = _raw_sender.split("<")[0].strip().strip('"') if "<" in _raw_sender else _raw_sender.split("@")[0]
+                _lane_str = email.get("lane") or ""
+                _subject_parts = [p for p in [_cust_name[:30] if _cust_name else None,
+                                               _lane_str[:40] if _lane_str else None] if p]
+                _alert_subject = "CSL Alert: No reply — " + " | ".join(_subject_parts) if _subject_parts else f"CSL Alert: No reply to customer quote — {email['efj'] or 'No EFJ'}"
                 _send_alert_email(
                     rep_email,
-                    f"CSL Alert: No reply to customer quote — {email['efj'] or 'No EFJ'}{lane_info}",
+                    _alert_subject,
                     f"""<div style="font-family:Arial,sans-serif;max-width:600px">
 <h3 style="color:#F59E0B;margin:0 0 12px 0">Customer Quote — No Reply for 15+ Minutes</h3>
 <table style="border-collapse:collapse;width:100%">
@@ -1236,7 +1442,7 @@ def process_message(service, msg_id):
                 log.error("  Download failed for %s: %s", att["filename"], e)
 
         # Classify the email itself (carrier/customer quote, lane detection)
-        email_type, lane = classify_email_type(sender, subject, body_preview, has_attachments)
+        email_type, lane = classify_email_type(sender, subject, body_preview, has_attachments, attachment_names=attachment_names)
         if email_type:
             log.info("  Email type: %s | Lane: %s", email_type, lane or "none")
 
@@ -1283,7 +1489,7 @@ def process_message(service, msg_id):
             put_conn(conn)
 
         # ── Carrier rate response detection (thread-based) ──
-        if final_email_type in (None, 'carrier_rate', 'general') and gmail_thread_id:
+        if final_email_type in (None, 'carrier_rate', 'general', 'customer_rate') and gmail_thread_id:
             try:
                 conn2 = get_conn()
                 with conn2.cursor() as cur2:
@@ -1361,7 +1567,7 @@ def process_message(service, msg_id):
 
     else:
         # Classify the email even when unmatched to an EFJ
-        email_type, lane = classify_email_type(sender, subject, body_preview, has_attachments)
+        email_type, lane = classify_email_type(sender, subject, body_preview, has_attachments, attachment_names=attachment_names)
         log.info("UNMATCHED: %s [%s] from %s | type=%s lane=%s",
                  msg_id[:12], subject[:60], sender[:40],
                  email_type or "unknown", lane or "none")
@@ -1407,8 +1613,61 @@ def process_message(service, msg_id):
         finally:
             put_conn(conn)
 
+
+        # ── PTD# contextual inheritance (DSV/Apple forwarded bids) ──────────
+        if final_email_type in (None, 'unknown') and body_preview:
+            ptd_match = PTD_PATTERN.search(body_preview)
+            if not ptd_match:
+                ptd_match = PTD_PATTERN.search(subject or "")
+            if ptd_match:
+                ptd_ref = ptd_match.group(0)
+                try:
+                    conn_ptd = get_conn()
+                    with conn_ptd.cursor(cursor_factory=RealDictCursor) as cur_ptd:
+                        cur_ptd.execute(
+                            """SELECT email_type, efj, lane, account
+                               FROM email_threads
+                               WHERE subject ILIKE %s
+                                  OR body_preview ILIKE %s
+                               ORDER BY sent_at DESC LIMIT 1""",
+                            (f"%{ptd_ref}%", f"%{ptd_ref}%"),
+                        )
+                        parent = cur_ptd.fetchone()
+                    if parent and parent.get("email_type"):
+                        inherited_type = parent["email_type"]
+                        inherited_efj  = parent.get("efj")
+                        inherited_lane = parent.get("lane") or lane
+                        final_email_type = inherited_type
+                        log.info("  PTD# match: %s → inherited type=%s efj=%s",
+                                 ptd_ref, inherited_type, inherited_efj or "none")
+                        if email_thread_db_id:
+                            conn_upd = get_conn()
+                            with conn_upd.cursor() as cur_upd:
+                                cur_upd.execute(
+                                    "UPDATE unmatched_inbox_emails SET email_type=%s, lane=%s WHERE id=%s",
+                                    (inherited_type, inherited_lane, email_thread_db_id),
+                                )
+                            conn_upd.commit()
+                            put_conn(conn_upd)
+                    else:
+                        # PTD# found but no parent — still mark as customer_rate (DSV bid)
+                        final_email_type = 'customer_rate'
+                        log.info("  PTD# found (%s) but no parent thread — tagging customer_rate", ptd_ref)
+                        if email_thread_db_id:
+                            conn_upd = get_conn()
+                            with conn_upd.cursor() as cur_upd:
+                                cur_upd.execute(
+                                    "UPDATE unmatched_inbox_emails SET email_type='customer_rate' WHERE id=%s",
+                                    (email_thread_db_id,),
+                                )
+                            conn_upd.commit()
+                            put_conn(conn_upd)
+                    put_conn(conn_ptd)
+                except Exception as e_ptd:
+                    log.error("  PTD# lookup failed: %s", e_ptd)
+
         # ── Carrier rate response detection for unmatched (thread-based) ──
-        if final_email_type in (None, 'carrier_rate', 'general') and gmail_thread_id:
+        if final_email_type in (None, 'carrier_rate', 'general', 'customer_rate') and gmail_thread_id:
             try:
                 conn_r = get_conn()
                 with conn_r.cursor() as cur_r:
@@ -1499,7 +1758,7 @@ def scan_sent_messages(service):
                     if cur.fetchone():
                         continue
 
-                    # Fetch message metadata (not full body — lightweight)
+                    # Fetch message metadata
                     msg = service.users().messages().get(
                         userId="me", id=msg_id, format="metadata",
                         metadataHeaders=["To", "Subject", "Date"],
@@ -1509,6 +1768,22 @@ def scan_sent_messages(service):
                     thread_id = msg.get("threadId", "")
                     recipient = headers.get("To", "")
                     subject = headers.get("Subject", "")
+
+                    # For rate_outreach subjects, fetch full body for quote extraction
+                    _rate_signals = bool(__import__('re').search(
+                        r'rate|rfq|quote|pricing|dray|lane', (subject or '').lower()))
+                    if _rate_signals:
+                        try:
+                            full_msg = service.users().messages().get(
+                                userId="me", id=msg_id, format="full").execute()
+                            _body = get_body_preview(full_msg.get("payload", {}))
+                            _lane = _extract_lane(subject or "", _body or "")
+                            _efj = match_email_to_efj(subject or "", _body or "", [])
+                            _qdata = extract_outbound_quote(subject, _body or "", recipient, _lane)
+                            if _qdata and _qdata.get("total_estimate"):
+                                save_outbound_quote(None, _efj, _lane, recipient, _qdata, None)
+                        except Exception as _e:
+                            log.warning("  Outbound quote extraction failed for %s: %s", msg_id[:12], _e)
 
                     # Parse date
                     sent_at = None

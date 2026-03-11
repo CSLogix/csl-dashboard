@@ -540,18 +540,18 @@ def run_once():
 
             # ── CAN'T MAKE IT alert ──────────────────────────────────────
             if cant_make_it:
-                cmi_status = f"Can't Make It - {cant_make_it}"
+                cmi_status = "Can't Make It"
                 if not already_sent(sent, key, cmi_status):
                     print(f"    CAN'T MAKE IT detected: {cant_make_it}")
                     send_ftl_email(efj, load_num, cmi_status, tab_name, ACCOUNT_REPS_PG,
-                                   mp_load_id=mp_load_id)
+                                   mp_load_id=mp_load_id, stop_times=stop_times)
                     mark_sent(sent, key, cmi_status)
 
             # ── Archive if Delivered ──────────────────────────────────────
             if "delivered" in cached_status.lower():
                 archive_ftl_row_pg(efj, load_num, dest, tab_name,
                                     final_pickup, final_delivery, ACCOUNT_REPS_PG,
-                                    mp_load_id=mp_load_id)
+                                    mp_load_id=mp_load_id, stop_times=stop_times)
 
     save_tracking_cache(tracking_cache)
     save_sent_alerts(sent)

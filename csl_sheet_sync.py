@@ -168,13 +168,13 @@ def _upsert_shipment(data: dict):
                     origin, destination, eta, lfd, pickup_date, delivery_date,
                     status, notes, driver, bot_notes, return_date,
                     account, hub, rep, source, container_url, driver_phone,
-                    sheet_row_index
+                    sheet_row_index, sheet_synced_at
                 ) VALUES (
                     %(efj)s, %(move_type)s, %(container)s, %(bol)s, %(vessel)s, %(carrier)s,
                     %(origin)s, %(destination)s, %(eta)s, %(lfd)s, %(pickup_date)s, %(delivery_date)s,
                     %(status)s, %(notes)s, %(driver)s, %(bot_notes)s, %(return_date)s,
                     %(account)s, %(hub)s, %(rep)s, %(source)s, %(container_url)s, %(driver_phone)s,
-                    %(sheet_row_index)s
+                    %(sheet_row_index)s, NOW()
                 )
                 ON CONFLICT (efj) DO UPDATE SET
                     status = COALESCE(NULLIF(EXCLUDED.status, ''), shipments.status),
@@ -188,8 +188,30 @@ def _upsert_shipment(data: dict):
                     container = EXCLUDED.container,
                     container_url = COALESCE(NULLIF(EXCLUDED.container_url, ''), shipments.container_url),
                     sheet_row_index = EXCLUDED.sheet_row_index,
+                    sheet_synced_at = NOW(),
                     updated_at = NOW()
             """, data)
+
+
+def _a1(row_1based, col_0based):
+    """Convert 1-based row + 0-based col to A1 notation (e.g. row=5, col=9 -> 'J5')."""
+    col = col_0based + 1
+    letters = ""
+    while col > 0:
+        col, rem = divmod(col - 1, 26)
+        letters = chr(65 + rem) + letters
+    return f"{letters}{row_1based}"
+
+
+def _batch_writeback(ws, updates):
+    """
+    Write cells back to a gspread worksheet.
+    updates: list of (row_1based, col_0based, value)
+    """
+    if not updates:
+        return
+    payload = [{"range": _a1(r, c), "values": [[v]]} for r, c, v in updates]
+    ws.batch_update(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +248,7 @@ def sync_tolead(gc, creds):
             hub_rows = hub_ws.get_all_values()
             cols = hub_cfg["cols"]
             hub_start = hub_cfg.get("start_row", 1)
+            lax_writebacks = []  # (row_1based, col_0based, value) — LAX only
 
             # Fetch hyperlinks for MP URLs from the EFJ column
             hub_links = _get_sheet_hyperlinks(creds, hub_cfg["sheet_id"], hub_cfg["tab"])
@@ -324,18 +347,35 @@ def sync_tolead(gc, creds):
                     _upsert_shipment(sheet_data)
                     synced_from_sheet += 1
                 else:
-                    sheet_status = (status or "").strip().lower()
-                    pg_status = (pg_row["status"] or "").strip().lower()
-
-                    if sheet_status != pg_status:
-                        _upsert_shipment(sheet_data)
-                        synced_from_sheet += 1
-                    else:
-                        _upsert_shipment(sheet_data)
+                    _merge_master_shipment(pg_row, sheet_data,
+                                           syncable_fields=TOLEAD_BOVIET_SYNCABLE_FIELDS)
+                    # LAX is internal-only — write PG dashboard edits back to sheet
+                    if hub_name == "LAX":
+                        _pg_updated = pg_row.get("updated_at")
+                        _pg_synced = pg_row.get("sheet_synced_at")
+                        if _pg_updated and _pg_synced and _pg_updated > _pg_synced:
+                            if pg_row.get("status") and pg_row["status"] != status:
+                                lax_writebacks.append((ri, cols["status"], pg_row["status"]))
+                            _pg_pu = (pg_row.get("pickup_date") or "").strip()
+                            _sh_pu = f"{pickup_date} {pickup_time}".strip() if pickup_date else ""
+                            if _pg_pu and _pg_pu != _sh_pu:
+                                lax_writebacks.append((ri, cols["pickup_date"], _pg_pu))
+                            _pg_del = (pg_row.get("delivery_date") or "").strip()
+                            _sh_del = delivery
+                            if _pg_del and _pg_del != _sh_del:
+                                lax_writebacks.append((ri, cols["delivery"], _pg_del))
 
                 # Write trailer to driver_contacts (separate from shipments.driver)
                 if trailer_val or driver_phone:
                     _write_driver_contact(key, trailer=trailer_val, phone=driver_phone)
+
+            # Flush LAX write-backs (one batch API call per hub cycle)
+            if hub_name == "LAX" and lax_writebacks:
+                try:
+                    _batch_writeback(hub_ws, lax_writebacks)
+                    log.info("Tolead LAX: wrote back %d cell(s) to sheet", len(lax_writebacks))
+                except Exception as _wb_err:
+                    log.warning("Tolead LAX write-back failed: %s", _wb_err)
 
             log.info("Tolead %s: synced", hub_name)
 
@@ -363,6 +403,7 @@ def sync_boviet(gc, creds):
         bov_value_ranges = bov_batch.get("valueRanges", [])
 
         pg_map = _get_pg_shipments("Boviet")
+        boviet_writebacks = {t: [] for t in bov_tabs}  # per-tab write-back queue
 
         for vr, tab_name in zip(bov_value_ranges, bov_tabs):
             cfg = BOVIET_TAB_CONFIGS[tab_name]
@@ -423,10 +464,40 @@ def sync_boviet(gc, creds):
                     _upsert_shipment(sheet_data)
                     synced_from_sheet += 1
                 else:
-                    # Update from sheet
-                    _upsert_shipment(sheet_data)
+                    _merge_master_shipment(pg_row, sheet_data,
+                                           syncable_fields=TOLEAD_BOVIET_SYNCABLE_FIELDS)
+                    # All Boviet tabs are internal — write PG dashboard edits back
+                    _pg_updated = pg_row.get("updated_at")
+                    _pg_synced = pg_row.get("sheet_synced_at")
+                    if _pg_updated and _pg_synced and _pg_updated > _pg_synced:
+                        if pg_row.get("status") and pg_row["status"] != status:
+                            boviet_writebacks[tab_name].append(
+                                (ri, cfg["status_col"], pg_row["status"]))
+                        if "pickup_col" in cfg:
+                            _pg_pu = (pg_row.get("pickup_date") or "").strip()
+                            _sh_pu = bov_pickup
+                            if _pg_pu and _pg_pu != _sh_pu:
+                                boviet_writebacks[tab_name].append(
+                                    (ri, cfg["pickup_col"], _pg_pu))
+                        if "delivery_col" in cfg:
+                            _pg_del = (pg_row.get("delivery_date") or "").strip()
+                            _sh_del = bov_delivery
+                            if _pg_del and _pg_del != _sh_del:
+                                boviet_writebacks[tab_name].append(
+                                    (ri, cfg["delivery_col"], _pg_del))
 
             time.sleep(1)
+
+        # Flush write-backs for this tab
+        if boviet_writebacks.get(tab_name):
+            try:
+                ws_write = bov_sh.worksheet(tab_name)
+                _batch_writeback(ws_write, boviet_writebacks[tab_name])
+                log.info("Boviet %s: wrote back %d cell(s) to sheet",
+                         tab_name, len(boviet_writebacks[tab_name]))
+                time.sleep(0.5)
+            except Exception as _wb_err:
+                log.warning("Boviet %s write-back failed: %s", tab_name, _wb_err)
 
     except Exception as e:
         log.error("Boviet sync failed: %s", e)
@@ -473,6 +544,12 @@ MASTER_SYNCABLE_FIELDS = [
     "move_type", "container", "bol", "vessel", "carrier",
     "origin", "destination", "eta", "lfd", "pickup_date",
     "delivery_date", "status", "driver", "bot_notes", "return_date",
+]
+
+# Fields the Tolead/Boviet sync is allowed to overwrite (no financial/ops fields)
+TOLEAD_BOVIET_SYNCABLE_FIELDS = [
+    "move_type", "container", "carrier", "origin", "destination",
+    "pickup_date", "delivery_date", "status", "driver_phone", "container_url",
 ]
 
 
@@ -527,7 +604,7 @@ def _upsert_master_shipment(data: dict):
             return cur.rowcount
 
 
-def _merge_master_shipment(pg_row: dict, sheet_data: dict):
+def _merge_master_shipment(pg_row: dict, sheet_data: dict, syncable_fields=None):
     """
     Merge a sheet row with an existing PG row using timestamp-based conflict resolution.
 
@@ -551,7 +628,9 @@ def _merge_master_shipment(pg_row: dict, sheet_data: dict):
             sheet_data[_df] = clean_date(sheet_data[_df]) or sheet_data[_df]
 
     updates = {}
-    for field in MASTER_SYNCABLE_FIELDS:
+    if syncable_fields is None:
+        syncable_fields = MASTER_SYNCABLE_FIELDS
+    for field in syncable_fields:
         sheet_val = (sheet_data.get(field) or "").strip()
         pg_val = (pg_row.get(field) or "").strip()
 
