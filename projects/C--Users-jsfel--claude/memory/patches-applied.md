@@ -68,3 +68,5 @@
 | `patch_sync_guard.py` | csl_sheet_sync.py: TOLEAD_BOVIET_SYNCABLE_FIELDS + sheet_synced_at stamp + syncable_fields param + Tolead/Boviet use _merge not _upsert + PG trigger trg_shipments_updated_at + cron bumped */10→*/3 |
 | `patch_writeback.py` | csl_sheet_sync.py: _a1() + _batch_writeback() helpers + Tolead LAX + all Boviet tabs write PG edits back to sheet when updated_at > sheet_synced_at |
 | `boviet_invoice_writer.py` | New script: Fills Boviet Piedra Invoice tab — MP stop times→G/I/L/N + detention calc→J/O. PM heuristic for bare time strings. Cron: every 2 hrs 6AM-8PM Mon-Fri |
+| `patch_status_writeback.py` | app.py: Add BackgroundTasks + _write_fields_to_master_sheet() to v2 status endpoint for non-shared accounts (fixes status revert bug) |
+| `patch_daily_report_html.py` | dray_daily_summary.py: Fix Outlook email HTML — rgba→solid borders, div→table wrapper, cellpadding/cellspacing, font-family |

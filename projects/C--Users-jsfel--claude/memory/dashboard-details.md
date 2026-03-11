@@ -9,11 +9,11 @@ Lines shift as code evolves — use Grep to find exact positions.
 | `TrackingBadge` | FTL tracking status badge |
 | `ClockDisplay` | Live clock + sync status |
 | `DispatchDashboard` | Root — all state, API fetching, nav |
-| `OverviewView` | Homepage: KPIs, pipeline, team, Live Alerts |
+| `OverviewView` | Homepage: KPIs, pipeline, stat cards (incl. Yesterday), Team+Account above Actions+Alerts |
 | `RepDashboardView` | Individual rep: Dray/FTL view toggle, account cards, inline date editing |
 | `AnalyticsView` | Bot status, sync log, Sheets connections |
 | `LoadSlideOver` | Right panel: tracking, docs, driver, emails |
-| `DispatchView` | Dispatch table: filters, search, sorting |
+| `DispatchView` | Dispatch table: filters, search, sorting. No sidebar nav — accessed via Overview stat cards. Has `← Overview` back button |
 | `HistoryView` | Archived/completed loads (needs backend) |
 | `MacropointModal` | Macropoint map, progress, driver info |
 | `UnbilledView` | Unbilled: Excel upload, aged table, dismiss |
