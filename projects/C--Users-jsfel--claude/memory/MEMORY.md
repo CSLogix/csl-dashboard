@@ -12,10 +12,8 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 
-## Git — Mar 10, 2026
-- **Baseline `7c93e8b`** (Mar 9): Clean baseline capturing all production code
-- **Latest `884790e`** (Mar 10): Server patches (49c09d9) + frontend fixes (3c44b59) merged
-- **Delivered flow fix** (Mar 10): Archive routing overhaul — pending commit (see patches below)
+## Git — Mar 10-11, 2026
+- **Latest `cc55669`** (Mar 11): Public tracker portal + date normalizer + LFD fix + Share Link button
 - **Repo**: `CSLogix/CSLogix_Bot` (private), single `master` branch
 - **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
@@ -68,6 +66,21 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Patches**: `terminal_normalizer.py` (new file), `patch_terminal_normalizer.py`
 
 ## Recent Dashboard Changes (Deployed)
+
+### Public Customer Tracking Portal — Mar 11, 2026
+- **`public_tracking_tokens` table**: UUID PK, `efj` FK → shipments, `show_driver` bool, 60-day `expires_at`
+- **`GET /track/{token}`**: Standalone Jinja2 page (no auth, no React bundle). Templates at `/root/csl-bot/csl-doc-tracker/templates/public_track.html`. Tailwind CDN, mobile-first, <50KB.
+- **`POST /api/shipments/{efj}/generate-token`**: Returns existing active token or creates new UUID. Returns `{token, url}`. Copies URL to clipboard via React.
+- **Auth bypass**: `/track` in `PUBLIC_PATHS` + `startswith("/track")` in `AuthMiddleware` middleware check.
+- **SQL**: LATERAL join on `tracking_events` for last GPS ping; `driver_contacts` joined on `efj`. No `accounts` table exists — `show_driver` lives on token row, not account.
+- **Share Link button**: Purple 🔗 in LoadSlideOver quick-action strip (line ~4155). `copiedLink`/`linkGenerating` state. `handleShareLink()` defined before `requestAiSummary`.
+- **Expired token**: Returns 404 inline HTML "Link Expired" page.
+- **Jinja2Templates**: Added `from fastapi.templating import Jinja2Templates` + `templates = Jinja2Templates(directory=...)` after `app = FastAPI(...)`.
+
+### Date Normalizer + LFD Fix — Mar 11, 2026
+- **`date_normalizer.py`**: `clean_date(raw) -> str` — normalizes all date fields to MM-DD / MM-DD HH:MM format
+- **Integrated** into `pg_update_shipment()`, `_upsert_shipment()`, `_upsert_master_shipment()`, `_merge_master_shipment()` pre-comparison
+- **LFD fix** (`csl_bot.py`): LFD now only used as pickup fallback when no actual gate-out event exists; existing LFD preserved through `pg_update_shipment`
 
 ### Magic Parse Modal + Quick Parse API — Mar 10, 2026
 - **`POST /api/quick-parse`** live on VPS (Claude Sonnet 4.6): extracts `efj_number`, `rate`, `container_number`, `carrier`, `confidence` from freeform text. Returns 422 if extraction fails. Patch: `patch_quick_parse.py`
@@ -151,7 +164,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ### Large Items
 - **Tolead/Boviet full PG migration**: Move off Google Sheets entirely
-- **Customer Tracking Portal**: Public-facing read-only load status
+- **Customer Tracking Portal**: ✅ DONE — `/track/{token}` live, Share Link button in LoadSlideOver
 - **Inbox polish**: Mailto reply button, thread detail slide-over assign/correction UI
 
 ### Rate IQ
