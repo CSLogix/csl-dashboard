@@ -910,12 +910,12 @@ def extract_rate_from_email(subject, body, sender, lane, email_type):
     if email_type != "carrier_rate":
         return None
 
-    text = f"{subject} {body[:1500]}"
+    text = f"{subject} {body[:2500]}"
     sender_name = sender.split("<")[0].strip().strip('"') if "<" in sender else sender
     carrier_email = sender.split("<")[-1].replace(">", "").strip() if "<" in sender else sender
 
     # AI extraction first
-    result = _ai_extract_rate(subject, body[:1200], sender_name)
+    result = _ai_extract_rate(subject, body[:2500], sender_name)
 
     # Regex fallback for missing fields
     if not result.get("rate_amount"):
@@ -966,29 +966,41 @@ def _ai_extract_rate(subject, body, sender_name):
                     break
     if not api_key:
         return {}
-    prompt = f"""Extract freight rate data from this carrier email. Return ONLY valid JSON.
+    prompt = f"""Extract the freight rate from this carrier email. Return ONLY valid JSON.
 
 FROM: {sender_name}
 SUBJECT: {subject}
-BODY: {body}
+BODY:
+{body}
 
+RULES:
+- Look for dollar amounts ($X,XXX or $X,XXX.XX) near keywords like "rate", "all-in", "total", "we can do", "our price", "quoted at", "linehaul", "flat rate"
+- IGNORE insurance amounts, liability limits, cargo values, bond amounts, and per-diem chassis charges unless they are the primary rate
+- If you see a per-mile rate (e.g. "$2.35/mile") with mileage, compute rate_amount = per_mile_rate * miles and set rate_unit=per_mile
+- If you see linehaul + FSC or accessorials separately, sum them for rate_amount and also populate linehaul/accessorials fields
+- If multiple dollar amounts exist, prefer the "all-in" or "total" amount. If no total, use the linehaul amount
+- If the email is a rate confirmation (not a new quote), extract the confirmed rate
+- move_type=dray if email mentions port, chassis, drayage, container, pier, terminal
+- If no clear freight rate is found, set rate_amount to null — do NOT guess
+
+Return this JSON:
 {{
-  "rate_amount": <flat dollar amount as number, null if not found>,
+  "rate_amount": <all-in dollar amount as number, or null>,
   "rate_unit": "<flat or per_mile>",
   "move_type": "<dray or ftl or ltl>",
-  "origin": "<origin city/port or null>",
+  "origin": "<origin city/state or null>",
   "destination": "<destination city/state or null>",
   "miles": <integer or null>,
-  "carrier_name": "<company name from signature or null>"
-}}
-
-rate_amount = all-in or linehaul flat rate. If per-mile rate, set rate_unit=per_mile.
-move_type=dray if mentions port/chassis/drayage/container."""
+  "carrier_name": "<company name from email signature or null>",
+  "linehaul": <linehaul amount if separate from total, or null>,
+  "accessorials": <accessorials/FSC total if mentioned, or null>,
+  "confidence": "<high or medium or low>"
+}}"""
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
-            model="claude-haiku-4-5-20251001", max_tokens=200,
+            model="claude-haiku-4-5-20251001", max_tokens=300,
             messages=[{"role": "user", "content": prompt}],
         )
         text = resp.content[0].text.strip()
@@ -1001,7 +1013,7 @@ move_type=dray if mentions port/chassis/drayage/container."""
                 out["rate_amount"] = float(data["rate_amount"])
             except (TypeError, ValueError):
                 pass
-        for f in ("rate_unit", "move_type", "origin", "destination", "carrier_name"):
+        for f in ("rate_unit", "move_type", "origin", "destination", "carrier_name", "confidence"):
             if data.get(f):
                 out[f] = str(data[f]).strip()
         if data.get("miles"):
@@ -1009,6 +1021,12 @@ move_type=dray if mentions port/chassis/drayage/container."""
                 out["miles"] = int(data["miles"])
             except (TypeError, ValueError):
                 pass
+        for nf in ("linehaul", "accessorials"):
+            if data.get(nf) is not None:
+                try:
+                    out[nf] = float(data[nf])
+                except (TypeError, ValueError):
+                    pass
         return out
     except Exception as e:
         log.debug("AI rate extraction failed: %s", e)

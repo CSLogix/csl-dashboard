@@ -76,10 +76,10 @@ ACCOUNT_REPS = {
 }
 
 # ── Styles ────────────────────────────────────────────────────────────────────
-_TH = 'style="padding:6px 10px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.3);color:white;font-size:12px;white-space:nowrap;"'
-_TD = 'style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;"'
-_TD_RED = 'style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;color:#c62828;font-weight:bold;"'
-_TD_ORG = 'style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;color:#f57c00;font-weight:bold;"'
+_TH = 'style="padding:8px 10px;text-align:left;border-bottom:2px solid #ffffff;color:#ffffff;font-size:12px;font-family:Arial,sans-serif;white-space:nowrap;"'
+_TD = 'style="padding:8px 10px;border-bottom:1px solid #eeeeee;font-size:12px;font-family:Arial,sans-serif;"'
+_TD_RED = 'style="padding:8px 10px;border-bottom:1px solid #eeeeee;font-size:12px;font-family:Arial,sans-serif;color:#c62828;font-weight:bold;"'
+_TD_ORG = 'style="padding:8px 10px;border-bottom:1px solid #eeeeee;font-size:12px;font-family:Arial,sans-serif;color:#f57c00;font-weight:bold;"'
 
 STATUS_COLORS = {
     "released":       "#1b5e20",
@@ -96,7 +96,7 @@ STATUS_COLORS = {
 
 def _status_style(status):
     color = STATUS_COLORS.get((status or "").lower(), "#333")
-    return f'style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;color:{color};font-weight:bold;"'
+    return f'style="padding:8px 10px;border-bottom:1px solid #eeeeee;font-size:12px;font-family:Arial,sans-serif;color:{color};font-weight:bold;"'
 
 
 def _g(row, col, default=""):
@@ -258,7 +258,7 @@ def _build_account_section(account_name, loads):
             f'</tr>'
         )
     return (
-        f'<table style="border-collapse:collapse;width:100%;border:1px solid #ddd;margin-top:20px;">'
+        f'<table cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;width:100%;border:1px solid #dddddd;margin-top:20px;table-layout:fixed;">'
         f'<tr style="background:{color};">{hdr_cells}</tr>'
         f'{rows_html}'
         f'</table>'
@@ -287,16 +287,16 @@ def build_dray_body(rep_name, accounts_data, now_str):
     )
 
     return (
-        f'<div style="font-family:Arial,sans-serif;max-width:960px;">'
+        f'<table cellpadding="0" cellspacing="0" width="960" style="font-family:Arial,sans-serif;max-width:960px;"><tr><td>'
         f'<h2 style="margin:0 0 4px 0;color:#333;">'
         f'CSL Daily &mdash; Dray Import &mdash; {rep_name}</h2>'
         f'<p style="color:#888;font-size:12px;margin:0 0 8px 0;">{now_str}</p>'
         f'<div style="background:#f5f5f5;border-left:4px solid #1565c0;padding:8px 14px;'
         f'border-radius:0 6px 6px 0;font-size:13px;margin-bottom:12px;">{ribbon_html}</div>'
         f'{sections}'
-        f'<p style="color:#aaa;font-size:11px;margin-top:20px;">'
+        f'<p style="color:#aaa;font-size:11px;margin-top:20px;font-family:Arial,sans-serif;">'
         f'CSLogix Dispatch &middot; {now_str}</p>'
-        f'</div>'
+        f'</td></tr></table>'
     )
 
 

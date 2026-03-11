@@ -3469,6 +3469,16 @@ async def update_rate_quote(quote_id: int, request: Request):
             row = cur.fetchone()
     if not row:
         return JSONResponse(status_code=404, content={"error": "quote not found"})
+    # When accepting, reject competing pending quotes for same EFJ
+    if new_status == "accepted" and row.get("efj"):
+        with db.get_conn() as conn2:
+            with db.get_cursor(conn2) as cur2:
+                cur2.execute(
+                    "UPDATE rate_quotes SET status = 'rejected' WHERE efj = %s AND id != %s AND status = 'pending'",
+                    (row["efj"], quote_id),
+                )
+                if cur2.rowcount:
+                    log.info("Rate IQ: rejected %d competing quotes for %s", cur2.rowcount, row["efj"])
     return {"ok": True, "id": row["id"], "status": new_status,
             "carrier": row["carrier_name"], "rate": float(row["rate_amount"]) if row["rate_amount"] else None}
 
@@ -5408,6 +5418,80 @@ async def api_load_summary(efj: str, request: Request):
         raise HTTPException(500, f"Summary generation failed: {str(e)}")
 
 
+
+# ── Rate Quote Suggestion Endpoints (Margin Bridge) ──
+
+@app.get("/api/load/{efj}/rate-quotes")
+async def get_load_rate_quotes(efj: str, request: Request):
+    """Return pending/accepted rate quotes for a specific load."""
+    with db.get_cursor() as cur:
+        cur.execute("""
+            SELECT id, carrier_name, carrier_email, rate_amount, rate_unit,
+                   move_type, origin, destination, miles, status, quote_date
+            FROM rate_quotes
+            WHERE efj = %s AND status IN ('pending', 'accepted')
+            ORDER BY
+                CASE WHEN status = 'accepted' THEN 0 ELSE 1 END,
+                quote_date DESC
+        """, (efj,))
+        rows = cur.fetchall()
+    quotes = []
+    for r in rows:
+        q = dict(r)
+        if q.get("rate_amount") is not None:
+            q["rate_amount"] = float(q["rate_amount"])
+        if q.get("quote_date"):
+            q["quote_date"] = q["quote_date"].isoformat()
+        quotes.append(q)
+    return {"quotes": quotes}
+
+
+@app.post("/api/load/{efj}/apply-rate")
+async def apply_rate_to_shipment(efj: str, request: Request, background_tasks: BackgroundTasks):
+    """Apply a rate quote amount to the shipment's carrier_pay or customer_rate field."""
+    body = await request.json()
+    quote_id = body.get("quote_id")
+    field = body.get("field", "carrier_pay")
+    if field not in ("carrier_pay", "customer_rate"):
+        return JSONResponse(status_code=400, content={"error": "field must be carrier_pay or customer_rate"})
+    if not quote_id:
+        return JSONResponse(status_code=400, content={"error": "quote_id required"})
+
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            # Look up the quote
+            cur.execute("SELECT id, rate_amount, efj FROM rate_quotes WHERE id = %s", (quote_id,))
+            quote = cur.fetchone()
+            if not quote or not quote["rate_amount"]:
+                return JSONResponse(status_code=400, content={"error": "Quote has no rate amount"})
+
+            # Write to shipments
+            cur.execute(
+                f"UPDATE shipments SET {field} = %s, updated_at = NOW() WHERE efj = %s RETURNING *",
+                (quote["rate_amount"], efj),
+            )
+            row = cur.fetchone()
+            if not row:
+                return JSONResponse(status_code=404, content={"error": f"Shipment {efj} not found"})
+
+            # Mark this quote accepted, reject competing
+            cur.execute("UPDATE rate_quotes SET status = 'accepted' WHERE id = %s AND status != 'accepted'", (quote_id,))
+            cur.execute(
+                "UPDATE rate_quotes SET status = 'rejected' WHERE efj = %s AND id != %s AND status = 'pending'",
+                (efj, quote_id),
+            )
+
+    # Sheet write-back for non-shared accounts
+    account = row.get("account")
+    if account and account not in _SHARED_SHEET_ACCOUNTS:
+        background_tasks.add_task(
+            _write_fields_to_master_sheet, efj, account, {field: str(quote["rate_amount"])}
+        )
+
+    log.info("Applied rate quote %d ($%s) → %s.%s", quote_id, quote["rate_amount"], efj, field)
+    return {"ok": True, "applied": float(quote["rate_amount"]), "field": field,
+            "shipment": _shipment_row_to_dict(row)}
+
 @app.get("/api/unmatched-emails")
 async def get_unmatched_emails():
     """List unmatched inbox emails pending review."""
@@ -7025,6 +7109,24 @@ async def patch_quote_action(email_id: int, request: Request):
         if cur.rowcount == 0:
             # Try unmatched_inbox_emails (no quote_status col there, just log)
             pass
+    # When marking "won", auto-accept linked rate_quote
+    if status == "won":
+        with db.get_cursor() as cur_rq:
+            cur_rq.execute("""
+                UPDATE rate_quotes SET status = 'accepted'
+                WHERE email_thread_id = %s AND status = 'pending'
+                RETURNING id, rate_amount, efj
+            """, (email_id,))
+            accepted = cur_rq.fetchone()
+            if accepted:
+                log.info("Quote-action won: auto-accepted rate_quote %d ($%s) for %s",
+                         accepted["id"], accepted["rate_amount"], accepted.get("efj"))
+                # Also reject competing quotes for same EFJ
+                if accepted.get("efj"):
+                    cur_rq.execute(
+                        "UPDATE rate_quotes SET status = 'rejected' WHERE efj = %s AND id != %s AND status = 'pending'",
+                        (accepted["efj"], accepted["id"]),
+                    )
     return {"ok": True, "quote_status": status}
 
 
@@ -7944,6 +8046,8 @@ def _shipment_row_to_dict(row: dict) -> dict:
         "source": row["source"] or "sheet",
         "archived": row.get("archived", False),
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else "",
+        "customer_rate": float(row["customer_rate"]) if row.get("customer_rate") else None,
+        "carrier_pay": float(row["carrier_pay"]) if row.get("carrier_pay") else None,
     }
 
 
@@ -8169,7 +8273,7 @@ async def api_v2_team(request: Request):
 
 
 @app.post("/api/v2/load/{efj}/status")
-async def api_v2_update_status(efj: str, request: Request):
+async def api_v2_update_status(efj: str, request: Request, background_tasks: BackgroundTasks):
     """Update status in Postgres. Write back to Google Sheet if shared account."""
     body = await request.json()
     new_status = body.get("status", "").strip()
@@ -8195,6 +8299,9 @@ async def api_v2_update_status(efj: str, request: Request):
             _v2_write_status_to_sheet(efj, new_status, account, row.get("hub"))
         except Exception as e:
             log.warning("Sheet write-back failed for %s: %s (Postgres updated OK)", efj, e)
+    elif account:
+        # Write back to Master Sheet for non-shared accounts (prevents sync overwrite)
+        background_tasks.add_task(_write_fields_to_master_sheet, efj, account, {"status": new_status})
 
     # Billing gate: if closing as billed, check for open unbilled orders
     if new_status.strip().lower() in ("billed_closed", "billed and closed"):
