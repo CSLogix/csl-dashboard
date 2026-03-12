@@ -8,7 +8,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [rateiq.md](rateiq.md) — Dray IQ, FTL IQ, OOG IQ, Scorecard, Directory
 - [inbox-command-center.md](inbox-command-center.md) — thread grouping, reply detection, classification
 - [macropoint-integration.md](macropoint-integration.md) — webhook flow, tracking events, GPS inference, timeline
-- [patches-applied.md](patches-applied.md) — full list (90 patches)
+- [patches-applied.md](patches-applied.md) — full list (93 patches)
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
@@ -52,6 +52,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ### Mar 12, 2026 Bot Changes (late)
 - **Inbox 500 fix**: `psycopg2.InterfaceError: cursor already closed` at `app.py:7239` — inbox enrichment query (`SELECT efj, rep, account FROM shipments`) ran after `with db.get_cursor()` block exited. Fixed with new `cur2` + dict key access. Patches: `fix_inbox_cursor.py` + `fix_inbox_cursor2.py`.
+- **Doc reclassify backfill**: `backfill_reclassify_other_docs.py` — Sonnet 4.6 vision reclassified 192/284 "other" docs (64 BOL, 55 POD, 34 carrier_rate, 27 screenshot, 8 carrier_invoice, 2 packing_list, 2 customer_rate). 9 loads auto-advanced to `ready_to_close`. 82 correctly stayed "other" (logos, signatures, embedded images).
 
 ### Mar 12, 2026 Bot Changes
 - **FTL Monitor crash fix**: `archive_ftl_row_pg()` missing `stop_times` kwarg — FTL loads couldn't archive. Added parameter. **CRITICAL fix.**
@@ -196,7 +197,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ## Health Check Baseline — Mar 12, 2026
 - **Server**: 6% disk (184G free), 2.3G/15G RAM, load 0.44, 8 days uptime
-- **DB**: 844 shipments (231→~166 active after archive), 904→835 docs, 2,344 emails, 92 rate quotes, 307 unbilled
+- **DB**: 844 shipments (231→~166 active after archive), 904→835 docs (192 reclassified from "other"), 2,344 emails, 92 rate quotes, 307 unbilled
 - **Status distribution after cleanup**: 27 distinct statuses → normalized to standard set (Title Case)
 - **Ghost prevention**: EFJ prefix guard deployed in sheet sync. Tolead container numbers no longer create ghost EFJ rows.
 
