@@ -3,6 +3,17 @@ import { useAppStore } from "./store";
 import QuoteBuilder from "./QuoteBuilder";
 import OOGQuoteBuilder from "./OOGQuoteBuilder";
 
+// ─── Mobile Detection ───
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth <= breakpoint);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth <= breakpoint);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 // ─── API Configuration ───
 const API_BASE = "";
 const apiFetch = (url, opts = {}) =>
@@ -1102,6 +1113,8 @@ export default function DispatchDashboard() {
     dataSource, setDataSource, systemHealth, setSystemHealth,
   } = useAppStore();
 
+  const isMobile = useIsMobile();
+
   // Clean up stale localStorage keys from old builds
   useState(() => { try { localStorage.removeItem("csl_preferred_rep"); } catch {} });
 
@@ -1716,12 +1729,20 @@ export default function DispatchDashboard() {
           .dash-grid-2 { grid-template-columns: 1fr !important; }
           .dash-sidebar { display: none !important; }
           .dash-topbar { padding: 8px 12px !important; }
-          .dash-content-area { padding: 0 10px !important; }
-          .dash-stat-row { flex-wrap: wrap !important; }
-          .dash-stat-row > div { flex: 1 1 30% !important; min-width: 90px !important; }
+          .dash-content-area { padding: 0 10px 66px !important; }
+          .dash-stat-row { display: flex !important; overflow-x: auto !important; scroll-snap-type: x mandatory !important; -webkit-overflow-scrolling: touch !important; gap: 8px !important; flex-wrap: nowrap !important; padding-bottom: 4px !important; }
+          .dash-stat-row > div { flex: 0 0 auto !important; min-width: 110px !important; scroll-snap-align: start !important; }
+          .mobile-bottom-nav { display: flex !important; }
+          .mobile-card-view { display: block !important; }
+          .desktop-table-view { display: none !important; }
+          .inbox-thread-panel { width: 100vw !important; border-left: none !important; }
+        }
+        @media (min-width: 769px) {
+          .mobile-bottom-nav { display: none !important; }
+          .mobile-card-view { display: none !important; }
         }
         @media (max-width: 480px) {
-          .dash-stat-row > div { padding: 10px 8px !important; }
+          .dash-stat-row > div { padding: 10px 8px !important; min-width: 100px !important; }
           .dash-stat-row .stat-value { font-size: 22px !important; }
           .dash-stat-row .stat-label { font-size: 9px !important; }
         }
@@ -2005,7 +2026,29 @@ export default function DispatchDashboard() {
         editField={editField} setEditField={setEditField} editValue={editValue} setEditValue={setEditValue}
         handleFieldEdit={handleFieldEdit} addSheetLog={addSheetLog}
         carrierDirectory={carrierDirectory}
-        onDocChange={refreshDocSummary} />
+        onDocChange={refreshDocSummary}
+        isMobile={isMobile} />
+
+      {/* ═══ MOBILE BOTTOM NAV ═══ */}
+      <nav className="mobile-bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, height: 56, background: "#0D1119", borderTop: "1px solid rgba(255,255,255,0.08)", display: "none", alignItems: "center", justifyContent: "space-around", zIndex: Z.sidebar + 5, paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {[
+          { key: "dashboard", label: "Home", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4" },
+          { key: "inbox", label: "Inbox", icon: "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" },
+          { key: "quotes", label: "Rates", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
+          { key: "billing", label: "Billing", icon: "M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2zM10 8.5a.5.5 0 11-1 0 .5.5 0 011 0zm5 5a.5.5 0 11-1 0 .5.5 0 011 0z" },
+          { key: "analytics", label: "More", icon: "M4 6h16M4 12h16M4 18h16" },
+        ].map(item => {
+          const isActive = activeView === item.key;
+          return (
+            <button key={item.key} onClick={() => { setActiveView(item.key); setSelectedRep(null); }}
+              style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, border: "none", background: "none", cursor: "pointer", padding: "6px 12px", minWidth: 44, minHeight: 44,
+                color: isActive ? "#00D4AA" : "#5A6478" }}>
+              <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d={item.icon} /></svg>
+              <span style={{ fontSize: 9, fontWeight: 600 }}>{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 }
@@ -3156,6 +3199,51 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
         </div>
       )}
 
+      {/* Boviet Project Cards — summary stats per project */}
+      {isBoviet && (() => {
+        const projects = ["Piedra", "Hanson"];
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 10, marginBottom: 14 }}>
+            {projects.map(proj => {
+              const projShips = repShipments.filter(s => {
+                if (!s.project) return proj === "Piedra";
+                return s.project.toLowerCase().includes(proj.toLowerCase());
+              });
+              const active = projShips.filter(s => !["delivered", "empty_return", "billed_closed", "cancelled"].includes(s.status)).length;
+              const delivered = projShips.filter(s => s.status === "delivered" || s.status === "empty_return").length;
+              const pending = projShips.filter(s => ["pending", "booked", "confirmed"].includes(s.status)).length;
+              const today = new Date().toISOString().slice(0, 10);
+              const pickupsToday = projShips.filter(s => (s.pickupDate || "").startsWith(today)).length;
+              const carriers = new Set(projShips.map(s => s.carrier).filter(Boolean)).size;
+              const lastDel = projShips.filter(s => s.deliveryDate).sort((a, b) => b.deliveryDate.localeCompare(a.deliveryDate))[0];
+              const isSel = bovietTab === proj;
+              return (
+                <div key={proj} onClick={() => setBovietTab(proj)}
+                  style={{ padding: "14px 16px", borderRadius: 10, cursor: "pointer",
+                    background: isSel ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)",
+                    border: `1px solid ${isSel ? "rgba(139,92,246,0.20)" : "rgba(255,255,255,0.06)"}`,
+                    transition: "all 0.15s" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: isSel ? "#A78BFA" : "#F0F2F5" }}>{proj}</span>
+                    <span style={{ fontSize: 18, fontWeight: 900, color: "#A78BFA", fontFamily: "'JetBrains Mono', monospace" }}>{projShips.length}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 10 }}><span style={{ fontWeight: 700, color: "#3B82F6" }}>{active}</span> <span style={{ color: "#5A6478" }}>active</span></div>
+                    <div style={{ fontSize: 10 }}><span style={{ fontWeight: 700, color: "#22C55E" }}>{delivered}</span> <span style={{ color: "#5A6478" }}>delivered</span></div>
+                    <div style={{ fontSize: 10 }}><span style={{ fontWeight: 700, color: "#F59E0B" }}>{pending}</span> <span style={{ color: "#5A6478" }}>pending</span></div>
+                  </div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
+                    {pickupsToday > 0 && <div style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: "rgba(59,130,246,0.10)", color: "#3B82F6", fontWeight: 700 }}>{pickupsToday} pickup{pickupsToday > 1 ? "s" : ""} today</div>}
+                    <div style={{ fontSize: 9, color: "#5A6478" }}>{carriers} carrier{carriers !== 1 ? "s" : ""}</div>
+                    {lastDel && <div style={{ fontSize: 9, color: "#5A6478" }}>Last delivery: {lastDel.deliveryDate?.slice(0, 10)}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       {/* Tolead hub tabs */}
       {isTolead && (
         <div style={{ display: "flex", gap: 2, marginBottom: 14, background: "rgba(0,0,0,0.2)", borderRadius: 8, padding: 3, width: "fit-content" }}>
@@ -4008,7 +4096,8 @@ function InboxView({ handleLoadClick }) {
                     </td>
                     {/* Status */}
                     <td style={cellStyle}>
-                      {thread.needs_reply && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(239,68,68,0.15)", color: "#EF4444", fontWeight: 700 }}>NEEDS REPLY</span>}
+                      {thread.actioned && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(34,197,94,0.10)", color: "#22C55E", fontWeight: 600, marginRight: 2 }}>ACTIONED</span>}
+                      {thread.needs_reply && !thread.actioned && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(239,68,68,0.15)", color: "#EF4444", fontWeight: 700 }}>NEEDS REPLY</span>}
                       {thread.has_csl_reply && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(34,197,94,0.12)", color: "#22C55E", fontWeight: 600 }}>REPLIED</span>}
                       {!thread.needs_reply && !thread.has_csl_reply && thread.source === "unmatched" && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(249,115,22,0.12)", color: "#F97316", fontWeight: 600 }}>UNMATCHED</span>}
                       {thread.quote_status === "quoted" && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(59,130,246,0.15)", color: "#3B82F6", fontWeight: 700, marginLeft: 2 }}>QUOTED</span>}
@@ -4060,7 +4149,7 @@ function InboxView({ handleLoadClick }) {
 
       {/* Thread Detail Slide-Over */}
       {selThread && (
-        <div style={{ position: "fixed", right: 0, top: 0, height: "100vh", width: 480, zIndex: Z.threadPanel, background: "#0F1420", borderLeft: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", boxShadow: "-8px 0 30px rgba(0,0,0,0.5)", animation: "slideInRight 0.2s ease" }}>
+        <div className="inbox-thread-panel" style={{ position: "fixed", right: 0, top: 0, height: "100vh", width: 480, zIndex: Z.threadPanel, background: "#0F1420", borderLeft: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", boxShadow: "-8px 0 30px rgba(0,0,0,0.5)", animation: "slideInRight 0.2s ease" }}>
           {/* Header */}
           <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -4207,6 +4296,41 @@ function InboxView({ handleLoadClick }) {
                 </div>
               );
             })()}
+
+            {/* ── Rep Assign + Mark Actioned ── */}
+            <div style={{ padding: "8px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 8, color: "#5A6478", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>Rep</span>
+              <select value={selThread.manual_rep || selThread.rep || ""} onChange={async (e) => {
+                const rep = e.target.value;
+                const msgId = selMsgId;
+                if (!msgId) return;
+                try {
+                  await apiFetch(`${API_BASE}/api/inbox/${msgId}/assign-rep`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rep }) });
+                  setSelectedThread(prev => ({ ...prev, manual_rep: rep, rep }));
+                } catch (err) { console.error("assign-rep error", err); }
+              }}
+                style={{ padding: "4px 8px", borderRadius: 5, fontSize: 10, background: "#141A28", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.12)", cursor: "pointer" }}>
+                <option value="">Unassigned</option>
+                {["Eli", "Radka", "John F", "Janice"].map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+                <button onClick={async () => {
+                  const newVal = !selThread.actioned;
+                  const msgId = selMsgId;
+                  if (!msgId) return;
+                  try {
+                    await apiFetch(`${API_BASE}/api/inbox/${msgId}/mark-actioned`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ actioned: newVal }) });
+                    setSelectedThread(prev => ({ ...prev, actioned: newVal }));
+                  } catch (err) { console.error("mark-actioned error", err); }
+                }}
+                  style={{ padding: "4px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer",
+                    background: selThread.actioned ? "rgba(34,197,94,0.10)" : "rgba(255,255,255,0.05)",
+                    color: selThread.actioned ? "#22C55E" : "#8B95A8",
+                    border: `1px solid ${selThread.actioned ? "rgba(34,197,94,0.20)" : "rgba(255,255,255,0.08)"}` }}>
+                  {selThread.actioned ? "✓ Actioned" : "Mark Actioned"}
+                </button>
+              </div>
+            </div>
 
             {/* ── Assign / Dismiss / Classification feedback ── */}
             <div style={{ padding: "8px 16px", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -4542,7 +4666,7 @@ function AnalyticsView({ loaded, botStatus, botHealth, cronStatus, sheetLog }) {
 // ═══════════════════════════════════════════════════════════════
 // LOAD SLIDE-OVER PANEL (shared across all views)
 // ═══════════════════════════════════════════════════════════════
-function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setShipments, handleStatusUpdate, editField, setEditField, editValue, setEditValue, handleFieldEdit, addSheetLog, carrierDirectory, onDocChange }) {
+function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setShipments, handleStatusUpdate, editField, setEditField, editValue, setEditValue, handleFieldEdit, addSheetLog, carrierDirectory, onDocChange, isMobile }) {
   const docInputRef = useRef(null);
 
   // FTL tracking preview state
@@ -4829,7 +4953,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
   return (
     <>
       <div aria-hidden="true" onClick={() => setSelectedShipment(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: Z.panelBackdrop, animation: "fade-in 0.2s ease" }} />
-      <div role="dialog" aria-modal="true" aria-label={`Shipment details — ${selectedShipment.loadNumber}`} className="glass-strong" style={{ position: "fixed", top: 0, right: 0, width: 380, height: "100vh", zIndex: Z.panel, display: "flex", flexDirection: "column", overflow: "hidden", animation: "slide-right 0.3s ease", borderLeft: "1px solid rgba(255,255,255,0.08)" }}>
+      <div role="dialog" aria-modal="true" aria-label={`Shipment details — ${selectedShipment.loadNumber}`} className="glass-strong" style={{ position: "fixed", top: 0, right: 0, width: isMobile ? "100vw" : 380, height: "100vh", zIndex: Z.panel, display: "flex", flexDirection: "column", overflow: "hidden", animation: "slide-right 0.3s ease", borderLeft: isMobile ? "none" : "1px solid rgba(255,255,255,0.08)" }}>
         <div style={{ flex: 1, overflow: "auto" }}>
           {/* Header */}
           <div style={{ padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -5263,6 +5387,34 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                       padding: "2px 6px", lineHeight: 1
                     }}
                   >✕</button>
+                </div>
+              );
+            })()}
+            {/* Customer Rate Suggestion Banner */}
+            {(() => {
+              const currentCxRate = shipments.find(s => s.id === selectedShipment.id)?.customerRate;
+              const cxQuote = loadRateQuotes.find(q => q.rate_amount && q.rate_type === "customer" && q.status !== "rejected");
+              if (!cxQuote || currentCxRate || rateApplied || rateDismissed) return null;
+              return (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", marginBottom: 10,
+                  background: "rgba(34,197,94,0.08)", borderLeft: "3px solid #22C55E", borderRadius: 8,
+                  animation: "fadeIn 0.3s ease"
+                }}>
+                  <span style={{ fontSize: 14 }}>💰</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, color: "#E5E7EB", fontWeight: 600 }}>
+                      Customer Rate — <span style={{ color: "#22C55E", fontFamily: "'JetBrains Mono', monospace" }}>${Number(cxQuote.rate_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div style={{ fontSize: 9, color: "#8B95A8", marginTop: 2 }}>Extracted from customer email</div>
+                  </div>
+                  <button onClick={() => handleApplyRate({ ...cxQuote, _field: "customer_rate" })}
+                    style={{ background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 6,
+                      color: "#22C55E", fontSize: 10, fontWeight: 700, padding: "5px 10px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                    ✓ Apply CX Rate
+                  </button>
+                  <button onClick={() => setRateDismissed(true)}
+                    style={{ background: "transparent", border: "none", color: "#5A6478", fontSize: 12, cursor: "pointer", padding: "2px 6px", lineHeight: 1 }}>✕</button>
                 </div>
               );
             })()}
@@ -6079,8 +6231,44 @@ function DispatchView({
         </div>
       )}
 
+      {/* Mobile Card View */}
+      <div className="mobile-card-view" style={{ display: "none", flex: 1, overflowY: "auto", padding: "0 2px 60px" }}>
+        {filteredShips.slice(0, 100).map(s => {
+          const sc = (isFTLShipment(s) ? FTL_STATUS_COLORS : STATUS_COLORS)[s.status] || { main: "#94a3b8" };
+          const mgn = calcMarginPct(s.customerRate, s.carrierPay);
+          return (
+            <div key={s.id} onClick={() => handleLoadClick(s)}
+              style={{ padding: "12px 14px", marginBottom: 8, borderRadius: 10, cursor: "pointer",
+                background: (mgn !== null && mgn < 10) ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.02)",
+                border: "1px solid rgba(255,255,255,0.06)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#00D4AA", fontSize: 13 }}>{s.loadNumber}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: "#F0F2F5" }}>{s.account}</span>
+                </div>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 10, fontSize: 8, fontWeight: 700,
+                  color: sc.main, background: `${sc.main}0D`, border: `1px solid ${sc.main}18`, textTransform: "uppercase" }}>
+                  <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
+                  {resolveStatusLabel(s)}
+                </span>
+              </div>
+              <div style={{ fontSize: 10, color: "#8B95A8", marginBottom: 4 }}>
+                {s.origin || "—"} → {s.destination || "—"}
+              </div>
+              <div style={{ display: "flex", gap: 12, fontSize: 9, color: "#5A6478", flexWrap: "wrap" }}>
+                {s.pickupDate && <span>PU: {formatDDMM(s.pickupDate)}</span>}
+                {s.deliveryDate && <span>DEL: {formatDDMM(s.deliveryDate)}</span>}
+                {s.carrier && <span>{s.carrier}</span>}
+                {s.customerRate && <span style={{ color: "#22C55E", fontWeight: 600 }}>${s.customerRate}</span>}
+                {mgn !== null && <span style={{ fontWeight: 700, color: mgn < 0 ? "#EF4444" : mgn < 10 ? "#F59E0B" : "#22C55E" }}>{mgn}%</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       {/* Full-width Table */}
-      <div className="dispatch-table-wrap" style={{ flex: 1, minHeight: 0, overflowX: "scroll", overflowY: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.01)" }}>
+      <div className="dispatch-table-wrap desktop-table-view" style={{ flex: 1, minHeight: 0, overflowX: "scroll", overflowY: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.01)" }}>
         <table style={{ width: "100%", minWidth: 1600, borderCollapse: "collapse", fontSize: 11 }}>
           <thead>
             <tr>
