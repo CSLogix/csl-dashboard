@@ -87,3 +87,5 @@
 | `patch_inbox_actions.py` | app.py: manual_rep + actioned columns on email_threads + PATCH assign-rep + mark-actioned endpoints |
 | `patch_customer_rate_extraction.py` | csl_inbox_scanner.py: extract_rate_from_email handles customer_rate + rate_type field + rate_quotes column |
 | `patch_ai_doc_classifier.py` | csl_inbox_scanner.py: Sonnet 4.6 vision for ambiguous docs (CamScanner/photos→POD, RC→carrier_rate, container PDFs→BOL) + auto-status advancement (POD+invoice→delivered→ready_to_close) |
+| `fix_inbox_cursor.py` | app.py: Fix inbox 500 — enrichment query used closed cursor. New `cur2` context manager |
+| `fix_inbox_cursor2.py` | app.py: Fix dict key access for RealDictCursor rows in inbox enrichment |

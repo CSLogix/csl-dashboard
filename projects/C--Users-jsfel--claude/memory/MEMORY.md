@@ -14,7 +14,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
 
 ## Git — Mar 12, 2026
-- **Latest**: Mar 12 — Smart billing + AI doc classifier + auto-status advancement + mobile layout
+- **Latest**: Mar 12 — Inbox fixes + drag-to-AI + AI summary card + filteredShips crash fix
 - **Repo**: `CSLogix/CSLogix_Bot` (private), single `master` branch
 - **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
@@ -50,6 +50,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ## Recent Bot Changes (Deployed)
 
+### Mar 12, 2026 Bot Changes (late)
+- **Inbox 500 fix**: `psycopg2.InterfaceError: cursor already closed` at `app.py:7239` — inbox enrichment query (`SELECT efj, rep, account FROM shipments`) ran after `with db.get_cursor()` block exited. Fixed with new `cur2` + dict key access. Patches: `fix_inbox_cursor.py` + `fix_inbox_cursor2.py`.
+
 ### Mar 12, 2026 Bot Changes
 - **FTL Monitor crash fix**: `archive_ftl_row_pg()` missing `stop_times` kwarg — FTL loads couldn't archive. Added parameter. **CRITICAL fix.**
 - **Ghost load prevention**: EFJ prefix guard in `csl_sheet_sync.py` — if Tolead efj column has container# (not `EFJ` prefix), treats as load_id to prevent ghost rows. Cleaned 4 ghosts (LAX1260309008 + 3 ORD).
@@ -81,6 +84,12 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Other**: Boviet invoice writer, dray daily report HTML fix, MP alert subject rename ("CSL Tracking"), margin guard + date/terminal normalizers
 
 ## Recent Dashboard Changes (Deployed)
+
+### Mar 12, 2026 Dashboard Changes (late)
+- **DispatchView crash fix**: `filteredShips` → `filtered` in mobile card view (line 6173). Wrong variable name caused error boundary crash on any navigation.
+- **Drag email → Ask AI**: Inbox rows are `draggable="true"`. Drag any thread onto the "Ask AI" button in top nav — it glows/scales with "Drop to Summarize" text. On drop, opens AskAIOverlay with pre-filled prompt including full thread context (subject, sender, messages, AI classification). `AskAIOverlay` accepts `initialQuery` + `onConsumeInitialQuery` props, auto-sends on open.
+- **AI Summary card**: Thread detail slide-over now shows `ai_summary` in a teal card at the top of the message list (was in data but never rendered).
+- **hideActioned filter fix**: Operator precedence bug — `!t.dismissed && t.needs_reply !== false || !t.has_csl_reply` → fixed to `!t.actioned && (t.needs_reply || t.source === "unmatched")`. "Showing New" now correctly filters to actionable threads only.
 
 ### Mar 12, 2026 Dashboard Changes
 - **Packing List doc type**: Added `packing_list` to DOC_TYPES_ADD, DOC_TYPE_LABELS, both reclassify dropdowns, both upload dropdowns, icon mapping (📦). Frontend + backend.
@@ -158,7 +167,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 ### Large Items
 - **Tolead/Boviet full PG migration**: Resolved as non-issue — data originates from client sheets. Sync guard + write-back deployed instead (see above). ORD/JFK/DFW remain client-shared (no write-back).
 - **Customer Tracking Portal**: ✅ DONE
-- **Inbox polish**: ✅ DONE — Reply button, density, rep filter, assign-rep dropdown, mark-actioned button all deployed
+- **Inbox polish**: ✅ DONE — Reply button, density, rep filter, assign-rep dropdown, mark-actioned, drag-to-AI summary, AI summary card in thread detail, hideActioned filter fix all deployed
 - **Margin Guard**: ✅ DONE — deployed Mar 11. **Margin Bridge** deployed Mar 11. **MGN column** + margin summary bar deployed Mar 12
 - **Rep Scoreboard**: ✅ DONE — v2 deployed Mar 12. REV window expanded to all active loads (not 7d). Deferred: WIN RATE (sparse data), Account Health view (next build), delivered_at TIMESTAMPTZ migration
 - **Account Health View**: NOT STARTED — same scoreboard data grouped by account instead of rep. Needed for strategic review (margin-to-friction ratio per customer)
