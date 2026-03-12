@@ -30,6 +30,7 @@ export const useAppStore = create((set) => ({
   inboxStats: { total_threads: 0, needs_reply: 0, unmatched: 0, high_priority: 0 },
   inboxInitialTab: null,   // set before navigating to inbox to pre-select a tab
   inboxInitialSearch: null, // set before navigating to inbox to pre-fill search
+  inboxInitialRep: null,   // set before navigating to inbox to filter by rep
 
   // ── Data Source Fallback ──
   dataSource: "postgres",  // "postgres" or "sheets"
@@ -73,6 +74,7 @@ export const useAppStore = create((set) => ({
   setInboxStats: (v) => set({ inboxStats: v }),
   setInboxInitialTab: (v) => set({ inboxInitialTab: v }),
   setInboxInitialSearch: (v) => set({ inboxInitialSearch: v }),
+  setInboxInitialRep: (v) => set({ inboxInitialRep: v }),
   setDataSource: (v) => set({ dataSource: v }),
   setSystemHealth: (v) => set({ systemHealth: v }),
 
