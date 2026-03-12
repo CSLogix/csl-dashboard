@@ -1165,12 +1165,21 @@ export default function DispatchDashboard() {
   const [askAIInitialQuery, setAskAIInitialQuery] = useState(null);
   const [askAIDragOver, setAskAIDragOver] = useState(false);
   const [repScoreboard, setRepScoreboard] = useState([]);
+  const { accountHealth, setAccountHealth } = useAppStore();
 
   // Fetch rep scoreboard
   const fetchScoreboard = useCallback(async () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/rep-scoreboard`);
       if (res.ok) { const data = await res.json(); setRepScoreboard(data.scoreboard || []); }
+    } catch {}
+  }, []);
+
+  // Fetch account health
+  const fetchAccountHealth = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/account-health`);
+      if (res.ok) { const data = await res.json(); setAccountHealth(data.accounts || []); }
     } catch {}
   }, []);
 
@@ -1336,11 +1345,13 @@ export default function DispatchDashboard() {
     fetchData().then(() => setLoaded(true));
     fetchProfiles();
     fetchScoreboard();
+    fetchAccountHealth();
     const fallback = setTimeout(() => setLoaded(true), 10000);
     return () => clearTimeout(fallback);
-  }, [fetchData, fetchProfiles, fetchScoreboard]);
+  }, [fetchData, fetchProfiles, fetchScoreboard, fetchAccountHealth]);
   useEffect(() => { const i = setInterval(fetchData, 90000); return () => clearInterval(i); }, [fetchData]);
   useEffect(() => { const i = setInterval(fetchScoreboard, 120000); return () => clearInterval(i); }, [fetchScoreboard]);
+  useEffect(() => { const i = setInterval(fetchAccountHealth, 120000); return () => clearInterval(i); }, [fetchAccountHealth]);
 
   // Deep link support: ?view=billing&load=EFJ-XXXX
   useEffect(() => {
@@ -1871,7 +1882,7 @@ export default function DispatchDashboard() {
         </div>
 
         {/* View Content */}
-        <div className="dash-content-area" style={{ flex: 1, overflow: "auto", padding: "0 24px 24px" }}>
+        <div className="dash-content-area" style={{ flex: 1, overflow: "auto", padding: "0 32px 24px" }}>
           {apiError && (
             <div style={{ margin: "8px 0", padding: "10px 16px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", display: "flex", alignItems: "center", justifyContent: "space-between", animation: "slide-up 0.3s ease" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1900,7 +1911,7 @@ export default function DispatchDashboard() {
           {activeView === "dashboard" && !selectedRep && (
             <OverviewView loaded={loaded} shipments={shipments} apiStats={apiStats}
               accountOverview={accountOverview} apiError={apiError} onSelectRep={goToRepDashboard}
-              unbilledStats={unbilledStats} repProfiles={repProfiles} repScoreboard={repScoreboard}
+              unbilledStats={unbilledStats} repProfiles={repProfiles} repScoreboard={repScoreboard} accountHealth={accountHealth}
               trackingSummary={trackingSummary} docSummary={docSummary} handleLoadClick={handleLoadClick}
               alerts={allAlerts} onDismissAlert={handleDismissAlert} onDismissAll={handleDismissAllAlerts}
               onNavigateDispatch={() => setActiveView("dispatch")} onFilterStatus={(s) => { setDateFilter(null); setActiveStatus(s); setActiveView("dispatch"); }}
@@ -2113,8 +2124,9 @@ export default function DispatchDashboard() {
 // ═══════════════════════════════════════════════════════════════
 // OVERVIEW VIEW (replaces old DashboardView)
 // ═══════════════════════════════════════════════════════════════
-function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, onSelectRep, onNavigateDispatch, onFilterStatus, onFilterDate, onFilterAccount, unbilledStats, onNavigateUnbilled, onAddLoad, onNavigateBilling, repProfiles, repScoreboard, trackingSummary, docSummary, handleLoadClick, alerts, onDismissAlert, onDismissAll, onNavigateInbox, onFilterRepDispatch }) {
+function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, onSelectRep, onNavigateDispatch, onFilterStatus, onFilterDate, onFilterAccount, unbilledStats, onNavigateUnbilled, onAddLoad, onNavigateBilling, repProfiles, repScoreboard, accountHealth, trackingSummary, docSummary, handleLoadClick, alerts, onDismissAlert, onDismissAll, onNavigateInbox, onFilterRepDispatch }) {
   const [alertFilter, setAlertFilter] = useState("all");
+  const [acctSortMode, setAcctSortMode] = useState("health"); // health | revenue | friction
 
   // Status pipeline data
   const statusGroups = {};
@@ -2255,8 +2267,8 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
         })}
       </div>
 
-      {/* Row 1: Rep Scoreboard + Account Overview */}
-      <div className="dash-grid-2" style={{ display: "grid", gridTemplateColumns: "1.3fr 0.7fr", gap: 14, marginBottom: 14, animation: loaded ? "slide-up 0.4s ease 0.1s both" : "none" }}>
+      {/* Row 1: Rep Scoreboard + Account Health */}
+      <div className="dash-grid-2" style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 14, marginBottom: 14, animation: loaded ? "slide-up 0.4s ease 0.1s both" : "none" }}>
         {/* Rep Scoreboard v2 — Offense + Defense */}
         <div className="dash-panel" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -2404,32 +2416,124 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
           </div>
         </div>
 
-        {/* Account Overview */}
-        <div className="dash-panel" style={{ padding: 16 }}>
-          <div className="dash-panel-title" style={{ marginBottom: 10 }}>Account Overview</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          {accountOverview.slice(0, 10).map((acct, i) => {
-            const maxLoads = accountOverview.length > 0 ? accountOverview[0].loads : 1;
-            const pct = maxLoads > 0 ? (acct.loads / maxLoads) * 100 : 0;
+        {/* Account Health View — margin-to-friction ratio per customer */}
+        {(() => {
+          const sortedAccounts = [...(accountHealth || [])].sort((a, b) => {
+            if (acctSortMode === "revenue") return (b.revenue || 0) - (a.revenue || 0);
+            if (acctSortMode === "friction") return (b.friction_score || 0) - (a.friction_score || 0);
+            return (b.health_score || 0) - (a.health_score || 0);
+          });
+          const sortLabels = { health: "Health", revenue: "Revenue", friction: "Friction" };
+          const nextSort = { health: "revenue", revenue: "friction", friction: "health" };
+
+          const formatRev = (val) => {
+            if (!val || val === 0) return "--";
+            if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M`;
+            if (val >= 1000) return `$${(val / 1000).toFixed(1)}k`;
+            return `$${Math.round(val)}`;
+          };
+
+          const mgnColor = (pct) => pct >= 15 ? "#22C55E" : pct >= 8 ? "#F59E0B" : pct > 0 ? "#EF4444" : "#3D4557";
+          const fricColor = (f) => f >= 5 ? "#EF4444" : f > 0 ? "#F59E0B" : "#3D4557";
+          const hsBg = (hs) => hs >= 10 ? "rgba(34,197,94,0.06)" : hs < 0 ? "rgba(239,68,68,0.06)" : "transparent";
+          const hsColor = (hs) => hs >= 10 ? "#22C55E" : hs >= 0 ? "#8B95A8" : "#EF4444";
+          const hsBorder = (hs) => hs >= 10 ? "rgba(34,197,94,0.15)" : hs < 0 ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.06)";
+
+          // Fallback to old Account Overview if no account health data
+          if (!accountHealth || accountHealth.length === 0) {
             return (
-              <div key={i} onClick={() => onFilterAccount && onFilterAccount(acct.name)}
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderRadius: 8, transition: "background 0.15s ease", cursor: "pointer" }}
-                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
-                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <div style={{ width: 24, height: 24, borderRadius: 6, background: `linear-gradient(135deg, ${acct.color}33, ${acct.color}66)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{acct.name[0]}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, color: "#F0F2F5", fontWeight: 600, marginBottom: 4 }}>{acct.name}</div>
-                  <div style={{ height: 3, borderRadius: 100, background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${pct}%`, borderRadius: 100, background: `linear-gradient(90deg, ${acct.color}, ${acct.color}88)`, transition: "width 0.8s ease" }} />
-                  </div>
+              <div className="dash-panel" style={{ padding: 16 }}>
+                <div className="dash-panel-title" style={{ marginBottom: 10 }}>Account Overview</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {accountOverview.slice(0, 10).map((acct, i) => {
+                  const maxLoads = accountOverview.length > 0 ? accountOverview[0].loads : 1;
+                  const pct = maxLoads > 0 ? (acct.loads / maxLoads) * 100 : 0;
+                  return (
+                    <div key={i} onClick={() => onFilterAccount && onFilterAccount(acct.name)}
+                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderRadius: 8, transition: "background 0.15s ease", cursor: "pointer" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <div style={{ width: 24, height: 24, borderRadius: 6, background: `linear-gradient(135deg, ${acct.color}33, ${acct.color}66)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{acct.name[0]}</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, color: "#F0F2F5", fontWeight: 600, marginBottom: 4 }}>{acct.name}</div>
+                        <div style={{ height: 3, borderRadius: 100, background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${pct}%`, borderRadius: 100, background: `linear-gradient(90deg, ${acct.color}, ${acct.color}88)`, transition: "width 0.8s ease" }} />
+                        </div>
+                      </div>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, fontSize: 13 }}>{acct.loads}</span>
+                      {acct.alerts > 0 && <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 6, background: "#EF444418", color: "#F87171", fontWeight: 700, border: "1px solid #EF444422", fontFamily: "'JetBrains Mono', monospace" }}>{acct.alerts}</span>}
+                    </div>
+                  );
+                })}
                 </div>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, fontSize: 13 }}>{acct.loads}</span>
-                {acct.alerts > 0 && <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 6, background: "#EF444418", color: "#F87171", fontWeight: 700, border: "1px solid #EF444422", fontFamily: "'JetBrains Mono', monospace" }}>{acct.alerts}</span>}
               </div>
             );
-          })}
-          </div>
-        </div>
+          }
+
+          return (
+            <div className="dash-panel" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <div className="dash-panel-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  Account Health
+                  <span style={{ fontSize: 8, color: "#22C55E", fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(34,197,94,0.1)", letterSpacing: "0.08em" }}>LIVE</span>
+                </div>
+                <span onClick={() => setAcctSortMode(nextSort[acctSortMode])}
+                  style={{ fontSize: 9, color: "#5A6478", cursor: "pointer", fontWeight: 600, padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.06)", transition: "all 0.15s", userSelect: "none" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "#8B95A8"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#5A6478"; }}
+                  title={`Sort by ${nextSort[acctSortMode]}`}>
+                  {sortLabels[acctSortMode]} ▼
+                </span>
+              </div>
+              {/* Column headers */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 38px 46px 36px 42px", gap: 2, marginBottom: 4, padding: "0 8px", alignItems: "center" }}>
+                <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Account</div>
+                <div style={{ fontSize: 9, color: "#3B82F6", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active loads">Lds</div>
+                <div style={{ fontSize: 9, color: "#3B82F6", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Revenue">Rev</div>
+                <div style={{ fontSize: 9, color: "#F59E0B", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Friction score (unreplied×2 + docs×1.5 + neglected×1)">Fric</div>
+                <div style={{ fontSize: 9, color: "#10B981", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Health score (loads − friction)">HS</div>
+              </div>
+              {/* Account rows */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 340, overflowY: "auto" }}>
+                {sortedAccounts.map(a => (
+                  <div key={a.account}
+                    onClick={() => onFilterAccount && onFilterAccount(a.account)}
+                    style={{ display: "grid", gridTemplateColumns: "1fr 38px 46px 36px 42px", gap: 2, alignItems: "center", padding: "5px 8px", borderRadius: 8,
+                      background: hsBg(a.health_score), border: `1px solid ${hsBorder(a.health_score)}`, cursor: "pointer", transition: "border-color 0.15s" }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.15)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = hsBorder(a.health_score); }}>
+                    {/* Account + Rep */}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.account}</div>
+                      {a.rep && <div style={{ fontSize: 8, color: "#5A6478", fontWeight: 500, marginTop: 0 }}>{a.rep}</div>}
+                    </div>
+                    {/* Loads */}
+                    <div style={{ textAlign: "center" }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: a.active_loads > 0 ? "#8B95A8" : "#3D4557", fontFamily: "'JetBrains Mono', monospace" }}>{a.active_loads}</span>
+                    </div>
+                    {/* Revenue */}
+                    <div style={{ textAlign: "center" }} title={`$${Math.round(a.revenue || 0).toLocaleString()} revenue`}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: a.revenue > 0 ? "#8B95A8" : "#3D4557", fontFamily: "'JetBrains Mono', monospace" }}>{formatRev(a.revenue)}</span>
+                    </div>
+                    {/* Friction */}
+                    <div style={{ textAlign: "center", cursor: a.friction_score > 0 ? "pointer" : "default", borderRadius: 6, padding: "2px 0" }}
+                      title={a.friction_score > 0 ? `${a.unreplied_threads} unreplied × 2 + ${a.docs_needed} docs × 1.5 + ${a.neglected_loads} neglected × 1` : "No friction"}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: fricColor(a.friction_score), fontFamily: "'JetBrains Mono', monospace" }}>
+                        {a.friction_score > 0 ? a.friction_score : "0"}
+                      </span>
+                    </div>
+                    {/* Health Score */}
+                    <div style={{ textAlign: "center", borderRadius: 6, padding: "2px 4px", background: a.health_score >= 10 ? "rgba(34,197,94,0.12)" : a.health_score < 0 ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.03)" }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: hsColor(a.health_score), fontFamily: "'JetBrains Mono', monospace" }}>
+                        {a.health_score > 0 ? "+" : ""}{a.health_score}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Row 2: Today's Actions + Live Alerts */}
