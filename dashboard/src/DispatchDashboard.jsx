@@ -368,8 +368,8 @@ const TRUCK_TYPES = ["", "53' Solo", "53' Team", "Flat Bed", "26' Box"];
 
 const DRAY_EQUIPMENT = ["", "20'", "40' Standard", "40' HC", "40' HC Reefer", "Flatrack", "Flatrack OOG", "LCL"];
 const FTL_EQUIPMENT = ["", "53' Van", "53' Team", "Box Truck", "Sprinter Van", "53' Reefer", "48ft Flatbed", "48ft Flatbed (Tarps)", "53' Flatbed", "53' Flatbed (Tarps)", "Flatbed Hotshot"];
-const DOC_TYPES_ADD = ["customer_rate", "carrier_rate", "pod", "bol", "carrier_invoice", "email", "other"];
-const DOC_TYPE_LABELS = { customer_rate: "CX Rate", carrier_rate: "RC", pod: "POD", bol: "BOL", carrier_invoice: "Carrier Inv", email: "Email", other: "Other" };
+const DOC_TYPES_ADD = ["customer_rate", "carrier_rate", "pod", "bol", "carrier_invoice", "packing_list", "email", "other"];
+const DOC_TYPE_LABELS = { customer_rate: "CX Rate", carrier_rate: "RC", pod: "POD", bol: "BOL", carrier_invoice: "Carrier Inv", packing_list: "Packing List", email: "Email", other: "Other" };
 
 const ALERT_TYPES = {
   STATUS_CHANGE: "status_change",
@@ -690,6 +690,18 @@ function DocIndicators({ docs }) {
   );
 }
 
+// ─── Billing Readiness — doc-aware auto-advance logic ───
+function getBillingReadiness(efj, docSummary) {
+  if (!efj || !docSummary) return { ready: false, missing: ["carrier_invoice", "pod"], present: [] };
+  const efjBare = (efj || "").replace(/^EFJ\s*/i, "");
+  const efjNS = (efj || "").replace(/\s/g, "");
+  const docs = docSummary[efjBare] || docSummary[efj] || docSummary[efjNS] || {};
+  const required = ["carrier_invoice", "pod"];
+  const present = required.filter(d => docs[d] > 0);
+  const missing = required.filter(d => !docs[d]);
+  return { ready: missing.length === 0, missing, present };
+}
+
 // ─── FTL Tracking Badge — shows actual Macropoint status ───
 function TrackingBadge({ tracking, mpStatus, mpDisplayStatus, mpDisplayDetail, mpLastUpdated }) {
   // mpDisplayStatus = classified status from server (On Time, Behind Schedule, At Pickup, etc.)
@@ -853,7 +865,7 @@ function CommandPalette({ open, query, setQuery, index, setIndex, shipments, onS
 // ═══════════════════════════════════════════════════════════════
 // ASK AI — Command palette overlay with Claude tool-calling
 // ═══════════════════════════════════════════════════════════════
-function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn }) {
+function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, initialQuery, onConsumeInitialQuery }) {
   const inputRef = useRef(null);
   const scrollRef = useRef(null);
   const [query, setQuery] = useState("");
@@ -861,6 +873,14 @@ function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn }) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => { if (open && inputRef.current) setTimeout(() => inputRef.current.focus(), 80); }, [open]);
+
+  // Auto-send initial query (e.g. from drag-drop)
+  useEffect(() => {
+    if (open && initialQuery && !loading) {
+      setTimeout(() => askAI(initialQuery), 150);
+      if (onConsumeInitialQuery) onConsumeInitialQuery();
+    }
+  }, [open, initialQuery]);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, loading]);
 
   const askAI = useCallback(async (q) => {
@@ -1105,6 +1125,8 @@ export default function DispatchDashboard() {
     loaded, setLoaded, apiError, setApiError,
     activeView, setActiveView, selectedRep, setSelectedRep,
     selectedShipment, setSelectedShipment,
+    expandEmailsOnOpen, setExpandEmailsOnOpen,
+    highlightedEfj, setHighlightedEfj,
     activeStatus, setActiveStatus, activeAccount, setActiveAccount,
     activeRep, setActiveRep, searchQuery, setSearchQuery,
     moveTypeFilter, setMoveTypeFilter, dateFilter, setDateFilter,
@@ -1140,6 +1162,8 @@ export default function DispatchDashboard() {
   const [cmdkQuery, setCmdkQuery] = useState("");
   const [cmdkIndex, setCmdkIndex] = useState(0);
   const [askAIOpen, setAskAIOpen] = useState(false);
+  const [askAIInitialQuery, setAskAIInitialQuery] = useState(null);
+  const [askAIDragOver, setAskAIDragOver] = useState(false);
   const [repScoreboard, setRepScoreboard] = useState([]);
 
   // Fetch rep scoreboard
@@ -1660,7 +1684,14 @@ export default function DispatchDashboard() {
     }
   };
 
-  const handleLoadClick = (s) => { setSelectedShipment(s); };
+  const handleLoadClick = (s, opts) => {
+    setSelectedShipment(s);
+    if (opts?.expandEmails) setExpandEmailsOnOpen(true);
+    if (opts?.highlight) {
+      setHighlightedEfj(s.efj);
+      setTimeout(() => setHighlightedEfj(null), 3000);
+    }
+  };
 
   const activeLoads = useMemo(() => filtered.filter(s => !["delivered", "issue", "cancelled", "cancelled_tonu", "empty_return", "driver_paid"].includes(s.status)).length, [filtered]);
   const inTransit = useMemo(() => filtered.filter(s => s.status === "in_transit").length, [filtered]);
@@ -1704,6 +1735,8 @@ export default function DispatchDashboard() {
         @keyframes glow-pulse { 0%, 100% { box-shadow: 0 0 16px rgba(0,222,180,0.08); } 50% { box-shadow: 0 0 28px rgba(0,222,180,0.18); } }
         @keyframes alert-pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(239,68,68,0.5); } 50% { opacity: 0.6; box-shadow: 0 0 12px rgba(239,68,68,0.3); } }
         @keyframes unbilled-pulse { 0%, 100% { box-shadow: 0 0 8px rgba(249,115,22,0.15); border-color: rgba(249,115,22,0.4); } 50% { box-shadow: 0 0 20px rgba(249,115,22,0.3); border-color: rgba(249,115,22,0.7); } }
+        @keyframes row-highlight { 0% { background: rgba(0,212,170,0.25); } 100% { background: transparent; } }
+        .row-highlight-pulse { animation: row-highlight 3s ease-out forwards; }
         .glass { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: var(--radius-card); box-shadow: var(--shadow-card); position: relative; }
         .glass::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent); border-radius: var(--radius-card) var(--radius-card) 0 0; pointer-events: none; }
         .glass-strong { background: var(--bg-elevated); border: 1px solid var(--border-emphasis); border-radius: var(--radius-card); box-shadow: var(--shadow-elevated); position: relative; }
@@ -1783,8 +1816,9 @@ export default function DispatchDashboard() {
         index={cmdkIndex} setIndex={setCmdkIndex} shipments={shipments}
         onSelect={(s) => handleLoadClick(s)} onClose={() => setCmdkOpen(false)} />
 
-      <AskAIOverlay open={askAIOpen} onClose={() => setAskAIOpen(false)}
-        API_BASE={API_BASE} apiFetchFn={apiFetch} />
+      <AskAIOverlay open={askAIOpen} onClose={() => { setAskAIOpen(false); setAskAIInitialQuery(null); }}
+        API_BASE={API_BASE} apiFetchFn={apiFetch}
+        initialQuery={askAIInitialQuery} onConsumeInitialQuery={() => setAskAIInitialQuery(null)} />
 
       {/* ═══ MAIN CONTENT ═══ */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative", zIndex: Z.main }}>
@@ -1801,14 +1835,35 @@ export default function DispatchDashboard() {
               </div>
             )}
             <button onClick={() => setAskAIOpen(true)}
-              title="Ask AI — Ctrl+K — ask about carriers, rates, load status, or paste a rate con"
-              style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, fontSize: 10, fontWeight: 700, cursor: "pointer", background: "rgba(0,212,170,0.10)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.25)", letterSpacing: "0.3px", transition: "all 0.15s" }}
-              onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,212,170,0.18)"; e.currentTarget.style.borderColor = "rgba(0,212,170,0.45)"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,212,170,0.10)"; e.currentTarget.style.borderColor = "rgba(0,212,170,0.25)"; }}>
+              title="Ask AI — Ctrl+K — drag an inbox email here for instant summary"
+              onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setAskAIDragOver(true); }}
+              onDragLeave={() => setAskAIDragOver(false)}
+              onDrop={e => {
+                e.preventDefault();
+                setAskAIDragOver(false);
+                try {
+                  const thread = JSON.parse(e.dataTransfer.getData("application/json"));
+                  const msgs = (thread.messages || []).map(m =>
+                    `[${m.direction === "sent" ? "CSL" : "External"}] ${(m.sender || "").replace(/<[^>]+>/g, "").trim()}: ${(m.body_preview || "").slice(0, 200)}`
+                  ).join("\n");
+                  const prompt = `Summarize this email thread and tell me what action is needed:\n\nSubject: ${thread.latest_subject || "(no subject)"}\nFrom: ${(thread.latest_sender || "").replace(/<[^>]+>/g, "").trim()}\nEFJ: ${thread.efj || "unmatched"}\nType: ${thread.email_type || "general"}\nMessages (${thread.message_count || 1}):\n${msgs}\n\nAI classification: ${thread.ai_summary || "none"}`;
+                  setAskAIInitialQuery(prompt);
+                  setAskAIOpen(true);
+                } catch {}
+              }}
+              style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, fontSize: 10, fontWeight: 700, cursor: "pointer",
+                background: askAIDragOver ? "rgba(0,212,170,0.35)" : "rgba(0,212,170,0.10)",
+                color: "#00D4AA",
+                border: askAIDragOver ? "2px solid #00D4AA" : "1px solid rgba(0,212,170,0.25)",
+                letterSpacing: "0.3px", transition: "all 0.15s",
+                boxShadow: askAIDragOver ? "0 0 20px rgba(0,212,170,0.4)" : "none",
+                transform: askAIDragOver ? "scale(1.08)" : "scale(1)" }}
+              onMouseEnter={e => { if (!askAIDragOver) { e.currentTarget.style.background = "rgba(0,212,170,0.18)"; e.currentTarget.style.borderColor = "rgba(0,212,170,0.45)"; }}}
+              onMouseLeave={e => { if (!askAIDragOver) { e.currentTarget.style.background = "rgba(0,212,170,0.10)"; e.currentTarget.style.borderColor = "rgba(0,212,170,0.25)"; }}}>
               <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
                 <path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5z" />
               </svg>
-              Ask AI
+              {askAIDragOver ? "Drop to Summarize" : "Ask AI"}
               <span style={{ fontSize: 8, opacity: 0.5, marginLeft: 2 }}>⌘K</span>
             </button>
             <ClockDisplay lastSyncTime={lastSyncTime} apiError={apiError} />
@@ -1846,7 +1901,7 @@ export default function DispatchDashboard() {
             <OverviewView loaded={loaded} shipments={shipments} apiStats={apiStats}
               accountOverview={accountOverview} apiError={apiError} onSelectRep={goToRepDashboard}
               unbilledStats={unbilledStats} repProfiles={repProfiles} repScoreboard={repScoreboard}
-              trackingSummary={trackingSummary} handleLoadClick={handleLoadClick}
+              trackingSummary={trackingSummary} docSummary={docSummary} handleLoadClick={handleLoadClick}
               alerts={allAlerts} onDismissAlert={handleDismissAlert} onDismissAll={handleDismissAllAlerts}
               onNavigateDispatch={() => setActiveView("dispatch")} onFilterStatus={(s) => { setDateFilter(null); setActiveStatus(s); setActiveView("dispatch"); }}
               onFilterAccount={(acct) => { if (acct === "Boviet" || acct === "Tolead") { goToRepDashboard(acct); } else { setDateFilter(null); setActiveAccount(acct); setActiveView("dispatch"); } }}
@@ -1907,7 +1962,7 @@ export default function DispatchDashboard() {
             <BillingView loaded={loaded} shipments={shipments} handleStatusUpdate={handleStatusUpdate}
               handleLoadClick={handleLoadClick} setSelectedShipment={setSelectedShipment}
               unbilledOrders={unbilledOrders} setUnbilledOrders={setUnbilledOrders}
-              unbilledStats={unbilledStats} setUnbilledStats={setUnbilledStats} />
+              unbilledStats={unbilledStats} setUnbilledStats={setUnbilledStats} docSummary={docSummary} />
           )}
           {activeView === "bol" && (
             <BOLGeneratorView loaded={loaded} />
@@ -2027,7 +2082,9 @@ export default function DispatchDashboard() {
         handleFieldEdit={handleFieldEdit} addSheetLog={addSheetLog}
         carrierDirectory={carrierDirectory}
         onDocChange={refreshDocSummary}
-        isMobile={isMobile} />
+        isMobile={isMobile}
+        expandEmailsOnOpen={expandEmailsOnOpen}
+        onConsumeExpandEmails={() => setExpandEmailsOnOpen(false)} />
 
       {/* ═══ MOBILE BOTTOM NAV ═══ */}
       <nav className="mobile-bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, height: 56, background: "#0D1119", borderTop: "1px solid rgba(255,255,255,0.08)", display: "none", alignItems: "center", justifyContent: "space-around", zIndex: Z.sidebar + 5, paddingBottom: "env(safe-area-inset-bottom)" }}>
@@ -2056,7 +2113,7 @@ export default function DispatchDashboard() {
 // ═══════════════════════════════════════════════════════════════
 // OVERVIEW VIEW (replaces old DashboardView)
 // ═══════════════════════════════════════════════════════════════
-function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, onSelectRep, onNavigateDispatch, onFilterStatus, onFilterDate, onFilterAccount, unbilledStats, onNavigateUnbilled, onAddLoad, onNavigateBilling, repProfiles, repScoreboard, trackingSummary, handleLoadClick, alerts, onDismissAlert, onDismissAll, onNavigateInbox, onFilterRepDispatch }) {
+function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, onSelectRep, onNavigateDispatch, onFilterStatus, onFilterDate, onFilterAccount, unbilledStats, onNavigateUnbilled, onAddLoad, onNavigateBilling, repProfiles, repScoreboard, trackingSummary, docSummary, handleLoadClick, alerts, onDismissAlert, onDismissAll, onNavigateInbox, onFilterRepDispatch }) {
   const [alertFilter, setAlertFilter] = useState("all");
 
   // Status pipeline data
@@ -2126,25 +2183,6 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
     })),
   ];
 
-  // Billing pipeline counts
-  const billingCounts = useMemo(() => {
-    const s = Array.isArray(shipments) ? shipments : [];
-    const readyToClose = s.filter(sh => sh.status === "ready_to_close").length;
-    const missingInvoice = s.filter(sh => sh.status === "missing_invoice").length;
-    const ppwkNeeded = s.filter(sh => sh.status === "ppwk_needed").length;
-    const waitingApproval = s.filter(sh => ["waiting_confirmation", "waiting_cx_approval", "cx_approved"].includes(sh.status)).length;
-    const delivered = s.filter(sh => sh.status === "delivered").length;
-    const needsBilling = s.filter(sh => sh.status === "delivered" && !sh._invoiced).length;
-    // Margin stats across all active priced loads
-    const priced = s.filter(sh => !sh._archived && parseFloat(sh.customerRate) > 0);
-    const totalRev = priced.reduce((sum, sh) => sum + (parseFloat(sh.customerRate) || 0), 0);
-    const totalCost = priced.reduce((sum, sh) => sum + (parseFloat(sh.carrierPay) || 0), 0);
-    const totalMargin = totalRev - totalCost;
-    const avgMarginPct = totalRev > 0 ? Math.round(((totalRev - totalCost) / totalRev) * 100) : null;
-    return { readyToClose, missingInvoice, ppwkNeeded, waitingApproval, delivered, needsBilling,
-      total: readyToClose + missingInvoice + ppwkNeeded + waitingApproval,
-      totalRev, totalMargin, avgMarginPct, pricedCount: priced.length };
-  }, [shipments]);
 
   return (
     <div style={{ animation: loaded ? "fade-in 0.5s ease" : "none" }}>
@@ -2508,65 +2546,7 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
         </div>
       </div>
 
-      {/* Row 3: Billing Cycle Pipeline */}
-      {billingCounts.total > 0 && (
-        <div style={{ marginTop: 14, animation: loaded ? "slide-up 0.4s ease 0.3s both" : "none" }}>
-          <div className="dash-panel" style={{ padding: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <div className="dash-panel-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 14 }}>💰</span> Billing Pipeline
-                <span style={{ fontSize: 10, color: "#5A6478", fontWeight: 500 }}>({billingCounts.total} loads)</span>
-              </div>
-              <button onClick={onNavigateBilling}
-                style={{ background: "none", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "5px 14px",
-                  color: "#00D4AA", fontSize: 10, fontWeight: 600, cursor: "pointer" }}>View Billing →</button>
-            </div>
-            {/* Pipeline visual */}
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {[
-                { label: "Delivered", count: billingCounts.needsBilling, color: "#22C55E", desc: "Needs billing" },
-                { label: "Ready to Close", count: billingCounts.readyToClose, color: "#F59E0B", desc: "Awaiting close-out" },
-                { label: "Missing Invoice", count: billingCounts.missingInvoice, color: "#EF4444", desc: "Carrier invoice needed" },
-                { label: "PPWK Needed", count: billingCounts.ppwkNeeded, color: "#EAB308", desc: "Paperwork missing" },
-                { label: "Waiting", count: billingCounts.waitingApproval, color: "#06B6D4", desc: "CX approval pending" },
-              ].filter(s => s.count > 0).map((stage, i, arr) => (
-                <div key={stage.label} style={{ display: "contents" }}>
-                  <div onClick={onNavigateBilling}
-                    style={{ flex: "1 1 120px", padding: "12px 14px", borderRadius: 10, cursor: "pointer",
-                      border: `1px solid ${stage.color}22`, background: `${stage.color}08`, transition: "all 0.15s" }}
-                    onMouseEnter={e => { e.currentTarget.style.background = `${stage.color}15`; e.currentTarget.style.borderColor = `${stage.color}44`; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = `${stage.color}08`; e.currentTarget.style.borderColor = `${stage.color}22`; }}>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: stage.color, fontFamily: "'JetBrains Mono', monospace" }}>{stage.count}</div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#F0F2F5", marginTop: 2 }}>{stage.label}</div>
-                    <div style={{ fontSize: 9, color: "#5A6478", marginTop: 1 }}>{stage.desc}</div>
-                  </div>
-                  {i < arr.length - 1 && (
-                    <div style={{ display: "flex", alignItems: "center", color: "#3D4557", fontSize: 14 }}>→</div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {/* Margin summary bar */}
-            {billingCounts.pricedCount > 0 && (
-              <div style={{ marginTop: 10, padding: "8px 14px", borderRadius: 8, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", display: "flex", gap: 20, alignItems: "center" }}>
-                <div style={{ fontSize: 10, color: "#5A6478" }}>
-                  <span style={{ fontWeight: 700, color: "#F0F2F5" }}>{billingCounts.pricedCount}</span> priced loads
-                </div>
-                <div style={{ fontSize: 10, color: "#5A6478" }}>
-                  Rev: <span style={{ fontWeight: 700, color: "#22C55E", fontFamily: "'JetBrains Mono', monospace" }}>${billingCounts.totalRev >= 1000 ? `${(billingCounts.totalRev / 1000).toFixed(1)}k` : Math.round(billingCounts.totalRev)}</span>
-                </div>
-                <div style={{ fontSize: 10, color: "#5A6478" }}>
-                  Margin: <span style={{ fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
-                    color: billingCounts.totalMargin < 0 ? "#EF4444" : billingCounts.avgMarginPct < 10 ? "#F59E0B" : "#22C55E" }}>
-                    ${billingCounts.totalMargin >= 1000 ? `${(billingCounts.totalMargin / 1000).toFixed(1)}k` : Math.round(billingCounts.totalMargin)}
-                    {billingCounts.avgMarginPct !== null && <span style={{ marginLeft: 4, fontSize: 9, opacity: 0.7 }}>({billingCounts.avgMarginPct}%)</span>}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Billing Pipeline removed — lives in Billing tab now */}
     </div>
   );
 }
@@ -2575,6 +2555,7 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
 // REP DASHBOARD VIEW
 // ═══════════════════════════════════════════════════════════════
 function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, repProfiles, onProfileUpdate, trackingSummary, docSummary, inboxThreads, onNavigateInbox }) {
+  const highlightedEfj = useAppStore(s => s.highlightedEfj);
   const [expandedAccount, setExpandedAccount] = useState(null);
   const [bovietTab, setBovietTab] = useState("Piedra");
   const [toleadHub, setToleadHub] = useState("ORD");
@@ -2830,8 +2811,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                 const dispMarginPct = calcMarginPct(s.customerRate, s.carrierPay);
                 const rowBg = (dispMarginPct !== null && dispMarginPct < 10) ? "rgba(239,68,68,0.10)" : repTermBg;
                 return (
-                  <tr key={s.id} className="row-hover" onClick={() => { if (!isEditing) handleLoadClick(s); }}
-                    style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)", background: rowBg }}>
+                  <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`} onClick={() => { if (!isEditing) handleLoadClick(s); }}
+                    style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : rowBg }}>
                     {/* Account */}
                     <td style={{ ...tdBase, color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}>{s.account}</td>
                     {/* Status (inline-editable) */}
@@ -3120,7 +3101,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                   });
                   return (
                     <div key={ti}
-                      onClick={() => { if (matchShip) { handleLoadClick(matchShip); setNeedsReplyOpen(false); } else { onNavigateInbox("needs_reply"); setNeedsReplyOpen(false); } }}
+                      onClick={() => { if (matchShip) { handleLoadClick(matchShip, { expandEmails: true, highlight: true }); setNeedsReplyOpen(false); } else { onNavigateInbox("needs_reply"); setNeedsReplyOpen(false); } }}
                       style={{ padding: "7px 10px", borderRadius: 7, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, marginBottom: 2,
                         background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.06)"}
@@ -3324,8 +3305,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                   const isEditing = inlineEditId === s.id;
                   const repDrayMarginPct = calcMarginPct(s.customerRate, s.carrierPay);
                   return (
-                    <tr key={s.id} className="row-hover" onClick={() => { if (!isEditing) handleLoadClick(s); }}
-                      style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)", background: repDrayMarginPct !== null && repDrayMarginPct < 10 ? "rgba(239,68,68,0.10)" : undefined }}>
+                    <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`} onClick={() => { if (!isEditing) handleLoadClick(s); }}
+                      style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : (repDrayMarginPct !== null && repDrayMarginPct < 10 ? "rgba(239,68,68,0.10)" : undefined) }}>
                       <td style={{ padding: "8px 14px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{s.loadNumber}</span>
@@ -3461,8 +3442,8 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                   const isEditing = inlineEditId === s.id;
                   const repFtlMarginPct = calcMarginPct(s.customerRate, s.carrierPay);
                   return (
-                    <tr key={s.id} className="row-hover" onClick={() => { if (!isEditing) handleLoadClick(s); }}
-                      style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)", background: repFtlMarginPct !== null && repFtlMarginPct < 10 ? "rgba(239,68,68,0.10)" : undefined }}>
+                    <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`} onClick={() => { if (!isEditing) handleLoadClick(s); }}
+                      style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : (repFtlMarginPct !== null && repFtlMarginPct < 10 ? "rgba(239,68,68,0.10)" : undefined) }}>
                       <td style={{ padding: "8px 14px", color: "#F0F2F5", fontSize: 11 }}>{s.account}</td>
                       <td style={{ padding: "8px 14px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -3891,9 +3872,9 @@ function InboxView({ handleLoadClick }) {
         return true;
       }));
     }
-    // Hide actioned threads (dismissed, assigned, already quoted)
+    // Hide actioned threads — show only threads that need attention
     if (hideActioned) {
-      list = list.filter(t => !t.dismissed && t.needs_reply !== false || !t.has_csl_reply);
+      list = list.filter(t => !t.actioned && (t.needs_reply || t.source === "unmatched"));
     }
     return list;
   }, [threads, inboxSearch, colFilters, hideActioned]);
@@ -4086,6 +4067,13 @@ function InboxView({ handleLoadClick }) {
                 const rowBg = isSelected ? "rgba(0,212,170,0.06)" : idx % 2 === 1 ? "rgba(255,255,255,0.015)" : "transparent";
                 return (
                   <tr key={thread.thread_id} style={{ background: rowBg, cursor: "pointer" }}
+                    draggable="true"
+                    onDragStart={e => {
+                      e.dataTransfer.setData("application/json", JSON.stringify(thread));
+                      e.dataTransfer.effectAllowed = "copy";
+                      e.currentTarget.style.opacity = "0.5";
+                    }}
+                    onDragEnd={e => { e.currentTarget.style.opacity = "1"; }}
                     onClick={() => setSelectedThread(isSelected ? null : thread)}
                     onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
                     onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = idx % 2 === 1 ? "rgba(255,255,255,0.015)" : "transparent"; }}>
@@ -4192,6 +4180,16 @@ function InboxView({ handleLoadClick }) {
 
           {/* Messages */}
           <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+            {/* AI Summary Card */}
+            {selThread.ai_summary && (
+              <div style={{ margin: "4px 16px 10px", padding: "10px 14px", borderRadius: 8, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.15)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                  <svg width="12" height="12" fill="none" stroke="#00D4AA" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5z" /></svg>
+                  <span style={{ fontSize: 8, fontWeight: 700, color: "#00D4AA", textTransform: "uppercase", letterSpacing: "0.5px" }}>AI Summary</span>
+                </div>
+                <div style={{ fontSize: 10, color: "#C8CDD8", lineHeight: 1.6 }}>{selThread.ai_summary}</div>
+              </div>
+            )}
             {(selThread.messages || []).map((msg, idx) => (
               <div key={idx} style={{ padding: "8px 16px", borderBottom: "1px solid rgba(255,255,255,0.03)", display: "flex", gap: 8 }}>
                 <span style={{ fontSize: 11, color: msg.direction === "sent" ? "#00D4AA" : "#8B95A8", flexShrink: 0, marginTop: 1 }}>
@@ -4666,8 +4664,9 @@ function AnalyticsView({ loaded, botStatus, botHealth, cronStatus, sheetLog }) {
 // ═══════════════════════════════════════════════════════════════
 // LOAD SLIDE-OVER PANEL (shared across all views)
 // ═══════════════════════════════════════════════════════════════
-function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setShipments, handleStatusUpdate, editField, setEditField, editValue, setEditValue, handleFieldEdit, addSheetLog, carrierDirectory, onDocChange, isMobile }) {
+function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setShipments, handleStatusUpdate, editField, setEditField, editValue, setEditValue, handleFieldEdit, addSheetLog, carrierDirectory, onDocChange, isMobile, expandEmailsOnOpen, onConsumeExpandEmails }) {
   const docInputRef = useRef(null);
+  const emailsSectionRef = useRef(null);
 
   // FTL tracking preview state
   const [trackingData, setTrackingData] = useState(null);
@@ -4709,6 +4708,18 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
   // Macropoint URL edit state
   const [editingMpUrl, setEditingMpUrl] = useState(false);
   const [mpUrlVal, setMpUrlVal] = useState("");
+
+  // Auto-expand emails section + scroll when opened from NEEDS REPLY
+  useEffect(() => {
+    if (expandEmailsOnOpen && loadEmails.length > 0) {
+      setEmailsCollapsed(false);
+      onConsumeExpandEmails?.();
+      // Wait a tick for the section to render, then scroll
+      requestAnimationFrame(() => {
+        emailsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }, [expandEmailsOnOpen, loadEmails.length]);
 
   // Fetch tracking + documents + driver info when slide-over opens
   useEffect(() => {
@@ -5515,7 +5526,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
 
           {/* Email History (collapsible) */}
           {loadEmails.length > 0 && (
-            <div style={{ padding: "8px 20px 12px" }}>
+            <div ref={emailsSectionRef} style={{ padding: "8px 20px 12px" }}>
               <div onClick={() => setEmailsCollapsed(prev => !prev)}
                 style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", userSelect: "none" }}>
                 <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", textTransform: "uppercase" }}>
@@ -5610,7 +5621,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                   if (docFilter === "carrier_invoice") return d.doc_type === "carrier_invoice";
                   return d.doc_type !== "customer_rate" && d.doc_type !== "carrier_rate" && d.doc_type !== "pod" && d.doc_type !== "bol" && d.doc_type !== "email" && d.doc_type !== "carrier_invoice";
                 }).map(doc => {
-                  const icon = doc.doc_type === "carrier_invoice" ? "🧾" : doc.doc_type.includes("rate") ? "💰" : doc.doc_type === "pod" ? "📸" : doc.doc_type === "bol" ? "📋" : doc.doc_type === "screenshot" ? "🖼" : doc.doc_type === "email" ? "✉" : "📄";
+                  const icon = doc.doc_type === "carrier_invoice" ? "🧾" : doc.doc_type.includes("rate") ? "💰" : doc.doc_type === "pod" ? "📸" : doc.doc_type === "bol" ? "📋" : doc.doc_type === "packing_list" ? "📦" : doc.doc_type === "screenshot" ? "🖼" : doc.doc_type === "email" ? "✉" : "📄";
                   const size = doc.size_bytes < 1024 ? `${doc.size_bytes}B` : doc.size_bytes < 1048576 ? `${Math.round(doc.size_bytes / 1024)}KB` : `${(doc.size_bytes / 1048576).toFixed(1)}MB`;
                   const date = doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString("en-US", { month: "numeric", day: "numeric" }) : "";
                   return (
@@ -5632,6 +5643,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                                 <option value="pod">POD</option>
                                 <option value="bol">BOL</option>
                                 <option value="carrier_invoice">Carrier Invoice</option>
+                                <option value="packing_list">Packing List</option>
                                 <option value="screenshot">Screenshot</option>
                                 <option value="email">Email</option>
                                 <option value="other">Other</option>
@@ -5669,6 +5681,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                 <option value="pod" style={{ background: "#0D1119" }}>POD</option>
                 <option value="bol" style={{ background: "#0D1119" }}>BOL</option>
                 <option value="carrier_invoice" style={{ background: "#0D1119" }}>Carrier Invoice</option>
+                <option value="packing_list" style={{ background: "#0D1119" }}>Packing List</option>
                 <option value="screenshot" style={{ background: "#0D1119" }}>Screenshot</option>
                 <option value="email" style={{ background: "#0D1119" }}>Email</option>
                 <option value="other" style={{ background: "#0D1119" }}>Other</option>
@@ -5792,6 +5805,7 @@ function DispatchView({
   handleDriverFieldUpdate,
   onBack,
 }) {
+  const highlightedEfj = useAppStore(s => s.highlightedEfj);
   const ACCOUNTS = accounts || ["All Accounts"];
   const podInputRef = useRef(null);
   const docInputRef = useRef(null);
@@ -6233,13 +6247,13 @@ function DispatchView({
 
       {/* Mobile Card View */}
       <div className="mobile-card-view" style={{ display: "none", flex: 1, overflowY: "auto", padding: "0 2px 60px" }}>
-        {filteredShips.slice(0, 100).map(s => {
+        {filtered.slice(0, 100).map(s => {
           const sc = (isFTLShipment(s) ? FTL_STATUS_COLORS : STATUS_COLORS)[s.status] || { main: "#94a3b8" };
           const mgn = calcMarginPct(s.customerRate, s.carrierPay);
           return (
-            <div key={s.id} onClick={() => handleLoadClick(s)}
+            <div key={s.id} className={highlightedEfj === s.efj ? "row-highlight-pulse" : ""} onClick={() => handleLoadClick(s)}
               style={{ padding: "12px 14px", marginBottom: 8, borderRadius: 10, cursor: "pointer",
-                background: (mgn !== null && mgn < 10) ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.02)",
+                background: highlightedEfj === s.efj ? undefined : ((mgn !== null && mgn < 10) ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.02)"),
                 border: "1px solid rgba(255,255,255,0.06)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -6351,8 +6365,8 @@ function DispatchView({
               const rowBg = isSelected ? `${sc.main}10` : termBg || zebraBg;
               let colIdx = 0;
               return (
-                <tr key={s.id} className="row-hover" onClick={() => { if (!isInlineEditing) handleLoadClick(s); }}
-                  style={{ cursor: "pointer", background: rowBg }}>
+                <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`} onClick={() => { if (!isInlineEditing) handleLoadClick(s); }}
+                  style={{ cursor: "pointer", background: highlightedEfj === s.efj ? undefined : rowBg }}>
                   {/* Account */}
                   <td style={{ ...cellStyle(colIdx++), color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}>{s.account}</td>
                   {/* Status (inline-editable) */}
@@ -7011,7 +7025,7 @@ function DispatchView({
                       if (docFilter === "email") return d.doc_type === "email";
                       return !d.doc_type.includes("rate") && d.doc_type !== "pod" && d.doc_type !== "bol" && d.doc_type !== "email";
                     }).map(doc => {
-                      const icon = doc.doc_type === "carrier_invoice" ? "🧾" : doc.doc_type.includes("rate") ? "💰" : doc.doc_type === "pod" ? "📸" : doc.doc_type === "bol" ? "📋" : doc.doc_type === "screenshot" ? "🖼" : doc.doc_type === "email" ? "✉" : "📄";
+                      const icon = doc.doc_type === "carrier_invoice" ? "🧾" : doc.doc_type.includes("rate") ? "💰" : doc.doc_type === "pod" ? "📸" : doc.doc_type === "bol" ? "📋" : doc.doc_type === "packing_list" ? "📦" : doc.doc_type === "screenshot" ? "🖼" : doc.doc_type === "email" ? "✉" : "📄";
                       const size = doc.size_bytes < 1024 ? `${doc.size_bytes}B` : doc.size_bytes < 1048576 ? `${Math.round(doc.size_bytes / 1024)}KB` : `${(doc.size_bytes / 1048576).toFixed(1)}MB`;
                       const date = doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString("en-US", { month: "numeric", day: "numeric" }) : "";
                       return (
@@ -7460,7 +7474,7 @@ function MacropointModal({ shipment, onClose }) {
 // BILLING VIEW — Billing Queue + Unbilled Orders
 // ═══════════════════════════════════════════════════════════════
 function BillingView({ loaded, shipments, handleStatusUpdate, handleLoadClick, setSelectedShipment,
-  unbilledOrders, setUnbilledOrders, unbilledStats, setUnbilledStats }) {
+  unbilledOrders, setUnbilledOrders, unbilledStats, setUnbilledStats, docSummary }) {
   const [billingTab, setBillingTab] = useState("queue");
   const [billingFilter, setBillingFilter] = useState("all");
   const [billSearch, setBillSearch] = useState("");
@@ -7477,6 +7491,7 @@ function BillingView({ loaded, shipments, handleStatusUpdate, handleLoadClick, s
     let q = billingQueue;
     if (billingFilter !== "all") q = q.filter(s => {
       if (billingFilter === "waiting") return ["waiting_confirmation", "waiting_cx_approval", "cx_approved"].includes(s.status);
+      if (billingFilter === "close_ready") return getBillingReadiness(s.efj, docSummary).ready;
       return s.status === billingFilter;
     });
     if (billRepFilter !== "All Reps") q = q.filter(s => {
@@ -7496,14 +7511,15 @@ function BillingView({ loaded, shipments, handleStatusUpdate, handleLoadClick, s
       return da - db;
     });
     return q;
-  }, [billingQueue, billingFilter, billRepFilter, billAcctFilter, billSearch]);
+  }, [billingQueue, billingFilter, billRepFilter, billAcctFilter, billSearch, docSummary]);
 
   const counts = useMemo(() => ({
     ready_to_close: billingQueue.filter(s => s.status === "ready_to_close").length,
     missing_invoice: billingQueue.filter(s => s.status === "missing_invoice").length,
     ppwk_needed: billingQueue.filter(s => s.status === "ppwk_needed").length,
     waiting: billingQueue.filter(s => ["waiting_confirmation", "waiting_cx_approval", "cx_approved"].includes(s.status)).length,
-  }), [billingQueue]);
+    close_ready: billingQueue.filter(s => getBillingReadiness(s.efj, docSummary).ready).length,
+  }), [billingQueue, docSummary]);
 
   const queueAccounts = useMemo(() => {
     const accts = [...new Set(billingQueue.map(s => s.account).filter(Boolean))].sort();
@@ -7520,17 +7536,37 @@ function BillingView({ loaded, shipments, handleStatusUpdate, handleLoadClick, s
     } catch {}
   };
 
-  const advanceBillingStatus = (s) => {
-    const flow = ["ready_to_close", "missing_invoice", "ppwk_needed", "billed_closed"];
-    const idx = flow.indexOf(s.status);
-    if (idx >= 0 && idx < flow.length - 1) {
-      handleStatusUpdate(s.id, flow[idx + 1]);
-    } else if (!flow.includes(s.status)) {
+  const [bulkClosing, setBulkClosing] = useState(false);
+
+  const smartAdvanceBillingStatus = (s) => {
+    const readiness = getBillingReadiness(s.efj, docSummary);
+    if (readiness.ready) {
+      handleStatusUpdate(s.id, "billed_closed");
+    } else if (readiness.missing.includes("carrier_invoice")) {
+      if (s.status !== "missing_invoice") handleStatusUpdate(s.id, "missing_invoice");
+      else handleStatusUpdate(s.id, "ppwk_needed");
+    } else if (readiness.missing.includes("pod")) {
+      if (s.status !== "ppwk_needed") handleStatusUpdate(s.id, "ppwk_needed");
+      else handleStatusUpdate(s.id, "billed_closed");
+    } else {
       handleStatusUpdate(s.id, "billed_closed");
     }
   };
 
+  const handleBulkCloseReady = async () => {
+    const readyLoads = billingQueue.filter(s => getBillingReadiness(s.efj, docSummary).ready);
+    if (readyLoads.length === 0) return;
+    if (!window.confirm(`Close ${readyLoads.length} load${readyLoads.length > 1 ? "s" : ""} with complete docs?`)) return;
+    setBulkClosing(true);
+    for (let i = 0; i < readyLoads.length; i++) {
+      await handleStatusUpdate(readyLoads[i].id, "billed_closed");
+      if (i < readyLoads.length - 1) await new Promise(r => setTimeout(r, 100));
+    }
+    setBulkClosing(false);
+  };
+
   const statCards = [
+    { label: "Close Ready", count: counts.close_ready, color: "#22C55E", filter: "close_ready" },
     { label: "Ready to Close", count: counts.ready_to_close, color: "#F59E0B", filter: "ready_to_close" },
     { label: "Missing Invoice", count: counts.missing_invoice, color: "#EF4444", filter: "missing_invoice" },
     { label: "PPWK Needed", count: counts.ppwk_needed, color: "#EAB308", filter: "ppwk_needed" },
@@ -7588,6 +7624,14 @@ function BillingView({ loaded, shipments, handleStatusUpdate, handleLoadClick, s
                 style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)",
                   color: "#8B95A8", fontSize: 10, cursor: "pointer" }}>Clear</button>
             )}
+            {counts.close_ready > 0 && (
+              <button onClick={handleBulkCloseReady} disabled={bulkClosing}
+                style={{ marginLeft: "auto", padding: "6px 14px", borderRadius: 8, border: "1px solid rgba(34,197,94,0.4)",
+                  background: bulkClosing ? "rgba(34,197,94,0.05)" : "rgba(34,197,94,0.12)",
+                  color: "#22C55E", fontSize: 10, fontWeight: 700, cursor: bulkClosing ? "wait" : "pointer", whiteSpace: "nowrap" }}>
+                {bulkClosing ? "Closing..." : `Close All Ready (${counts.close_ready})`}
+              </button>
+            )}
           </div>
 
           {/* Table */}
@@ -7595,19 +7639,20 @@ function BillingView({ loaded, shipments, handleStatusUpdate, handleLoadClick, s
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                  {["EFJ #", "Account", "Rep", "Container/Load", "Carrier", "Route", "Delivered", "Status", "Invoiced", ""].map(h => (
+                  {["EFJ #", "Account", "Rep", "Container/Load", "Carrier", "Route", "Docs", "Delivered", "Status", "Invoiced", ""].map(h => (
                     <th key={h} style={{ padding: "10px 12px", textAlign: "left", color: "#8B95A8", fontSize: 10, fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filteredQueue.length === 0 && (
-                  <tr><td colSpan={10} style={{ padding: "40px 0", textAlign: "center", color: "#3D4557", fontSize: 12 }}>No loads in billing queue</td></tr>
+                  <tr><td colSpan={11} style={{ padding: "40px 0", textAlign: "center", color: "#3D4557", fontSize: 12 }}>No loads in billing queue</td></tr>
                 )}
                 {filteredQueue.map(s => {
                   const bStatus = BILLING_STATUSES.find(b => b.key === s.status);
                   const bColor = BILLING_STATUS_COLORS[s.status]?.main || "#6B7280";
                   const rep = resolveRepForShipment(s);
+                  const readiness = getBillingReadiness(s.efj, docSummary);
                   return (
                     <tr key={s.id} onClick={() => handleLoadClick(s)}
                       style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", cursor: "pointer", transition: "background 0.15s" }}
@@ -7619,21 +7664,40 @@ function BillingView({ loaded, shipments, handleStatusUpdate, handleLoadClick, s
                       <td style={{ padding: "10px 12px", color: "#8B95A8", fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>{s.container}</td>
                       <td style={{ padding: "10px 12px", color: "#8B95A8" }}>{s.carrier}</td>
                       <td style={{ padding: "10px 12px", color: "#8B95A8", fontSize: 11 }}>{s.origin && s.destination ? `${s.origin} → ${s.destination}` : s.destination || "—"}</td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <span style={{ display: "inline-flex", gap: 4, fontSize: 10 }}>
+                          <span title="Carrier Invoice" style={{ color: readiness.present.includes("carrier_invoice") ? "#22C55E" : "#EF4444", fontWeight: 700 }}>
+                            {readiness.present.includes("carrier_invoice") ? "INV\u2713" : "INV\u2717"}
+                          </span>
+                          <span title="Proof of Delivery" style={{ color: readiness.present.includes("pod") ? "#22C55E" : "#EF4444", fontWeight: 700 }}>
+                            {readiness.present.includes("pod") ? "POD\u2713" : "POD\u2717"}
+                          </span>
+                        </span>
+                      </td>
                       <td style={{ padding: "10px 12px", color: "#8B95A8", fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
                         {s.deliveryDate ? new Date(s.deliveryDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
-                        <button onClick={e => { e.stopPropagation(); advanceBillingStatus(s); }}
-                          style={{ padding: "4px 12px", borderRadius: 8, border: `1px solid ${bColor}44`, background: `${bColor}15`,
-                            color: bColor, fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
-                          {bStatus?.label || s.status}
-                        </button>
+                        {readiness.ready ? (
+                          <button onClick={e => { e.stopPropagation(); handleStatusUpdate(s.id, "billed_closed"); }}
+                            style={{ padding: "4px 12px", borderRadius: 8, border: "1px solid rgba(34,197,94,0.4)", background: "rgba(34,197,94,0.15)",
+                              color: "#22C55E", fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                            Close \u2713
+                          </button>
+                        ) : (
+                          <button onClick={e => { e.stopPropagation(); smartAdvanceBillingStatus(s); }}
+                            title={readiness.missing.length > 0 ? `Missing: ${readiness.missing.join(", ")}` : ""}
+                            style={{ padding: "4px 12px", borderRadius: 8, border: `1px solid ${bColor}44`, background: `${bColor}15`,
+                              color: bColor, fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                            {bStatus?.label || s.status}
+                          </button>
+                        )}
                       </td>
                       <td style={{ padding: "10px 12px", textAlign: "center" }}>
                         <button onClick={e => { e.stopPropagation(); handleInvoicedToggle(s); }}
                           style={{ width: 18, height: 18, borderRadius: 4, border: s._invoiced ? "2px solid #A855F7" : "2px solid #3D4557",
                             background: s._invoiced ? "#A855F7" : "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
-                          {s._invoiced && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
+                          {s._invoiced && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>\u2713</span>}
                         </button>
                       </td>
                       <td style={{ padding: "10px 12px" }}>

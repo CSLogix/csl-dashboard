@@ -40,6 +40,8 @@ export const useAppStore = create((set) => ({
   activeView: "dashboard",
   selectedRep: null,
   selectedShipment: null,
+  expandEmailsOnOpen: false,  // when true, LoadSlideOver auto-expands emails section
+  highlightedEfj: null,       // EFJ to pulse-highlight in dispatch table rows
 
   // ── Filters ──
   activeStatus: "all",
@@ -81,6 +83,8 @@ export const useAppStore = create((set) => ({
   setActiveView: (v) => set({ activeView: v }),
   setSelectedRep: (v) => set({ selectedRep: v }),
   setSelectedShipment: (v) => set({ selectedShipment: v }),
+  setExpandEmailsOnOpen: (v) => set({ expandEmailsOnOpen: v }),
+  setHighlightedEfj: (v) => set({ highlightedEfj: v }),
 
   setActiveStatus: (v) => set({ activeStatus: v }),
   setActiveAccount: (v) => set({ activeAccount: v }),
