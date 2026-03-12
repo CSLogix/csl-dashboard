@@ -25,7 +25,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - **SSH key**: `~/.ssh/id_ed25519` added to GitHub (`CSLogix` account)
 
 ## Dashboard Component Map (DispatchDashboard.jsx)
-Single-file React SPA (~7100 lines). Key components: `DispatchDashboard` (root), `OverviewView`, `RepDashboardView`, `DispatchView`, `InboxView`, `LoadSlideOver`, `AnalyticsView`, `UnbilledView`, `HistoryView`, `AddForm`.
+Single-file React SPA (~8500 lines). Key components: `DispatchDashboard` (root), `OverviewView`, `RepDashboardView`, `DispatchView`, `InboxView`, `LoadSlideOver`, `AnalyticsView`, `UnbilledView`, `HistoryView`, `AddForm`, `AskAIOverlay`, `RateIQView` (with Directory, Lane Search, Scorecard tabs).
 
 ## Services Architecture (as of Mar 2026)
 
@@ -101,6 +101,27 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ## Recent Dashboard Changes (Deployed)
 
+### Carrier Intelligence Suite — Mar 11, 2026
+- **Carrier Directory tab** in Rate IQ: searchable/filterable carrier cards with capability pills (HAZ, OWT, Reefer, Bonded, OOG, WHS), tier badges, market chips, truck counts. Expanded detail shows contact info, equipment, insurance, service feedback/notes/record/comments
+- **Carrier Directory inline editing**: ✏️ pencil toggle per card → capability pills become toggleable (click to on/off), tier rank becomes dropdown, all detail fields become save-on-blur inputs. `PUT /api/carriers/{id}` handles updates
+- **Lane Search tab** in Rate IQ: origin/dest search with grouped results by lane. Expanded view shows carrier table with all accessorial columns (dray, FSC, total, chassis, prepull, storage, detention, chassis split, overweight, tolls, hazmat, triaxle, reefer, bond)
+- **Lane Search inline editing**: click any rate cell → number input with teal border → save on blur/Enter, Escape cancels. `PUT /api/lane-rates/{id}` endpoint (new) with auto-recalculate total if dray_rate/fsc change
+- **Lane Search carrier enhancements**: capability emoji badges (🔥⚖❄🔒📦🏭), tier dot indicators, MC# from carrierCapMap cross-reference, date stamps ("today"/"3d"/"2w"/"3mo" with color aging), "Draft Load →" hover button opens Ask AI
+- **Carrier schema expansion**: `can_reefer`, `can_bonded`, `can_oog`, `can_warehousing`, `tier_rank`, `service_feedback`, `service_notes`, `service_record`, `comments`, `markets[]`, `haz_classes[]`, `dnu`, `trucks`, `insurance_info` columns added to `carriers` table
+- **Carrier Sheet import**: `import_carrier_sheet.py` (openpyxl) reads 35 tabs from `Carrier Sheet.xlsx`, UPSERT on MC#, merges markets array, maps Yes/No → booleans, tier strings → integers
+- **Rate Quote Sheet import**: `import_rate_quotes_sheet.py` reads 40 city-market tabs, imports dray rates + all accessorial columns to `lane_rates` table
+- **Document dedup**: SHA-256 `file_hash` column + UNIQUE constraint on `load_documents`, backfill script, inbox scanner + upload endpoint hash-check guard. Expanded junk filename patterns (image.png, Outlook-*.jpg)
+- **Macropoint→Billing bridge**: Webhook "Delivered" auto-transitions to `ready_to_close` after 60s delay via BackgroundTask
+- **Loadboard rename**: "Dispatch" labels → "Loadboard" in OverviewView stat cards and DispatchView header
+- **BOL systemd service**: `/etc/systemd/system/bol-webapp.service` created and enabled
+
+### Ask AI — Command Palette — Mar 11, 2026
+- **Backend**: `ai_assistant.py` module — Claude Sonnet 4.6 tool-calling with 5 tools: `query_lane_history`, `query_carrier_db`, `check_efj_status`, `extract_rate_con`, `draft_new_load`. Each tool queries PG directly. Up to 3 tool iterations per query
+- **Endpoint**: `POST /api/ask-ai` in app.py — accepts `{ question, context }`, returns `{ answer, tool_calls, sources }`
+- **Frontend**: `AskAIOverlay` component — center-screen chat overlay (z-index 310), triggered by Ctrl+K or "Ask AI ⌘K" button. Quick-action chips, markdown rendering (tables, bold, lists, headers), tool call purple badges, session history
+- **Keyboard shortcuts**: Ctrl+K → Ask AI, Ctrl+F → shipment search CommandPalette
+- **Anthropic API key**: stored in `/root/csl-bot/.env` as `ANTHROPIC_API_KEY`, `pip install anthropic --break-system-packages`
+
 ### Team Feedback Session Fixes — Mar 11, 2026
 - **Dispatch nav removed**: Removed from `NAV_ITEMS` sidebar. DispatchView still accessible via Overview stat card clicks (Active, Today, Yesterday, etc.)
 - **Yesterday filter**: `isDateYesterday()` helper + filter clause in `filtered` useMemo + purple "YESTERDAY" stat card on Overview + "Yesterday's Activity" chip label
@@ -163,14 +184,14 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Weekly profit report**: Unblocked — `_shipment_row_to_dict` now serializes `customer_rate`/`carrier_pay`. Will return real data as reps use Apply button or enter manually
 
 ### Rate IQ
-- Lane search mode, Phase 2 OOG IQ (real data), Phase 2 FTL IQ (not built)
+- ✅ Carrier Directory + Lane Search: DONE — inline editing deployed Mar 11
+- Phase 2 OOG IQ (real data), Phase 2 FTL IQ (not built)
 - Quote extractor v2 deployed (hub normalization + LoadMatch intelligence) — see [rateiq.md](rateiq.md)
 
 ### Other
 - Tolead/Boviet slide-over fields (driver phone, delivery date, appt_id)
 - Phase 3: Boviet Project Cards (not started)
 - Phase 5: Mobile App Layout (not started)
-- Excel import: `rate_quote_sheet.xlsx` for Directory
 - Warehouse extract: `POST /api/warehouses/extract` handler
 
 ## Documents Created
