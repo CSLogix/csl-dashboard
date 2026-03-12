@@ -76,3 +76,6 @@
 | `patch_noreply_fix.py` | csl_inbox_scanner.py: Fix unreplied email alerts — self-filter, EFJ dedup, 4hr cap, lane fallback |
 | `patch_alert_subject.py` | csl_ftl_alerts.py: "FTL Alert"→"CSL Tracking" email subject rename |
 | `patch_archive_distance_guard.py` | ftl_monitor.py + app.py: Block false D1 archive when distance_to_stop > 15mi |
+| `patch_rep_scoreboard.py` | app.py: GET /api/rep-scoreboard — unreplied threads, avg response time, stale quotes, neglected loads |
+| `patch_rep_scoreboard_v2.py` | app.py: Added loads_7d, revenue_7d, docs_needed to scoreboard + migration batch guard |
+| `fix_scoreboard_db.py` | app.py: Fix DB access pattern (get_db→database._pool) in rep-scoreboard endpoint |

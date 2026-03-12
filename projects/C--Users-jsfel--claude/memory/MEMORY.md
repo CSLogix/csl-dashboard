@@ -13,8 +13,8 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
 
-## Git — Mar 11, 2026
-- **Latest `8e1419c`** (Mar 11): Margin bridge + AI extraction v2 + archive distance guard
+## Git — Mar 12, 2026
+- **Latest**: Mar 12 — Rep Scoreboard v2 + revenue rename
 - **Repo**: `CSLogix/CSLogix_Bot` (private), single `master` branch
 - **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
@@ -54,61 +54,29 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **`patch_status_writeback.py`** applied to `app.py`: v2 status endpoint (`POST /api/v2/load/{efj}/status`) now writes back to Master Sheet for non-shared accounts via `BackgroundTasks` + `_write_fields_to_master_sheet()`. Previously only Tolead/Boviet (shared accounts) got sheet writeback — Master accounts (DSV, Allround, etc.) had their dashboard status edits overwritten by the 3-min sheet→PG sync.
 - **Root cause**: Status endpoint wrote to PG only; sheet kept old value; sync read sheet → overwrote PG
 
-### Margin Bridge — Carrier Pay Auto-Extraction Pipeline — Mar 11, 2026
-- **Problem**: `_shipment_row_to_dict()` omitted `customer_rate`/`carrier_pay` from API response → frontend always got undefined → 0/805 shipments had financial data despite columns existing in PG. Rate extraction pipeline (Haiku AI → `rate_quotes` table) was fully disconnected from `shipments.carrier_pay`.
-- **`patch_margin_bridge.py`** applied to `app.py`:
-  - Added `customer_rate`/`carrier_pay` to `_shipment_row_to_dict()` serialization
-  - New `GET /api/load/{efj}/rate-quotes` endpoint (pending/accepted quotes)
-  - New `POST /api/load/{efj}/apply-rate` endpoint (one-click confirm → writes to `shipments.carrier_pay` + rejects competing quotes)
-  - Wired `PATCH /api/rate-iq/{id}` accept → auto-reject competing quotes for same EFJ
-  - Wired `PATCH /api/inbox/{id}/quote-action` won → auto-accept linked `rate_quotes` row
-- **`patch_ai_extraction_v2.py`** applied to `csl_inbox_scanner.py`:
-  - Body window expanded 1200→2500 chars, regex fallback 1500→2500
-  - Improved prompt with carrier-specific patterns (ignore insurance/bond, handle per-mile, sum linehaul+FSC)
-  - Added `linehaul`, `accessorials`, `confidence` fields to extraction output
-  - Max tokens 200→300
-- **Frontend**: Rate suggestion banner in both LoadSlideOver Financials sections (main + rep). Shows carrier name + amount with "✓ Apply" button. Auto-hides when carrier_pay already populated.
-- **Pipeline**: Email classified → AI extracts rate → `rate_quotes` INSERT → banner appears in slide-over → rep clicks Apply → `shipments.carrier_pay` updated → Margin Guard activates
-
-### Archive Distance Guard — FTL False-Positive Prevention — Mar 11, 2026
-- **Problem**: Macropoint fired a D1 (Delivered) event for `LAX1260309020` (EFJ107436) while truck was still at pickup in Vernon CA. FTL monitor archived the load immediately → disappeared from Dispatch. Root cause: MP auto-closed the original shipment; Tolead had created `-02` and `-1` re-tracks but original's D1 event matched the cache entry via suffix-stripping logic.
-- **`patch_archive_distance_guard.py`** applied to `ftl_monitor.py` + `app.py`:
-  - **FTL monitor**: Before calling `archive_ftl_row_pg()`, checks `distance_to_stop` from cache. If > 15 miles, blocks archive + logs warning instead.
-  - **Webhook D1 handler**: If D1 event arrives and `distance_to_stop > 15`, demotes status to `"Arrived at Delivery"` before writing to cache — prevents false status from propagating to next poll.
-- **Cache fixed**: EFJ107436 status reset `Delivered → In Transit`, URL updated to active `-1` tracking link, bogus `stop2_arrived/stop2_departed` cleared.
-- **What rep could do**: Nothing from dashboard currently — no "re-link MP URL" UI. Future: add update tracking link field to LoadSlideOver.
-
-### Unbilled Weekly Digest — Mar 11, 2026
-- `unbilled_weekly_digest.py`: Outlook-safe HTML email to Janice (billing) with summary cards (total/avg age/new/cleared), aging buckets (0-7/8-14/15-30/30+), ⚠ approaching-30-day warning table, and customer breakdown with color-coded bucket counts
-- Cron: Monday 7:15 AM ET → `Janice.Cortes@evansdelivery.com` (cc: efj-operations)
-- 307 orders across 29 customers on first run. DSV has 11 orders approaching 30-day threshold
-
-### Dray Daily Report Email Fix — Mar 11, 2026
-- **`patch_daily_report_html.py`** applied to `dray_daily_summary.py`: Fixed Outlook-incompatible HTML — rgba→solid borders, div→table wrapper, added cellpadding/cellspacing/table-layout:fixed, font-family on all cells
-
-### Sync Guard + PG→Sheet Write-back — Mar 11, 2026
-- `patch_sync_guard.py` + `patch_writeback.py`: TOLEAD_BOVIET_SYNCABLE_FIELDS, sheet_synced_at stamps, PG trigger, cron */3, Tolead LAX + Boviet tabs write PG edits back to sheet
-
-### Boviet Invoice Writer — Mar 11, 2026
-- `boviet_invoice_writer.py`: Fills Piedra Invoice tab from MP stop times. Cron: every 2 hrs 6AM-8PM Mon-Fri
-
-### No-Reply Alert Fix — Mar 11, 2026
-- **`patch_noreply_fix.py`** applied to `csl_inbox_scanner.py`: Fixed `check_unreplied_customer_emails()` and re-enabled in `run_loop`
-  - **Removed "Open Dashboard" link** — IT was blocking emails with external links
-  - **Self-email filter** — bot's own alert emails (`jfeltzjr`, `CSL Alert` subject) excluded from triggering new alerts (was causing 10x spam loop)
-  - **EFJ-level dedup** — same EFJ can only fire once per 2 hours (prevents multiple threads from same customer triggering separate alerts)
-  - **4hr lookback cap** — won't alert on ancient emails
-  - **Lane fix** — if `email_threads.lane` contains body text garbage (e.g. "dont want → proceed if he"), falls back to `shipments.origin → destination` from PG
-- **DB table**: `customer_reply_alerts` (email_thread_id, efj, sender, subject, alerted_at, dismissed)
-
-### Macropoint Alert Subject Rename — Mar 11, 2026
-- **`patch_alert_subject.py`** applied to `csl_ftl_alerts.py`: Renamed email subject "FTL Alert" → "CSL Tracking" and body header "FTL Status Update" → "Tracking Update" — generic across all move types (dray, FTL, etc.)
-- **Macropoint webhook delay analysis**: Arrived/Delivered events come 60-80 min late from Macropoint's side. Departed events are near-instant. Our server processes + emails within 1-2 seconds of webhook receipt.
-
-### Margin Guard + Date Normalizer + Terminal Normalizer — Mar 10-11, 2026
-- `calcMarginPct()` + red row bg when margin < 10%. `date_normalizer.py` gate in pg_update_shipment(). `terminal_normalizer.py` in csl_bot.py dray import loop. LFD/pickup fix (fallback only)
+### Mar 11, 2026 Bot Changes (condensed)
+- **Margin Bridge**: `patch_margin_bridge.py` — customer_rate/carrier_pay serialization, rate-quotes/apply-rate endpoints, auto-reject competing quotes. AI extraction v2 (expanded body window, linehaul/accessorials fields). Rate suggestion banner in LoadSlideOver.
+- **Archive Distance Guard**: `patch_archive_distance_guard.py` — block false D1 archive when distance_to_stop > 15mi in ftl_monitor + webhook handler
+- **Status Writeback**: v2 status endpoint writes back to Master Sheet for non-shared accounts (was being overwritten by 3-min sync)
+- **Unbilled Weekly Digest**: `unbilled_weekly_digest.py` — Outlook-safe HTML email, Monday 7:15 AM, aging buckets + customer breakdown
+- **Sync Guard + PG→Sheet Write-back**: sheet_synced_at stamps, cron */3, Tolead LAX + Boviet write-back
+- **No-Reply Alert Fix**: Self-email filter, EFJ dedup, 4hr lookback cap, lane fallback
+- **Other**: Boviet invoice writer, dray daily report HTML fix, MP alert subject rename ("CSL Tracking"), margin guard + date/terminal normalizers
 
 ## Recent Dashboard Changes (Deployed)
+
+### Rep Scoreboard v2 — Mar 12, 2026
+- **Backend**: `GET /api/rep-scoreboard` — 7 SQL queries computing per-rep metrics, polls every 2 min
+  - **Offense**: `loads_7d` (loads booked, migration-batch excluded), `revenue_7d` (SUM customer_rate, NOT margin — owner's preference to hide cost structure from floor)
+  - **Defense**: `unreplied_threads` (last msg is external, 3-day window), `avg_response_min` (7-day rolling, 16hr overnight cap), `docs_needed` (delivered loads missing POD/carrier_invoice), `neglected_loads` (non-terminal, no update >24h), `stale_quotes` (pending >2h)
+  - `worst_account` flag per rep (account with most unreplied threads)
+- **Frontend**: Replaced old Team panel in OverviewView with grid scoreboard. Blue offense headers (LOADS, REV) | divider | amber defense headers (COMMS, DOCS, STALE)
+  - COMMS = merged unreplied count + avg speed in one cell (green ✓ / yellow / red composite)
+  - Color thresholds: ≥5 unreplied or ≥3 stale or ≥5 docs → red row highlight
+  - **Clickable cells**: COMMS → Inbox filtered by rep, DOCS → Rep Dashboard, STALE → Dispatch filtered by rep
+- **DB pattern**: Uses `database._pool.getconn()` directly (not context manager) for multi-query read-only endpoint
+- **Deferred**: WIN RATE (only 83 rate_quotes, 1 accepted — too sparse), carrier assignment speed + on-time delivery (needs delivered_at TIMESTAMPTZ migration), Account Health view (same data grouped by account — next build)
+- **Data gaps**: REV shows "--" until customer_rate populates via rate extraction pipeline. LOADS had migration batch issue (610 loads on Mar 6) — excluded via `created_at > '2026-03-07'` guard that becomes no-op naturally
 
 ### Carrier Intelligence Suite — Mar 11, 2026
 - **Carrier Directory tab** in Rate IQ: searchable/filterable carrier cards with capability pills (HAZ, OWT, Reefer, Bonded, OOG, WHS), tier badges, market chips, truck counts. Expanded detail shows contact info, equipment, insurance, service feedback/notes/record/comments
@@ -198,8 +166,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Tolead/Boviet full PG migration**: Resolved as non-issue — data originates from client sheets. Sync guard + write-back deployed instead (see above). ORD/JFK/DFW remain client-shared (no write-back).
 - **Customer Tracking Portal**: ✅ DONE
 - **Inbox polish**: ✅ Reply button + density reduction done. Thread detail assign/correction UI still unbuilt
-- **Margin Guard**: ✅ DONE — deployed Mar 11. **Margin Bridge** deployed Mar 11 — auto-extraction pipeline wired, suggestion banner live, one-click apply works
-- **Weekly profit report**: Unblocked — `_shipment_row_to_dict` now serializes `customer_rate`/`carrier_pay`. Will return real data as reps use Apply button or enter manually
+- **Margin Guard**: ✅ DONE — deployed Mar 11. **Margin Bridge** deployed Mar 11
+- **Rep Scoreboard**: ✅ DONE — v2 deployed Mar 12. LOADS/REV/COMMS/DOCS/STALE. Deferred: WIN RATE (sparse data), Account Health view (next build), delivered_at TIMESTAMPTZ migration
+- **Account Health View**: NOT STARTED — same scoreboard data grouped by account instead of rep. Needed for strategic review (margin-to-friction ratio per customer)
 
 ### Rate IQ
 - ✅ Carrier Directory + Lane Search: DONE — inline editing deployed Mar 11
