@@ -90,3 +90,4 @@
 | `fix_inbox_cursor.py` | app.py: Fix inbox 500 — enrichment query used closed cursor. New `cur2` context manager |
 | `fix_inbox_cursor2.py` | app.py: Fix dict key access for RealDictCursor rows in inbox enrichment |
 | `backfill_reclassify_other_docs.py` | One-time: Sonnet 4.6 vision reclassified 192/284 "other" docs + auto-advanced 9 loads to ready_to_close |
+| `patch_account_health.py` | app.py: GET /api/account-health — 5 SQL queries GROUP BY account (loads, revenue, margin, unreplied, docs_needed, neglected, rep mapping via DISTINCT ON) |

@@ -8,7 +8,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [rateiq.md](rateiq.md) — Dray IQ, FTL IQ, OOG IQ, Scorecard, Directory
 - [inbox-command-center.md](inbox-command-center.md) — thread grouping, reply detection, classification
 - [macropoint-integration.md](macropoint-integration.md) — webhook flow, tracking events, GPS inference, timeline
-- [patches-applied.md](patches-applied.md) — full list (93 patches)
+- [patches-applied.md](patches-applied.md) — full list (94 patches)
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
@@ -86,6 +86,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ## Recent Dashboard Changes (Deployed)
 
+### Mar 12, 2026 Dashboard Changes (latest)
+- **Account Health View**: New panel in OverviewView Row 1 right column (next to Rep Scoreboard), replacing old Account Overview bar chart. Backend `GET /api/account-health` (`patch_account_health.py`, patch #94) — 5 SQL queries GROUP BY account: active loads+revenue+margin, unreplied threads, docs needed, neglected loads, rep mapping (DISTINCT ON + ORDER BY updated_at DESC). Grid columns: Account, Loads, Revenue, Friction, Health Score. Health Score = margin_pct - friction_score (friction = unreplied×2 + docs_needed×1.5 + neglected×1). Sort toggle cycles Health→Revenue→Friction. Clickable rows → dispatch filtered by account (Boviet/Tolead → rep dashboard). Fallback to old bar chart if API empty. Margin% column intentionally hidden (owner preference). Grid ratio 1.1fr/0.9fr, content padding 32px. `accountHealth` + `setAccountHealth` in Zustand store, 2-min polling.
+
 ### Mar 12, 2026 Dashboard Changes (late)
 - **NEEDS REPLY → Load Indexing**: Clicking a thread in the NEEDS REPLY dropdown now opens the load's slide-over with emails auto-expanded + smooth-scrolled into view, AND pulse-highlights the matching row in the dispatch table (3s teal fade-out). `expandEmailsOnOpen` + `highlightedEfj` Zustand state, `handleLoadClick(s, { expandEmails, highlight })` opts pattern, `emailsSectionRef` + `useEffect` scroll, highlight applied across all 5 row render sites (RepDash dray/ops/FTL, DispatchView desktop, mobile cards).
 - **DispatchView crash fix**: `filteredShips` → `filtered` in mobile card view (line 6173). Wrong variable name caused error boundary crash on any navigation.
@@ -120,7 +123,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
   - Color thresholds: ≥5 unreplied or ≥3 stale or ≥5 docs → red row highlight
   - **Clickable cells**: COMMS → Inbox filtered by rep, DOCS → Rep Dashboard, STALE → Dispatch filtered by rep
 - **DB pattern**: Uses `database._pool.getconn()` directly (not context manager) for multi-query read-only endpoint
-- **Deferred**: WIN RATE (only 83 rate_quotes, 1 accepted — too sparse), carrier assignment speed + on-time delivery (needs delivered_at TIMESTAMPTZ migration), Account Health view (same data grouped by account — next build)
+- **Deferred**: WIN RATE (only 83 rate_quotes, 1 accepted — too sparse), carrier assignment speed + on-time delivery (needs delivered_at TIMESTAMPTZ migration)
 - **Data gaps**: REV shows "--" until customer_rate populates via rate extraction pipeline. LOADS/REV now use `archived = false` (removed 7d rolling + migration batch guard). `total_margin` added to response
 
 ### Mar 11, 2026 Dashboard Changes (condensed)
@@ -171,8 +174,8 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Customer Tracking Portal**: ✅ DONE
 - **Inbox polish**: ✅ DONE — Reply button, density, rep filter, assign-rep dropdown, mark-actioned, drag-to-AI summary, AI summary card in thread detail, hideActioned filter fix all deployed
 - **Margin Guard**: ✅ DONE — deployed Mar 11. **Margin Bridge** deployed Mar 11. **MGN column** + margin summary bar deployed Mar 12
-- **Rep Scoreboard**: ✅ DONE — v2 deployed Mar 12. REV window expanded to all active loads (not 7d). Deferred: WIN RATE (sparse data), Account Health view (next build), delivered_at TIMESTAMPTZ migration
-- **Account Health View**: NOT STARTED — same scoreboard data grouped by account instead of rep. Needed for strategic review (margin-to-friction ratio per customer)
+- **Rep Scoreboard**: ✅ DONE — v2 deployed Mar 12. REV window expanded to all active loads (not 7d). Deferred: WIN RATE (sparse data), delivered_at TIMESTAMPTZ migration
+- **Account Health View**: ✅ DONE — deployed Mar 12. `GET /api/account-health` (5 SQL queries GROUP BY account). Health Score = margin_pct - friction_score. Grid in OverviewView next to Rep Scoreboard, clickable rows → dispatch/rep dashboard
 
 ### Rate IQ
 - ✅ Carrier Directory + Lane Search: DONE — inline editing deployed Mar 11

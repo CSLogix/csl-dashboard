@@ -9,7 +9,7 @@ Lines shift as code evolves — use Grep to find exact positions.
 | `TrackingBadge` | FTL tracking status badge |
 | `ClockDisplay` | Live clock + sync status |
 | `DispatchDashboard` | Root — all state, API fetching, nav |
-| `OverviewView` | Homepage: KPIs, pipeline, stat cards (incl. Yesterday), Team+Account above Actions+Alerts |
+| `OverviewView` | Homepage: KPIs, stat cards (incl. Yesterday), Rep Scoreboard (left) + Account Health grid (right) above Actions+Alerts |
 | `RepDashboardView` | Individual rep: Dray/FTL view toggle, account cards, inline date editing |
 | `AnalyticsView` | Bot status, sync log, Sheets connections |
 | `LoadSlideOver` | Right panel: tracking, docs, driver, emails |
@@ -41,6 +41,7 @@ Lines shift as code evolves — use Grep to find exact positions.
 ## Key API Endpoints Added (Mar 5, 2026)
 | Method | Path | Purpose |
 |--------|------|---------|
+| GET | `/api/account-health` | Account health metrics: loads, revenue, friction, health score per account (2-min poll) |
 | POST | `/api/load/add` | Add new load → routes to Master/Tolead/Boviet sheet |
 | GET | `/api/rate-iq/search-lane` | Fuzzy lane search for rate intelligence |
 
