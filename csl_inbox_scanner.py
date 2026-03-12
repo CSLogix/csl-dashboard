@@ -101,16 +101,21 @@ ALLOWED_EXTENSIONS = {
 # ── Junk attachment filter (signature icons, tracking pixels, social logos) ──
 
 JUNK_FILENAME_PATTERNS = re.compile(
-    r"^image\d{3}\.(png|jpg|jpeg|gif)$"       # Outlook signature images: image001.png
+    r"^image\d*\.(png|jpg|jpeg|gif)$"           # Outlook signature images: image.png, image001.png
+    r"|^Outlook-\w+\.(png|jpg|jpeg)$"            # Outlook-generated: Outlook-abc123.png
     r"|^(icon|logo|banner|spacer|pixel|beacon)"  # Generic junk prefixes
     r"|facebook|linkedin|twitter|instagram|youtube|tiktok"  # Social media icons
     r"|(^|\.)(gif)$"                             # Almost all .gif attachments are tracking pixels
-    r"|^outlook_\w+\.(png|jpg)"                  # Outlook-generated images
+    r"|^outlook_\w+\.(png|jpg)"                  # Outlook-generated images (lowercase)
     r"|^~\$"                                      # Office temp files
+    r"|_logo\.(png|jpg|jpeg)$"                    # Company logos: otr_logo.png
+    r"|^(sig|signature|header|footer|divider|separator)\d*\.(png|jpg|jpeg)$"
+    r"|^cid[_-]"                                   # Content-ID referenced images
+    r"|^(brand|badge|seal|cert|certified)\.(png|jpg|jpeg)$"
     , re.IGNORECASE
 )
 
-JUNK_MAX_SIZE_BYTES = 15_000  # 15KB — real docs are larger
+JUNK_MAX_SIZE_BYTES = 50_000  # 50KB — real docs (rate cons, PODs) are larger — real docs are larger
 
 def is_junk_attachment(filename, size_bytes=None):
     """Return True if attachment looks like a signature icon or tracking pixel."""
@@ -286,12 +291,19 @@ CARRIER_RATE_LANGUAGE = re.compile(
     re.IGNORECASE,
 )
 
-# Lane pattern: "City, ST to City, ST" with optional miles
+# US state abbreviations for lane validation
+_US_STATES = {
+    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
+    "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+    "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
+    "VA","WA","WV","WI","WY","DC",
+}
+
+# Lane pattern: "City, ST to City, ST" with optional miles (case-sensitive for state codes)
 LANE_PATTERN = re.compile(
     r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?,?\s*[A-Z]{2})\s*(?:to|→|->|-)\s*"
     r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?,?\s*[A-Z]{2})"
     r"(?:.*?(\d{2,4})\s*mi)?",
-    re.IGNORECASE,
 )
 
 # ── Tag-based classification (for forwarded emails with explicit tags) ──
@@ -660,16 +672,23 @@ def _extract_lane(subject, body):
     Strips email signatures and disclaimers before parsing to avoid false matches."""
     # Strip signature/disclaimer content — only parse first 400 chars of body
     clean_body = _SIG_STRIP.sub("", body or "")[:400] if body else ""
-    lane_match = LANE_PATTERN.search(subject or "") or LANE_PATTERN.search(clean_body)
-    if not lane_match:
-        return None
-    origin_city = lane_match.group(1).strip()
-    dest_city = lane_match.group(2).strip()
-    miles = lane_match.group(3)
-    lane = f"{origin_city} → {dest_city}"
-    if miles:
-        lane += f" ({miles} mi)"
-    return lane
+    for text in [subject or "", clean_body]:
+        lane_match = LANE_PATTERN.search(text)
+        if not lane_match:
+            continue
+        origin_city = lane_match.group(1).strip()
+        dest_city = lane_match.group(2).strip()
+        # Validate state codes are real US states
+        origin_st = origin_city[-2:].upper()
+        dest_st = dest_city[-2:].upper()
+        if origin_st not in _US_STATES or dest_st not in _US_STATES:
+            continue
+        miles = lane_match.group(3)
+        lane = f"{origin_city} → {dest_city}"
+        if miles:
+            lane += f" ({miles} mi)"
+        return lane
+    return None
 
 
 def classify_email_type(sender, subject, body, has_attachments=False, attachment_names=None):
@@ -1213,6 +1232,10 @@ def check_unreplied_customer_emails():
     Check for customer quote emails that haven't received a reply within 15 minutes.
     Inserts into customer_reply_alerts table for the frontend to display.
     Also sends an email alert to the assigned rep.
+
+    Dedup: by email_thread_id AND by (efj, sender_domain) to prevent
+    multiple alerts when same customer sends multiple threads about same EFJ.
+    Filters out self-sent emails (bot alert emails classified as customer_rate).
     """
     conn = get_conn()
     try:
@@ -1222,6 +1245,13 @@ def check_unreplied_customer_emails():
                 FROM email_threads et
                 WHERE et.email_type = 'customer_rate'
                   AND et.sent_at < NOW() - INTERVAL '15 minutes'
+                  AND et.sent_at > NOW() - INTERVAL '4 hours'
+                  -- Exclude self-sent (bot alert emails)
+                  AND et.sender NOT ILIKE '%%jfeltzjr%%'
+                  AND et.sender NOT ILIKE '%%commonsenselogistics%%'
+                  AND et.sender NOT ILIKE '%%evansdelivery%%'
+                  AND et.subject NOT ILIKE '%%CSL Alert%%'
+                  -- No reply from our team in same thread
                   AND NOT EXISTS (
                     SELECT 1 FROM email_threads reply
                     WHERE reply.gmail_thread_id = et.gmail_thread_id
@@ -1229,16 +1259,26 @@ def check_unreplied_customer_emails():
                            OR reply.sender ILIKE '%%evansdelivery%%')
                       AND reply.sent_at > et.sent_at
                   )
+                  -- Not a rate outreach thread
                   AND NOT EXISTS (
                     SELECT 1 FROM email_threads outreach
                     WHERE outreach.gmail_thread_id = et.gmail_thread_id
                       AND outreach.email_type = 'rate_outreach'
                   )
+                  -- Dedup: not already alerted for this email_thread_id
                   AND NOT EXISTS (
                     SELECT 1 FROM customer_reply_alerts cra
                     WHERE cra.email_thread_id = et.id
                   )
-                LIMIT 10
+                  -- Dedup: not already alerted for same EFJ in last 2 hours
+                  AND NOT EXISTS (
+                    SELECT 1 FROM customer_reply_alerts cra2
+                    WHERE cra2.efj = et.efj
+                      AND cra2.efj IS NOT NULL
+                      AND cra2.alerted_at > NOW() - INTERVAL '2 hours'
+                  )
+                ORDER BY et.sent_at ASC
+                LIMIT 5
             """)
             unreplied = cur.fetchall()
 
@@ -1250,14 +1290,30 @@ def check_unreplied_customer_emails():
                 log.info("UNREPLIED ALERT: %s [%s] from %s — no reply for 15+ min",
                          email["efj"], email["subject"][:50], email["sender"][:40])
 
+                # Try to get lane from shipments table if email lane is bad
+                lane = email.get("lane") or ""
+                if not lane or len(lane) > 60 or any(w in lane.lower() for w in
+                        ["don't", "dont", "want", "proceed", "please", "need", "can you"]):
+                    # Lane looks like body text, try PG shipments table
+                    try:
+                        cur.execute(
+                            "SELECT origin, destination FROM shipments WHERE efj = %s LIMIT 1",
+                            (email["efj"],)
+                        )
+                        row = cur.fetchone()
+                        if row and row.get("origin") and row.get("destination"):
+                            lane = f"{row['origin']} → {row['destination']}"
+                        else:
+                            lane = ""
+                    except Exception:
+                        lane = ""
+
                 # Send email alert to assigned rep
                 rep_email = _get_rep_email_for_efj(email["efj"])
-                # Extract customer name from sender string
                 _raw_sender = email.get("sender", "")
                 _cust_name = _raw_sender.split("<")[0].strip().strip('"') if "<" in _raw_sender else _raw_sender.split("@")[0]
-                _lane_str = email.get("lane") or ""
                 _subject_parts = [p for p in [_cust_name[:30] if _cust_name else None,
-                                               _lane_str[:40] if _lane_str else None] if p]
+                                               lane[:40] if lane else None] if p]
                 _alert_subject = "CSL Alert: No reply — " + " | ".join(_subject_parts) if _subject_parts else f"CSL Alert: No reply to customer quote — {email['efj'] or 'No EFJ'}"
                 _send_alert_email(
                     rep_email,
@@ -1268,11 +1324,10 @@ def check_unreplied_customer_emails():
 <tr><td style="padding:6px 12px;font-weight:bold;color:#555">EFJ</td><td style="padding:6px 12px">{email['efj'] or 'Not matched'}</td></tr>
 <tr><td style="padding:6px 12px;font-weight:bold;color:#555">From</td><td style="padding:6px 12px">{email['sender']}</td></tr>
 <tr><td style="padding:6px 12px;font-weight:bold;color:#555">Subject</td><td style="padding:6px 12px">{email['subject']}</td></tr>
-<tr><td style="padding:6px 12px;font-weight:bold;color:#555">Lane</td><td style="padding:6px 12px">{email.get('lane') or 'N/A'}</td></tr>
+<tr><td style="padding:6px 12px;font-weight:bold;color:#555">Lane</td><td style="padding:6px 12px">{lane or 'N/A'}</td></tr>
 <tr><td style="padding:6px 12px;font-weight:bold;color:#555">Received</td><td style="padding:6px 12px">{email['sent_at']}</td></tr>
 </table>
 <p style="color:#888;font-size:12px;margin-top:16px">This customer has been waiting 15+ minutes for a response. Please reply ASAP.</p>
-<p style="margin-top:12px"><a href="https://cslogixdispatch.com/app" style="color:#3B82F6">Open Dashboard</a></p>
 </div>""",
                 )
 
@@ -1336,11 +1391,22 @@ def collect_attachments(payload):
     """Recursively collect attachment metadata from payload."""
     attachments = []
     if payload.get("filename") and payload.get("body", {}).get("attachmentId"):
+        # Check Content-Disposition / Content-ID for inline detection
+        disposition = ""
+        has_content_id = False
+        for h in payload.get("headers", []):
+            hname = h.get("name", "").lower()
+            if hname == "content-disposition":
+                disposition = h.get("value", "").lower()
+            elif hname == "content-id":
+                has_content_id = True
+        is_inline = "inline" in disposition or (has_content_id and "attachment" not in disposition)
         attachments.append({
             "filename": payload["filename"],
             "attachment_id": payload["body"]["attachmentId"],
             "mime_type": payload.get("mimeType", ""),
             "size": payload.get("body", {}).get("size", 0),
+            "is_inline": is_inline,
         })
     for part in payload.get("parts", []):
         attachments.extend(collect_attachments(part))
@@ -1422,6 +1488,7 @@ def process_message(service, msg_id):
         a for a in attachments
         if Path(a["filename"]).suffix.lower() in ALLOWED_EXTENSIONS
         and not is_junk_attachment(a["filename"], a.get("size"))
+        and not (a.get("is_inline") and Path(a["filename"]).suffix.lower() in (".png", ".jpg", ".jpeg", ".gif"))
     ]
 
     # Match to EFJ
@@ -1438,14 +1505,28 @@ def process_message(service, msg_id):
                 safe_name = save_attachment(efj, att["filename"], data)
                 doc_type = classify_doc_type(att["filename"], sender=sender, subject=subject, body=body_preview)
 
+                # Compute file hash for dedup
+                import hashlib as _hl
+                file_hash = _hl.sha256(data).hexdigest()
+
                 # Insert into load_documents (same table as manual uploads)
                 conn = get_conn()
                 try:
                     with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                        # Check for duplicate by hash
                         cur.execute(
-                            "INSERT INTO load_documents (efj, doc_type, filename, original_name, size_bytes, uploaded_by) "
-                            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                            (efj, doc_type, safe_name, att["filename"], len(data), "inbox_scanner"),
+                            "SELECT 1 FROM load_documents WHERE efj=%s AND file_hash=%s",
+                            (efj, file_hash),
+                        )
+                        if cur.fetchone():
+                            log.info("  Skipping duplicate document: %s for %s", att["filename"], efj)
+                            conn.commit()
+                            continue
+
+                        cur.execute(
+                            "INSERT INTO load_documents (efj, doc_type, filename, original_name, size_bytes, uploaded_by, file_hash) "
+                            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                            (efj, doc_type, safe_name, att["filename"], len(data), "inbox_scanner", file_hash),
                         )
                         doc_id = cur.fetchone()["id"]
                     conn.commit()
@@ -1542,7 +1623,7 @@ def process_message(service, msg_id):
                     f"<b>From:</b> {sender}<br>"
                     f"<b>Subject:</b> {subject}<br>"
                     f"<b>Summary:</b> {ai_summary_text or 'CarrierPay flagged non-payment'}</p>"
-                    f"<p><a href='https://cslogixdispatch.com/app'>Open Dashboard</a></p>",
+                    
                 )
             except Exception as e:
                 log.error("  Payment alert email failed: %s", e)

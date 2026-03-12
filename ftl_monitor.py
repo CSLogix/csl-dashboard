@@ -549,9 +549,23 @@ def run_once():
 
             # ── Archive if Delivered ──────────────────────────────────────
             if "delivered" in cached_status.lower():
-                archive_ftl_row_pg(efj, load_num, dest, tab_name,
-                                    final_pickup, final_delivery, ACCOUNT_REPS_PG,
-                                    mp_load_id=mp_load_id, stop_times=stop_times)
+                # Guard: don't archive if truck is still > 15 miles from destination.
+                # Macropoint sometimes fires D1 events prematurely (wrong driver,
+                # auto-close, or re-tracked shipment). Verify proximity first.
+                dist_raw = cached.get("distance_to_stop")
+                dist_miles = None
+                try:
+                    dist_miles = float(dist_raw) if dist_raw is not None else None
+                except (TypeError, ValueError):
+                    pass
+                if dist_miles is not None and dist_miles > 15:
+                    print(f"    ⚠️  ARCHIVE BLOCKED for {efj}: D1 received but "
+                          f"truck is {dist_miles:.1f} mi from destination — "
+                          f"likely false positive (MP re-track?)")
+                else:
+                    archive_ftl_row_pg(efj, load_num, dest, tab_name,
+                                        final_pickup, final_delivery, ACCOUNT_REPS_PG,
+                                        mp_load_id=mp_load_id, stop_times=stop_times)
 
     save_tracking_cache(tracking_cache)
     save_sent_alerts(sent)

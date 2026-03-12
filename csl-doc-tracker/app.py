@@ -30,6 +30,7 @@ import auth
 import config
 from crypto import encrypt_data, decrypt_data
 import database as db
+import ai_assistant
 # ── Macropoint tracking constants ──
 TRACKING_PHONE = os.getenv("MACROPOINT_TRACKING_PHONE", "4437614954")
 DISPATCH_EMAIL = os.getenv("EMAIL_CC", "efj-operations@evansdelivery.com")
@@ -3194,11 +3195,15 @@ async def api_document_summary():
         doc_type = r["doc_type"] if isinstance(r, dict) else r[1]
         cnt = r["cnt"] if isinstance(r, dict) else r[2]
         latest_id = r["latest_id"] if isinstance(r, dict) else r[3]
-        if efj_val not in result:
-            result[efj_val] = {}
-            doc_ids[efj_val] = {}
-        result[efj_val][doc_type] = cnt
-        doc_ids[efj_val][doc_type] = latest_id
+        # Normalize EFJ key to bare number (strip "EFJ" prefix with or without space)
+        efj_key = re.sub(r'^EFJ\s*', '', str(efj_val), flags=re.IGNORECASE).strip()
+        if not efj_key:
+            efj_key = efj_val  # fallback to original if normalization yields empty
+        if efj_key not in result:
+            result[efj_key] = {}
+            doc_ids[efj_key] = {}
+        result[efj_key][doc_type] = cnt
+        doc_ids[efj_key][doc_type] = latest_id
     return {"documents": result, "doc_ids": doc_ids}
 
 
@@ -4366,14 +4371,22 @@ async def upload_load_document(efj: str, file: UploadFile = File(...), doc_type:
     safe_name = f"{uuid.uuid4().hex[:8]}_{file.filename}"
     file_path = os.path.join(upload_dir, safe_name)
     contents = await file.read()
+    import hashlib as _hl
+    file_hash = _hl.sha256(contents).hexdigest()
+    # Check for duplicate
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute("SELECT 1 FROM load_documents WHERE efj=%s AND file_hash=%s", (efj, file_hash))
+            if cur.fetchone():
+                return JSONResponse({"error": "Document already exists for this load"}, status_code=409)
     with open(file_path, "wb") as f:
         f.write(contents)
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
             cur.execute(
-                "INSERT INTO load_documents (efj, doc_type, filename, original_name, size_bytes) "
-                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                (efj, doc_type, safe_name, file.filename, len(contents))
+                "INSERT INTO load_documents (efj, doc_type, filename, original_name, size_bytes, file_hash) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                (efj, doc_type, safe_name, file.filename, len(contents), file_hash)
             )
             doc_id = cur.fetchone()["id"]
     return JSONResponse({"ok": True, "id": doc_id, "original_name": file.filename})
@@ -6192,7 +6205,14 @@ def _serialize_row(row):
 
 
 @app.get("/api/carriers")
-async def api_list_carriers(search: str = Query(default=None), region: str = Query(default=None)):
+async def api_list_carriers(
+    search: str = Query(default=None),
+    region: str = Query(default=None),
+    market: str = Query(default=None),
+    capability: str = Query(default=None),
+    exclude_dnu: bool = Query(default=False),
+    include_lanes: bool = Query(default=False),
+):
     with db.get_cursor() as cur:
         clauses, params = [], []
         if search:
@@ -6202,23 +6222,76 @@ async def api_list_carriers(search: str = Query(default=None), region: str = Que
         if region:
             clauses.append("regions ILIKE %s")
             params.append(f"%{region}%")
+        if market:
+            clauses.append("%s = ANY(markets)")
+            params.append(market)
+        if exclude_dnu:
+            clauses.append("(dnu IS NOT TRUE)")
+        if capability:
+            caps = [c.strip().lower() for c in capability.split(",") if c.strip()]
+            cap_map = {
+                "hazmat": "can_hazmat", "dray": "can_dray", "overweight": "can_overweight",
+                "transload": "can_transload", "reefer": "can_reefer", "bonded": "can_bonded",
+                "oog": "can_oog", "warehousing": "can_warehousing",
+            }
+            for cap in caps:
+                col = cap_map.get(cap)
+                if col:
+                    clauses.append(f"{col} IS TRUE")
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        cur.execute(f"SELECT * FROM carriers {where} ORDER BY carrier_name ASC", params)
+        cur.execute(f"SELECT * FROM carriers {where} ORDER BY tier_rank ASC NULLS LAST, carrier_name ASC", params)
         rows = [_serialize_row(r) for r in cur.fetchall()]
-    return JSONResponse({"carriers": rows})
+
+        # Optionally nest lane_rates per carrier
+        if include_lanes and rows:
+            carrier_names = list({r.get("carrier_name") for r in rows if r.get("carrier_name")})
+            if carrier_names:
+                placeholders = ",".join(["%s"] * len(carrier_names))
+                cur.execute(
+                    f"SELECT * FROM lane_rates WHERE carrier_name IN ({placeholders}) ORDER BY port, destination, total ASC NULLS LAST",
+                    carrier_names,
+                )
+                lane_rows = [_serialize_row(r) for r in cur.fetchall()]
+                lanes_by_carrier = {}
+                for lr in lane_rows:
+                    cn = lr.get("carrier_name", "")
+                    lanes_by_carrier.setdefault(cn, []).append(lr)
+                for row in rows:
+                    row["lane_rates"] = lanes_by_carrier.get(row.get("carrier_name", ""), [])
+
+    return JSONResponse({"carriers": rows, "total": len(rows)})
 
 
 @app.post("/api/carriers")
 async def api_create_carrier(request: Request):
     body = await request.json()
     fields = ["carrier_name", "mc_number", "dot_number", "contact_email", "contact_phone",
-              "contact_name", "regions", "ports", "rail_ramps", "equipment_types", "notes", "source", "pickup_area", "destination_area", "date_quoted", "v_code",
-              "can_dray", "can_hazmat", "can_overweight", "can_transload"]
-    bool_fields = {"can_dray", "can_hazmat", "can_overweight", "can_transload"}
+              "contact_name", "regions", "ports", "rail_ramps", "equipment_types", "notes", "source",
+              "pickup_area", "destination_area", "date_quoted", "v_code",
+              "can_dray", "can_hazmat", "can_overweight", "can_transload",
+              "can_reefer", "can_bonded", "can_oog", "can_warehousing",
+              "tier_rank", "dnu", "trucks",
+              "service_feedback", "service_notes", "service_record", "comments", "insurance_info",
+              "markets", "haz_classes"]
+    bool_fields = {"can_dray", "can_hazmat", "can_overweight", "can_transload",
+                   "can_reefer", "can_bonded", "can_oog", "can_warehousing", "dnu"}
+    int_fields = {"tier_rank", "trucks"}
+    array_fields = {"markets", "haz_classes"}
     vals = []
     for f in fields:
         if f in bool_fields:
             vals.append(bool(body.get(f, False)))
+        elif f in int_fields:
+            v = body.get(f)
+            vals.append(int(v) if v is not None else None)
+        elif f in array_fields:
+            v = body.get(f)
+            if isinstance(v, list):
+                vals.append(v)
+            elif isinstance(v, str) and v:
+                vals.append([x.strip() for x in v.split(",") if x.strip()])
+            else:
+                vals.append(None)
         elif f == "carrier_name":
             vals.append(body.get(f, ""))
         else:
@@ -6239,14 +6312,34 @@ async def api_create_carrier(request: Request):
 async def api_update_carrier(carrier_id: int, request: Request):
     body = await request.json()
     allowed = {"carrier_name", "mc_number", "dot_number", "contact_email", "contact_phone",
-               "contact_name", "regions", "ports", "rail_ramps", "equipment_types", "notes", "pickup_area", "destination_area", "date_quoted", "v_code",
-               "can_dray", "can_hazmat", "can_overweight", "can_transload"}
-    bool_fields = {"can_dray", "can_hazmat", "can_overweight", "can_transload"}
+               "contact_name", "regions", "ports", "rail_ramps", "equipment_types", "notes",
+               "pickup_area", "destination_area", "date_quoted", "v_code",
+               "can_dray", "can_hazmat", "can_overweight", "can_transload",
+               "can_reefer", "can_bonded", "can_oog", "can_warehousing",
+               "tier_rank", "dnu", "trucks",
+               "service_feedback", "service_notes", "service_record", "comments", "insurance_info",
+               "markets", "haz_classes"}
+    bool_fields = {"can_dray", "can_hazmat", "can_overweight", "can_transload",
+                   "can_reefer", "can_bonded", "can_oog", "can_warehousing", "dnu"}
+    int_fields = {"tier_rank", "trucks"}
+    array_fields = {"markets", "haz_classes"}
     sets, params = [], []
     for k, v in body.items():
         if k in allowed:
             sets.append(f"{k} = %s")
-            params.append(bool(v) if k in bool_fields else v)
+            if k in bool_fields:
+                params.append(bool(v))
+            elif k in int_fields:
+                params.append(int(v) if v is not None else None)
+            elif k in array_fields:
+                if isinstance(v, list):
+                    params.append(v)
+                elif isinstance(v, str) and v:
+                    params.append([x.strip() for x in v.split(",") if x.strip()])
+                else:
+                    params.append(None)
+            else:
+                params.append(v)
     if not sets:
         raise HTTPException(400, "No valid fields")
     sets.append("updated_at = NOW()")
@@ -6523,6 +6616,47 @@ async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Qu
         cur.execute(f"SELECT * FROM lane_rates {where} ORDER BY port, destination, total ASC NULLS LAST LIMIT 1000", params)
         rows = [_serialize_row(r) for r in cur.fetchall()]
     return JSONResponse({"lane_rates": rows, "total": len(rows)})
+
+@app.put("/api/lane-rates/{rate_id}")
+async def api_update_lane_rate(rate_id: int, request: Request):
+    body = await request.json()
+    allowed = {"port", "destination", "carrier_name", "dray_rate", "fsc", "total",
+               "chassis_per_day", "prepull", "storage_per_day", "detention",
+               "chassis_split", "overweight", "tolls", "reefer", "hazmat",
+               "triaxle", "bond_fee", "residential", "all_in_total",
+               "rank", "equipment_type", "move_type", "notes"}
+    decimal_fields = {"dray_rate", "total", "chassis_per_day", "prepull", "storage_per_day",
+                      "chassis_split", "overweight", "tolls", "reefer", "hazmat",
+                      "triaxle", "bond_fee", "residential", "all_in_total"}
+    int_fields = {"rank"}
+    sets, params = [], []
+    for k, v in body.items():
+        if k in allowed:
+            sets.append(f"{k} = %s")
+            if k in decimal_fields:
+                from decimal import Decimal, InvalidOperation
+                try:
+                    params.append(Decimal(str(v)) if v is not None and str(v).strip() != "" else None)
+                except (InvalidOperation, ValueError):
+                    params.append(None)
+            elif k in int_fields:
+                params.append(int(v) if v is not None else None)
+            else:
+                params.append(str(v).strip() if v is not None else None)
+    if not sets:
+        raise HTTPException(400, "No valid fields")
+    # Auto-recalculate total if dray_rate or fsc changed but total not explicitly sent
+    if ("dray_rate" in body or "fsc" in body) and "total" not in body:
+        sets.append("total = COALESCE(dray_rate, 0) + CASE WHEN fsc ~ '^[0-9.]+$' THEN fsc::numeric ELSE 0 END")
+    params.append(rate_id)
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute(f"UPDATE lane_rates SET {', '.join(sets)} WHERE id = %s RETURNING *", params)
+            row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Lane rate not found")
+    return JSONResponse(_serialize_row(row))
+
 
 
 # ═══════════════════════════════════════════════════════════
@@ -7201,14 +7335,18 @@ def health():
 _BOL_ACCOUNTS = {
     "accounts": [
         {
+            "key": "boviet",
+            "label": "Boviet / Piedra Solar",
             "name": "Boviet",
-            "columns": ["PO Number", "Quantity", "Weight", "Description",
-                        "Consignee", "Ship From", "Ship To"],
-        },
-        {
-            "name": "General",
-            "columns": ["PO Number", "Quantity", "Weight", "Description",
-                        "Consignee", "Ship From", "Ship To"],
+            "columns": ["EFJ Pro #", "BV #", "Boviet  Load#",
+                        "Pickup Appt Date", "PU Appt Time",
+                        "Delivery Apt Date", "Delivery Appt Time"],
+            "required_columns": ["EFJ Pro #", "BV #", "Boviet  Load#",
+                                 "Pickup Appt Date", "PU Appt Time",
+                                 "Delivery Apt Date", "Delivery Appt Time"],
+            "combined_columns": [],
+            "hint": "Matches Piedra Solar pickup & delivery plan format. "
+                    "Drop the Excel export directly — no reformatting needed.",
         },
     ]
 }
@@ -8848,6 +8986,22 @@ def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload
             f"Webhook: BLOCKED status regression {matched_key} [{old_status}] -> [{status}]"
         )
         return False, None
+    # ── Distance guard: block premature Delivered from D1 ──────────────
+    if status == "Delivered":
+        dist_raw = entry.get("distance_to_stop")
+        dist_miles = None
+        try:
+            dist_miles = float(dist_raw) if dist_raw is not None else None
+        except (TypeError, ValueError):
+            pass
+        if dist_miles is not None and dist_miles > 15:
+            log.warning(
+                "Webhook D1 DEMOTED for %s: truck is %.1f mi from dest — "
+                "setting 'Arrived at Delivery' instead to prevent false archive",
+                load_ref, dist_miles
+            )
+            status = "Arrived at Delivery"
+
     entry["status"] = status
     entry["last_scraped"] = now
     entry["webhook_updated"] = True
@@ -8898,6 +9052,29 @@ async def webhook_health():
 
 
 
+
+
+# ── Macropoint Billing Bridge: auto-transition Delivered → ready_to_close ──
+import threading as _billing_threading
+
+def _delayed_billing_transition(efj_num: str, delay_seconds: int = 60):
+    """After a delay, transition delivered loads to ready_to_close for billing queue.
+    Only transitions if status is still 'Delivered' (rep hasn't changed it)."""
+    import time
+    time.sleep(delay_seconds)
+    try:
+        with db.get_cursor() as cur:
+            cur.execute(
+                """UPDATE shipments SET status = 'ready_to_close', updated_at = NOW()
+                   WHERE efj = %s AND LOWER(status) IN ('delivered', 'completed')""",
+                (efj_num,),
+            )
+            if cur.rowcount > 0:
+                log.info("Billing bridge: auto-transitioned %s to ready_to_close (60s after Delivered)", efj_num)
+            else:
+                log.info("Billing bridge: skipped %s — status already changed by rep", efj_num)
+    except Exception as exc:
+        log.error("Billing bridge: failed for %s: %s", efj_num, exc)
 
 def _webhook_send_alert_background(efj: str, load_num: str, status: str,
                                     stop_times: dict, mp_load_id: str,
@@ -8951,6 +9128,18 @@ def _webhook_send_alert_background(efj: str, load_num: str, status: str,
                 log.info(f"Webhook bg: PG updated {efj} -> {dropdown}")
             except Exception as exc:
                 log.warning(f"Webhook bg: PG write failed for {efj}: {exc}")
+
+        # ── Billing Bridge: fire delayed transition on Delivered ──
+        if dropdown == "Delivered":
+            _t = _billing_threading.Thread(
+                target=_delayed_billing_transition,
+                args=(efj,),
+                kwargs={"delay_seconds": 60},
+                daemon=True,
+            )
+            _t.start()
+            log.info(f"Billing bridge: scheduled ready_to_close for {efj} in 60s")
+
 
         # Write container_url to PG if available from cache
         try:
@@ -9585,6 +9774,21 @@ Contact Evans Delivery for an updated link.</p>
     return templates.TemplateResponse(
         "public_track.html", {"request": request, "data": data}
     )
+
+
+
+# ── Ask AI Endpoint ──────────────────────────────────────────────────────
+@app.post("/api/ask-ai")
+async def api_ask_ai(request: Request):
+    """AI assistant with tool-calling access to CSL database."""
+    body = await request.json()
+    question = body.get("question", "").strip()
+    if not question:
+        return JSONResponse({"error": "No question provided"}, status_code=400)
+    context = body.get("context", {})
+    result = await ai_assistant.ask_ai(question, context)
+    return JSONResponse(result)
+
 
 if __name__ == "__main__":
     main()
