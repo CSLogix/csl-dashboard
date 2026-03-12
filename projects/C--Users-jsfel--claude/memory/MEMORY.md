@@ -8,13 +8,13 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [rateiq.md](rateiq.md) — Dray IQ, FTL IQ, OOG IQ, Scorecard, Directory
 - [inbox-command-center.md](inbox-command-center.md) — thread grouping, reply detection, classification
 - [macropoint-integration.md](macropoint-integration.md) — webhook flow, tracking events, GPS inference, timeline
-- [patches-applied.md](patches-applied.md) — full list (88 patches)
+- [patches-applied.md](patches-applied.md) — full list (90 patches)
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
 
 ## Git — Mar 12, 2026
-- **Latest**: Mar 12 — Mobile layout + margin column + inbox actions + Boviet cards + MP URL edit
+- **Latest**: Mar 12 — Smart billing + AI doc classifier + auto-status advancement + mobile layout
 - **Repo**: `CSLogix/CSLogix_Bot` (private), single `master` branch
 - **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
@@ -68,6 +68,8 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **REV window expansion**: `patch_rev_window.py` — scoreboard loads/revenue queries use `archived = false` instead of 7-day rolling filter + `total_margin` in response
 - **Inbox actions**: `patch_inbox_actions.py` — `manual_rep` + `actioned` columns on email_threads, 2 new PATCH endpoints (assign-rep, mark-actioned), needs_reply filters actioned threads
 - **Customer rate extraction**: `patch_customer_rate_extraction.py` — `extract_rate_from_email()` now handles `customer_rate` emails, adds `rate_type` field, `rate_quotes.rate_type` column
+- **AI Document Classifier**: `patch_ai_doc_classifier.py` — Sonnet 4.6 vision classifies ambiguous attachments (CamScanner PDFs, phone photos, generic filenames) when regex returns "other". 8/8 accuracy in live testing. Fires only on ambiguous docs (~$7.50/mo).
+- **Auto-status advancement**: `check_and_advance_billing()` in scanner — after saving docs, checks if POD + carrier_invoice both present. In-transit/at-delivery → Delivered → Ready to Close. Already-delivered → Ready to Close. Hands-free billing pipeline.
 
 ### Mar 11, 2026 Bot Changes (condensed)
 - **Margin Bridge**: `patch_margin_bridge.py` — customer_rate/carrier_pay serialization, rate-quotes/apply-rate endpoints, auto-reject competing quotes. AI extraction v2 (expanded body window, linehaul/accessorials fields). Rate suggestion banner in LoadSlideOver.
@@ -88,13 +90,14 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Directory port filter**: `<select>` dropdown filters carriers by port group membership
 - **Inbox rep chip**: Blue "Radka's Inbox ×" chip when filtered, `inboxInitialRep` added to Zustand store
 - **MGN column**: Dispatch table margin column with color coding (red <0, orange <10%, green ≥10%) + sortable via `calcMarginPct()`
-- **Margin summary bar**: Billing Pipeline section shows total rev/cost/margin/avg margin % across all priced active loads
+- **Billing Pipeline removed from Overview**: Was redundant with Billing tab. Margin summary bar also removed.
 - **MP URL edit**: LoadSlideOver Quick Action Strip "Edit MP URL" button with inline input + PATCH to `/api/load/{efj}/mp-url`
 - **Inbox thread actions**: Rep assignment `<select>` dropdown + "Mark Actioned" button per thread, ACTIONED badge, actioned threads hidden from needs_reply
 - **Boviet Project Cards**: RepDashboardView per-project summary cards (Piedra/Hanson) — active/delivered/pending counts, pickups today, carrier count, last delivery
 - **Customer Rate Banner**: LoadSlideOver Financials section shows pending customer rate suggestion with Apply/Reject buttons
 - **Mobile layout (Phase 5)**: `useIsMobile()` hook (768px breakpoint), bottom nav bar (Home/Inbox/Rates/Billing/More), full-width slide-overs, card view for dispatch table, horizontal scroll stat cards with snap, CSS media queries
 - **Scoreboard tooltips**: Updated from "7d rolling" to "Active loads" / "Active revenue" + margin tooltip
+- **Smart Billing Queue**: `getBillingReadiness()` pure function checks POD + carrier_invoice per load via docSummary. Green "Close Ready" stat card + filter. Docs column (INV✓/✗ POD✓/✗). Smart status button (green "Close ✓" when docs complete, advances to correct blocking stage when not). "Close All Ready (N)" bulk close button with 100ms stagger. Close Ready card added to stat row.
 
 ### Rep Scoreboard v2 — Mar 12, 2026
 - **Backend**: `GET /api/rep-scoreboard` — 7 SQL queries computing per-rep metrics, polls every 2 min
@@ -171,6 +174,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - Phase 5: Mobile App Layout — ✅ DONE (deployed Mar 12, bottom nav + card views + full-width panels)
 - Warehouse extract: `POST /api/warehouses/extract` handler
 - Customer rate extraction pipeline deployed (scanner handles customer_rate emails → rate_quotes with rate_type)
+- **Billing Flow**: ✅ DONE — Smart auto-advance (doc-aware), AI doc classifier (Sonnet vision), auto-status advancement (POD+invoice→delivered→ready_to_close), bulk close, Close Ready filter. Full hands-free pipeline until final close click.
 
 ### Radka Feedback Items (from Daily Agenda doc, Mar 12)
 - **Inbox "click does nothing"**: Thread detail panel opens on right (480px, z-index 35) — works but may not be obvious. Consider visual feedback or auto-scroll.

@@ -86,3 +86,4 @@
 | `patch_rev_window.py` | app.py: Expand REV scoreboard to all active loads (remove 7d filter) + total_margin in response |
 | `patch_inbox_actions.py` | app.py: manual_rep + actioned columns on email_threads + PATCH assign-rep + mark-actioned endpoints |
 | `patch_customer_rate_extraction.py` | csl_inbox_scanner.py: extract_rate_from_email handles customer_rate + rate_type field + rate_quotes column |
+| `patch_ai_doc_classifier.py` | csl_inbox_scanner.py: Sonnet 4.6 vision for ambiguous docs (CamScanner/photos→POD, RC→carrier_rate, container PDFs→BOL) + auto-status advancement (POD+invoice→delivered→ready_to_close) |
