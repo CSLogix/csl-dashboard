@@ -2092,8 +2092,15 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
     const waitingApproval = s.filter(sh => ["waiting_confirmation", "waiting_cx_approval", "cx_approved"].includes(sh.status)).length;
     const delivered = s.filter(sh => sh.status === "delivered").length;
     const needsBilling = s.filter(sh => sh.status === "delivered" && !sh._invoiced).length;
+    // Margin stats across all active priced loads
+    const priced = s.filter(sh => !sh._archived && parseFloat(sh.customerRate) > 0);
+    const totalRev = priced.reduce((sum, sh) => sum + (parseFloat(sh.customerRate) || 0), 0);
+    const totalCost = priced.reduce((sum, sh) => sum + (parseFloat(sh.carrierPay) || 0), 0);
+    const totalMargin = totalRev - totalCost;
+    const avgMarginPct = totalRev > 0 ? Math.round(((totalRev - totalCost) / totalRev) * 100) : null;
     return { readyToClose, missingInvoice, ppwkNeeded, waitingApproval, delivered, needsBilling,
-      total: readyToClose + missingInvoice + ppwkNeeded + waitingApproval };
+      total: readyToClose + missingInvoice + ppwkNeeded + waitingApproval,
+      totalRev, totalMargin, avgMarginPct, pricedCount: priced.length };
   }, [shipments]);
 
   return (
@@ -2496,6 +2503,24 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
                 </div>
               ))}
             </div>
+            {/* Margin summary bar */}
+            {billingCounts.pricedCount > 0 && (
+              <div style={{ marginTop: 10, padding: "8px 14px", borderRadius: 8, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", display: "flex", gap: 20, alignItems: "center" }}>
+                <div style={{ fontSize: 10, color: "#5A6478" }}>
+                  <span style={{ fontWeight: 700, color: "#F0F2F5" }}>{billingCounts.pricedCount}</span> priced loads
+                </div>
+                <div style={{ fontSize: 10, color: "#5A6478" }}>
+                  Rev: <span style={{ fontWeight: 700, color: "#22C55E", fontFamily: "'JetBrains Mono', monospace" }}>${billingCounts.totalRev >= 1000 ? `${(billingCounts.totalRev / 1000).toFixed(1)}k` : Math.round(billingCounts.totalRev)}</span>
+                </div>
+                <div style={{ fontSize: 10, color: "#5A6478" }}>
+                  Margin: <span style={{ fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+                    color: billingCounts.totalMargin < 0 ? "#EF4444" : billingCounts.avgMarginPct < 10 ? "#F59E0B" : "#22C55E" }}>
+                    ${billingCounts.totalMargin >= 1000 ? `${(billingCounts.totalMargin / 1000).toFixed(1)}k` : Math.round(billingCounts.totalMargin)}
+                    {billingCounts.avgMarginPct !== null && <span style={{ marginLeft: 4, fontSize: 9, opacity: 0.7 }}>({billingCounts.avgMarginPct}%)</span>}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2919,6 +2944,16 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                       ) : (
                         <span style={{ fontSize: 10, color: s.customerRate ? "#22C55E" : "#3D4557", fontFamily: "'JetBrains Mono', monospace", cursor: "text", fontWeight: s.customerRate ? 600 : 400 }}>{s.customerRate || "\u2014"}</span>
                       )}
+                    </td>
+                    {/* Margin (MGN) — color-coded */}
+                    <td style={{ ...tdBase, textAlign: "center" }}>
+                      {dispMarginPct !== null ? (
+                        <span style={{ fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+                          color: dispMarginPct < 0 ? "#EF4444" : dispMarginPct < 10 ? "#F59E0B" : "#22C55E" }}
+                          title={`$${Math.round(parseFloat(s.customerRate) - parseFloat(s.carrierPay))} margin`}>
+                          {dispMarginPct}%
+                        </span>
+                      ) : <span style={{ color: "#3D4557", fontSize: 10 }}>{"\u2014"}</span>}
                     </td>
                     {/* Notes (inline-editable) */}
                     <td style={{ ...tdBase, borderRight: "none" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("notes"); setInlineEditValue(s.notes || ""); }}>
@@ -5797,6 +5832,7 @@ function DispatchView({
     { key: "driverPhone", label: "Driver Phone", w: 100, sortFn: (a, b) => (a.driverPhone || "").localeCompare(b.driverPhone || "") },
     { key: "carrierEmail", label: "Carrier Email", w: 130, sortFn: (a, b) => (a.carrierEmail || "").localeCompare(b.carrierEmail || "") },
     { key: "customerRate", label: "Rate", w: 70, sortFn: (a, b) => (a.customerRate || "").localeCompare(b.customerRate || "") },
+    { key: "margin", label: "MGN", w: 55, sortFn: (a, b) => { const ma = calcMarginPct(a.customerRate, a.carrierPay); const mb = calcMarginPct(b.customerRate, b.carrierPay); return (ma ?? -999) - (mb ?? -999); }},
     { key: "notes", label: "Notes", w: 140, sortFn: (a, b) => (a.notes || "").localeCompare(b.notes || "") },
   ];
 
