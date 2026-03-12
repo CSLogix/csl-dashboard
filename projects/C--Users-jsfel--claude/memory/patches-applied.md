@@ -79,3 +79,7 @@
 | `patch_rep_scoreboard.py` | app.py: GET /api/rep-scoreboard — unreplied threads, avg response time, stale quotes, neglected loads |
 | `patch_rep_scoreboard_v2.py` | app.py: Added loads_7d, revenue_7d, docs_needed to scoreboard + migration batch guard |
 | `fix_scoreboard_db.py` | app.py: Fix DB access pattern (get_db→database._pool) in rep-scoreboard endpoint |
+| `patch_revenue_backfill.py` | One-time XLS→PG backfill of customer_rate from commission report (596 shipments, $12M) |
+| `patch_inbox_rep_filter.py` | app.py: Enrich /api/inbox threads with rep from shipments JOIN, fix rep_filter |
+| `patch_port_groups.py` | app.py: /api/port-groups + /api/rate-history + search-lane port group expansion + apply-rate→lane_rates |
+| `port_groups.py` | New module: 18 port/rail group dictionary + normalize_to_port_group() + reverse lookup |

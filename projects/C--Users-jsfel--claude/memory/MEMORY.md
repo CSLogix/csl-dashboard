@@ -8,13 +8,13 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [rateiq.md](rateiq.md) — Dray IQ, FTL IQ, OOG IQ, Scorecard, Directory
 - [inbox-command-center.md](inbox-command-center.md) — thread grouping, reply detection, classification
 - [macropoint-integration.md](macropoint-integration.md) — webhook flow, tracking events, GPS inference, timeline
-- [patches-applied.md](patches-applied.md) — full list (67 patches)
+- [patches-applied.md](patches-applied.md) — full list (70 patches)
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
 
 ## Git — Mar 12, 2026
-- **Latest**: Mar 12 — Rep Scoreboard v2 + revenue rename
+- **Latest**: Mar 12 — Port groups + revenue backfill + COMMS fix + History tab
 - **Repo**: `CSLogix/CSLogix_Bot` (private), single `master` branch
 - **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
@@ -50,9 +50,13 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ## Recent Bot Changes (Deployed)
 
-### Status Writeback Fix (All Accounts) — Mar 11, 2026
-- **`patch_status_writeback.py`** applied to `app.py`: v2 status endpoint (`POST /api/v2/load/{efj}/status`) now writes back to Master Sheet for non-shared accounts via `BackgroundTasks` + `_write_fields_to_master_sheet()`. Previously only Tolead/Boviet (shared accounts) got sheet writeback — Master accounts (DSV, Allround, etc.) had their dashboard status edits overwritten by the 3-min sheet→PG sync.
-- **Root cause**: Status endpoint wrote to PG only; sheet kept old value; sync read sheet → overwrote PG
+### Mar 12, 2026 Bot Changes
+- **Sheet sync cron fix**: Was pointing to wrong file (`csl-doc-tracker/csl_sheet_sync.py` 19KB → `/root/csl-bot/csl_sheet_sync.py` 33KB). Prolog, MD Metal, Talatrans now sync.
+- **Revenue backfill**: `patch_revenue_backfill.py` — XLS commission report → PG `customer_rate` (596 shipments, $12M total via xlrd)
+- **Inbox rep filter**: `patch_inbox_rep_filter.py` — enriches `/api/inbox` threads with `rep` from shipments table JOIN, fixes `rep_filter`
+- **Port groups**: `port_groups.py` (new module) — 18 port/rail groups (LA/LB, NY/NJ, Savannah, Chicago Rail, etc.) + `normalize_to_port_group()`
+- **Port groups API**: `patch_port_groups.py` — `/api/port-groups`, `/api/rate-history` endpoints, search-lane port group expansion, apply-rate→lane_rates INSERT
+- **ACCOUNT_REPS**: Added Prolog, Talatrans, LS Cargo (→Radka), GW-World (→John F) to `csl_bot.py`
 
 ### Mar 11, 2026 Bot Changes (condensed)
 - **Margin Bridge**: `patch_margin_bridge.py` — customer_rate/carrier_pay serialization, rate-quotes/apply-rate endpoints, auto-reject competing quotes. AI extraction v2 (expanded body window, linehaul/accessorials fields). Rate suggestion banner in LoadSlideOver.
@@ -64,6 +68,13 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Other**: Boviet invoice writer, dray daily report HTML fix, MP alert subject rename ("CSL Tracking"), margin guard + date/terminal normalizers
 
 ## Recent Dashboard Changes (Deployed)
+
+### Mar 12, 2026 Dashboard Changes
+- **COMMS click fix**: Scoreboard COMMS click → Inbox filtered by rep (was broken — passed rep as search text). Backend enriches threads with `rep` from shipments JOIN, frontend passes `&rep=` param
+- **Port group pills**: Lane Search — 12 port buttons (teal) + 6 rail buttons (purple) above search, click sets origin
+- **History tab**: Rate IQ "History" tab — lazy-loads from `/api/rate-history`, groups applied rates by port group
+- **Directory port filter**: `<select>` dropdown filters carriers by port group membership
+- **Inbox rep chip**: Blue "Radka's Inbox ×" chip when filtered, `inboxInitialRep` added to Zustand store
 
 ### Rep Scoreboard v2 — Mar 12, 2026
 - **Backend**: `GET /api/rep-scoreboard` — 7 SQL queries computing per-rep metrics, polls every 2 min
@@ -78,54 +89,13 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Deferred**: WIN RATE (only 83 rate_quotes, 1 accepted — too sparse), carrier assignment speed + on-time delivery (needs delivered_at TIMESTAMPTZ migration), Account Health view (same data grouped by account — next build)
 - **Data gaps**: REV shows "--" until customer_rate populates via rate extraction pipeline. LOADS had migration batch issue (610 loads on Mar 6) — excluded via `created_at > '2026-03-07'` guard that becomes no-op naturally
 
-### Carrier Intelligence Suite — Mar 11, 2026
-- **Carrier Directory tab** in Rate IQ: searchable/filterable carrier cards with capability pills (HAZ, OWT, Reefer, Bonded, OOG, WHS), tier badges, market chips, truck counts. Expanded detail shows contact info, equipment, insurance, service feedback/notes/record/comments
-- **Carrier Directory inline editing**: ✏️ pencil toggle per card → capability pills become toggleable (click to on/off), tier rank becomes dropdown, all detail fields become save-on-blur inputs. `PUT /api/carriers/{id}` handles updates
-- **Lane Search tab** in Rate IQ: origin/dest search with grouped results by lane. Expanded view shows carrier table with all accessorial columns (dray, FSC, total, chassis, prepull, storage, detention, chassis split, overweight, tolls, hazmat, triaxle, reefer, bond)
-- **Lane Search inline editing**: click any rate cell → number input with teal border → save on blur/Enter, Escape cancels. `PUT /api/lane-rates/{id}` endpoint (new) with auto-recalculate total if dray_rate/fsc change
-- **Lane Search carrier enhancements**: capability emoji badges (🔥⚖❄🔒📦🏭), tier dot indicators, MC# from carrierCapMap cross-reference, date stamps ("today"/"3d"/"2w"/"3mo" with color aging), "Draft Load →" hover button opens Ask AI
-- **Carrier schema expansion**: `can_reefer`, `can_bonded`, `can_oog`, `can_warehousing`, `tier_rank`, `service_feedback`, `service_notes`, `service_record`, `comments`, `markets[]`, `haz_classes[]`, `dnu`, `trucks`, `insurance_info` columns added to `carriers` table
-- **Carrier Sheet import**: `import_carrier_sheet.py` (openpyxl) reads 35 tabs from `Carrier Sheet.xlsx`, UPSERT on MC#, merges markets array, maps Yes/No → booleans, tier strings → integers
-- **Rate Quote Sheet import**: `import_rate_quotes_sheet.py` reads 40 city-market tabs, imports dray rates + all accessorial columns to `lane_rates` table
-- **Document dedup**: SHA-256 `file_hash` column + UNIQUE constraint on `load_documents`, backfill script, inbox scanner + upload endpoint hash-check guard. Expanded junk filename patterns (image.png, Outlook-*.jpg)
-- **Macropoint→Billing bridge**: Webhook "Delivered" auto-transitions to `ready_to_close` after 60s delay via BackgroundTask
-- **Loadboard rename**: "Dispatch" labels → "Loadboard" in OverviewView stat cards and DispatchView header
-- **BOL systemd service**: `/etc/systemd/system/bol-webapp.service` created and enabled
-
-### Ask AI — Command Palette — Mar 11, 2026
-- **Backend**: `ai_assistant.py` module — Claude Sonnet 4.6 tool-calling with **23 tools** across 4 tiers. Up to 5 tool iterations, 2048 max response tokens. Backup: `ai_assistant.py.pre-tools-v2`
-- **Tier 1** (original): query_lane_history, query_carrier_db, check_efj_status, extract_rate_con, draft_new_load + quote_lookup, carrier_capability_check, available_capacity, eta_delay_check, recent_emails, suggest_carrier
-- **Tier 2** "Stop Asking Me": unit_converter, shipment_summary, detention_calculator, accessorial_estimator, billing_checklist
-- **Tier 3** "Make Me Look Smart": load_comparison, account_health_report, transit_time_estimator, explain_like_a_customer, what_if_scenario
-- **Tier 4** "Outside the Box": daily_briefing, smart_dispatch_suggest
-- **Endpoint**: `POST /api/ask-ai` in app.py — accepts `{ question, context }`, returns `{ answer, tool_calls, sources }`
-- **Frontend**: `AskAIOverlay` component — center-screen chat overlay (z-index 310), triggered by Ctrl+K or "Ask AI ⌘K" button. Quick-action chips, markdown rendering (tables, bold, lists, headers), tool call purple badges, session history
-- **Keyboard shortcuts**: Ctrl+K → Ask AI, Ctrl+F → shipment search CommandPalette
-- **Anthropic API key**: stored in `/root/csl-bot/.env` as `ANTHROPIC_API_KEY`, `pip install anthropic --break-system-packages`
-
-### Overview Enhancements — Mar 11, 2026
-- **+ New Load button**: Top-right of Overview header, calls `onAddLoad` to open AddForm modal
-- **Billing Pipeline section**: Visual pipeline below Today's Actions/Live Alerts. Shows color-coded stage cards (Delivered → Ready to Close → Missing Invoice → PPWK Needed → Waiting) with counts and arrow separators. "View Billing →" link. `billingCounts` useMemo computes from shipments array. Conditional render when `billingCounts.total > 0`
-- **STATUS_MAP underscore fix**: Added all PG underscore-format status variants (`ready_to_close`, `missing_invoice`, `billed_closed`, `ppwk_needed`, `in_transit`, `at_port`, `on_vessel`, `returned_to_port`, `empty_return`, etc.) so `normalizeStatus()` maps them correctly instead of falling through to "pending"
-
-### Team Feedback Session Fixes — Mar 11, 2026
-- **Dispatch nav removed**: Removed from `NAV_ITEMS` sidebar. DispatchView still accessible via Overview stat card clicks (Active, Today, Yesterday, etc.)
-- **Yesterday filter**: `isDateYesterday()` helper + filter clause in `filtered` useMemo + purple "YESTERDAY" stat card on Overview + "Yesterday's Activity" chip label
-- **Back button**: `← Overview` button in DispatchView header, resets all filters on click
-- **Overview layout reorder**: Team + Account Overview grid now renders ABOVE Today's Actions + Live Alerts (swapped the two grid rows)
-- **Boviet STATUS_MAP**: Added `"ready to close": "ready_to_close"` and `"completed": "delivered"` mappings
-- **Inbox density**: Default fetch reduced 7→3 days, actioned threads hidden by default, toggle buttons for both settings
-- **Status save fix**: See "Status Writeback Fix" in Bot Changes above
-
-### Financials + Margin Guard — Mar 11, 2026
-- `carrier_pay NUMERIC(10,2)` added; Financials section in both LoadSlideOvers; `calcMarginPct()` + red row bg when margin < 10%
-
-### pg_dump Backup + Auto-Token + Reply Button + Top Lanes + Public Tracking — Mar 11, 2026
-- **pg_dump**: Daily backup at 3AM, 14-day retention, `/root/backups/`
-- **Auto-token**: `csl_pg_writer.py` auto-inserts `public_tracking_tokens` on new load creation
-- **Reply button**: `↩ Reply` in InboxView + `Reply-To` header on outbound emails via `_get_reply_to(account)`
-- **Top Lanes**: `GET /api/lane-stats` + Rate IQ "Top Lanes" tab
-- **Public tracking**: `GET /track/{token}` standalone Jinja2 page, `POST /api/shipments/{efj}/generate-token`, Share Link button in LoadSlideOver
+### Mar 11, 2026 Dashboard Changes (condensed)
+- **Carrier Intelligence Suite**: Directory tab (cards + inline editing + capability pills), Lane Search (grouped results, inline rate editing, carrier enhancements), schema expansion (12 new columns), Sheet imports (35 carrier tabs, 40 rate tabs), doc dedup (SHA-256), MP→billing bridge, Loadboard rename, BOL systemd
+- **Ask AI Command Palette**: `ai_assistant.py` — Claude Sonnet 4.6, 23 tools across 4 tiers, `POST /api/ask-ai`, `AskAIOverlay` component (Ctrl+K), quick-action chips, markdown rendering
+- **Overview**: + New Load button, Billing Pipeline section (stage cards with counts), STATUS_MAP underscore fix
+- **Team Feedback Fixes**: Dispatch nav removed (accessible via stat cards), Yesterday filter + stat card, ← Overview back button, layout reorder (Team above Actions), Boviet STATUS_MAP, inbox density reduction
+- **Financials + Margin Guard**: `carrier_pay` column, Financials section in LoadSlideOvers, `calcMarginPct()`, red row bg <10%
+- **pg_dump + Tracking + Reply**: Daily backup, auto-token, Reply button in Inbox, Top Lanes tab, Public tracking portal (`/track/{token}`)
 
 ### Mar 10, 2026 (condensed)
 - Magic Parse modal + `POST /api/quick-parse` (Claude Sonnet 4.6). Terminal Ground Truth panel (red/blue cards). Quote Extractor v2 (hub normalization + LoadMatch). Archive routing fix (atomic rep lookup). Tolead MP URL + ghost cleanup. Daily summary `_is_this_week()` date filter. Date normalizer gate in pg_update_shipment(). See topic files for details.
@@ -165,7 +135,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 ### Large Items
 - **Tolead/Boviet full PG migration**: Resolved as non-issue — data originates from client sheets. Sync guard + write-back deployed instead (see above). ORD/JFK/DFW remain client-shared (no write-back).
 - **Customer Tracking Portal**: ✅ DONE
-- **Inbox polish**: ✅ Reply button + density reduction done. Thread detail assign/correction UI still unbuilt
+- **Inbox polish**: ✅ Reply button + density + rep filter done. Thread detail assign/correction UI still unbuilt
 - **Margin Guard**: ✅ DONE — deployed Mar 11. **Margin Bridge** deployed Mar 11
 - **Rep Scoreboard**: ✅ DONE — v2 deployed Mar 12. LOADS/REV/COMMS/DOCS/STALE. Deferred: WIN RATE (sparse data), Account Health view (next build), delivered_at TIMESTAMPTZ migration
 - **Account Health View**: NOT STARTED — same scoreboard data grouped by account instead of rep. Needed for strategic review (margin-to-friction ratio per customer)
