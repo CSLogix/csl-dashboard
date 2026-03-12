@@ -125,11 +125,20 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **BOL systemd service**: `/etc/systemd/system/bol-webapp.service` created and enabled
 
 ### Ask AI — Command Palette — Mar 11, 2026
-- **Backend**: `ai_assistant.py` module — Claude Sonnet 4.6 tool-calling with **11 tools** (5 original + 6 Tier 1). Up to 4 tool iterations per query. See [ai-tools-roadmap.md](ai-tools-roadmap.md) for full list + 14 more planned
+- **Backend**: `ai_assistant.py` module — Claude Sonnet 4.6 tool-calling with **23 tools** across 4 tiers. Up to 5 tool iterations, 2048 max response tokens. Backup: `ai_assistant.py.pre-tools-v2`
+- **Tier 1** (original): query_lane_history, query_carrier_db, check_efj_status, extract_rate_con, draft_new_load + quote_lookup, carrier_capability_check, available_capacity, eta_delay_check, recent_emails, suggest_carrier
+- **Tier 2** "Stop Asking Me": unit_converter, shipment_summary, detention_calculator, accessorial_estimator, billing_checklist
+- **Tier 3** "Make Me Look Smart": load_comparison, account_health_report, transit_time_estimator, explain_like_a_customer, what_if_scenario
+- **Tier 4** "Outside the Box": daily_briefing, smart_dispatch_suggest
 - **Endpoint**: `POST /api/ask-ai` in app.py — accepts `{ question, context }`, returns `{ answer, tool_calls, sources }`
 - **Frontend**: `AskAIOverlay` component — center-screen chat overlay (z-index 310), triggered by Ctrl+K or "Ask AI ⌘K" button. Quick-action chips, markdown rendering (tables, bold, lists, headers), tool call purple badges, session history
 - **Keyboard shortcuts**: Ctrl+K → Ask AI, Ctrl+F → shipment search CommandPalette
 - **Anthropic API key**: stored in `/root/csl-bot/.env` as `ANTHROPIC_API_KEY`, `pip install anthropic --break-system-packages`
+
+### Overview Enhancements — Mar 11, 2026
+- **+ New Load button**: Top-right of Overview header, calls `onAddLoad` to open AddForm modal
+- **Billing Pipeline section**: Visual pipeline below Today's Actions/Live Alerts. Shows color-coded stage cards (Delivered → Ready to Close → Missing Invoice → PPWK Needed → Waiting) with counts and arrow separators. "View Billing →" link. `billingCounts` useMemo computes from shipments array. Conditional render when `billingCounts.total > 0`
+- **STATUS_MAP underscore fix**: Added all PG underscore-format status variants (`ready_to_close`, `missing_invoice`, `billed_closed`, `ppwk_needed`, `in_transit`, `at_port`, `on_vessel`, `returned_to_port`, `empty_return`, etc.) so `normalizeStatus()` maps them correctly instead of falling through to "pending"
 
 ### Team Feedback Session Fixes — Mar 11, 2026
 - **Dispatch nav removed**: Removed from `NAV_ITEMS` sidebar. DispatchView still accessible via Overview stat card clicks (Active, Today, Yesterday, etc.)

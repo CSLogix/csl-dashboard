@@ -70,3 +70,9 @@
 | `boviet_invoice_writer.py` | New script: Fills Boviet Piedra Invoice tab — MP stop times→G/I/L/N + detention calc→J/O. PM heuristic for bare time strings. Cron: every 2 hrs 6AM-8PM Mon-Fri |
 | `patch_status_writeback.py` | app.py: Add BackgroundTasks + _write_fields_to_master_sheet() to v2 status endpoint for non-shared accounts (fixes status revert bug) |
 | `patch_daily_report_html.py` | dray_daily_summary.py: Fix Outlook email HTML — rgba→solid borders, div→table wrapper, cellpadding/cellspacing, font-family |
+| `patch_ai_tools_v2.py` | ai_assistant.py: 12 new Ask AI tools (Tier 2-4), MAX_TOOL_ITERATIONS 4→5, MAX_RESPONSE_TOKENS 1024→2048, _clean_efj() helper |
+| `patch_margin_bridge.py` | app.py: customer_rate/carrier_pay serialization + rate-quotes/apply-rate endpoints + auto-reject competing quotes |
+| `patch_ai_extraction_v2.py` | csl_inbox_scanner.py: Expanded body window, improved prompts, linehaul/accessorials/confidence fields |
+| `patch_noreply_fix.py` | csl_inbox_scanner.py: Fix unreplied email alerts — self-filter, EFJ dedup, 4hr cap, lane fallback |
+| `patch_alert_subject.py` | csl_ftl_alerts.py: "FTL Alert"→"CSL Tracking" email subject rename |
+| `patch_archive_distance_guard.py` | ftl_monitor.py + app.py: Block false D1 archive when distance_to_stop > 15mi |
