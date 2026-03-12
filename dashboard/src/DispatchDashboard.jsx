@@ -2182,8 +2182,8 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
           {/* Column headers — Offense | Defense divider */}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(110px, 1fr) 44px 58px 1px 56px 40px 40px", gap: 2, marginBottom: 6, padding: "0 10px", alignItems: "center" }}>
             <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Rep</div>
-            <div style={{ fontSize: 9, color: "#3B82F6", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Loads booked (7d rolling)">Loads</div>
-            <div style={{ fontSize: 9, color: "#3B82F6", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Revenue booked (7d rolling)">Rev</div>
+            <div style={{ fontSize: 9, color: "#3B82F6", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active loads (not archived)">Loads</div>
+            <div style={{ fontSize: 9, color: "#3B82F6", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active revenue (all priced loads)">Rev</div>
             <div style={{ background: "rgba(255,255,255,0.06)", height: 20 }} />
             <div style={{ fontSize: 9, color: "#F59E0B", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Unreplied threads + avg response speed">Comms</div>
             <div style={{ fontSize: 9, color: "#F59E0B", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Delivered loads missing POD or carrier invoice">Docs</div>
@@ -2264,7 +2264,7 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
                   </div>
 
                   {/* REVENUE (offense) */}
-                  <div style={{ textAlign: "center" }} title={revenueLoads > 0 ? `From ${revenueLoads} priced loads` : "No priced loads in 7d"}>
+                  <div style={{ textAlign: "center" }} title={revenueLoads > 0 ? `$${Math.round(score.total_margin || 0).toLocaleString()} margin from ${revenueLoads} priced loads` : "No priced loads"}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: revColor, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.2 }}>
                       {formatRev(revenue7d)}
                     </div>
@@ -4547,6 +4547,10 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
   const [rateApplied, setRateApplied] = useState(false);
   const [rateDismissed, setRateDismissed] = useState(false);
 
+  // Macropoint URL edit state
+  const [editingMpUrl, setEditingMpUrl] = useState(false);
+  const [mpUrlVal, setMpUrlVal] = useState("");
+
   // Fetch tracking + documents + driver info when slide-over opens
   useEffect(() => {
     if (!selectedShipment) {
@@ -4862,6 +4866,9 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
               { icon: "📍", label: "Tracking", color: "#3B82F6",
                 onClick: () => { const url = trackingData?.macropointUrl || driverInfo.macropointUrl || selectedShipment.macropointUrl; if (url) window.open(url, '_blank'); },
                 enabled: !!(trackingData?.macropointUrl || driverInfo.macropointUrl || selectedShipment.macropointUrl) },
+              { icon: "✏️", label: editingMpUrl ? "Cancel" : "Edit MP URL", color: "#8B5CF6",
+                onClick: () => { if (editingMpUrl) { setEditingMpUrl(false); } else { setMpUrlVal(driverInfo.macropointUrl || selectedShipment.macropointUrl || ""); setEditingMpUrl(true); } },
+                enabled: true },
               { icon: "📄", label: "BOL", color: "rgba(255,255,255,0.5)",
                 onClick: () => { const bol = loadDocs.find(d => d.doc_type === 'bol'); if (bol) setPreviewDoc(bol); },
                 enabled: loadDocs.some(d => d.doc_type === 'bol') },
@@ -4881,6 +4888,18 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
               >{btn.icon} {btn.label}</button>
             ))}
           </div>
+
+          {/* MP URL Edit — inline input */}
+          {editingMpUrl && (
+            <div style={{ padding: "8px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", gap: 6, alignItems: "center" }}>
+              <input value={mpUrlVal} onChange={e => setMpUrlVal(e.target.value)} placeholder="https://visibility.macropoint.com/..."
+                style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 6, padding: "6px 10px", color: "#F0F2F5", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none" }}
+                onKeyDown={e => { if (e.key === "Enter") { saveDriverField("macropointUrl", mpUrlVal); setEditingMpUrl(false); } if (e.key === "Escape") setEditingMpUrl(false); }}
+                autoFocus />
+              <button onClick={() => { saveDriverField("macropointUrl", mpUrlVal); setEditingMpUrl(false); }}
+                style={{ background: "#8B5CF6", border: "none", borderRadius: 6, padding: "6px 12px", color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Save</button>
+            </div>
+          )}
 
           {/* AI Summary — inline section */}
           {(aiSummary || aiSummaryLoading) && (
