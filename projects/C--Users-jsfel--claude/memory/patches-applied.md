@@ -83,3 +83,6 @@
 | `patch_inbox_rep_filter.py` | app.py: Enrich /api/inbox threads with rep from shipments JOIN, fix rep_filter |
 | `patch_port_groups.py` | app.py: /api/port-groups + /api/rate-history + search-lane port group expansion + apply-rate→lane_rates |
 | `port_groups.py` | New module: 18 port/rail group dictionary + normalize_to_port_group() + reverse lookup |
+| `patch_rev_window.py` | app.py: Expand REV scoreboard to all active loads (remove 7d filter) + total_margin in response |
+| `patch_inbox_actions.py` | app.py: manual_rep + actioned columns on email_threads + PATCH assign-rep + mark-actioned endpoints |
+| `patch_customer_rate_extraction.py` | csl_inbox_scanner.py: extract_rate_from_email handles customer_rate + rate_type field + rate_quotes column |

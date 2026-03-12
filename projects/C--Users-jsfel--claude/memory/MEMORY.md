@@ -8,13 +8,13 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [rateiq.md](rateiq.md) — Dray IQ, FTL IQ, OOG IQ, Scorecard, Directory
 - [inbox-command-center.md](inbox-command-center.md) — thread grouping, reply detection, classification
 - [macropoint-integration.md](macropoint-integration.md) — webhook flow, tracking events, GPS inference, timeline
-- [patches-applied.md](patches-applied.md) — full list (70 patches)
+- [patches-applied.md](patches-applied.md) — full list (88 patches)
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
 
 ## Git — Mar 12, 2026
-- **Latest**: Mar 12 — Port groups + revenue backfill + COMMS fix + History tab
+- **Latest**: Mar 12 — Mobile layout + margin column + inbox actions + Boviet cards + MP URL edit
 - **Repo**: `CSLogix/CSLogix_Bot` (private), single `master` branch
 - **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
@@ -57,6 +57,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Port groups**: `port_groups.py` (new module) — 18 port/rail groups (LA/LB, NY/NJ, Savannah, Chicago Rail, etc.) + `normalize_to_port_group()`
 - **Port groups API**: `patch_port_groups.py` — `/api/port-groups`, `/api/rate-history` endpoints, search-lane port group expansion, apply-rate→lane_rates INSERT
 - **ACCOUNT_REPS**: Added Prolog, Talatrans, LS Cargo (→Radka), GW-World (→John F) to `csl_bot.py`
+- **REV window expansion**: `patch_rev_window.py` — scoreboard loads/revenue queries use `archived = false` instead of 7-day rolling filter + `total_margin` in response
+- **Inbox actions**: `patch_inbox_actions.py` — `manual_rep` + `actioned` columns on email_threads, 2 new PATCH endpoints (assign-rep, mark-actioned), needs_reply filters actioned threads
+- **Customer rate extraction**: `patch_customer_rate_extraction.py` — `extract_rate_from_email()` now handles `customer_rate` emails, adds `rate_type` field, `rate_quotes.rate_type` column
 
 ### Mar 11, 2026 Bot Changes (condensed)
 - **Margin Bridge**: `patch_margin_bridge.py` — customer_rate/carrier_pay serialization, rate-quotes/apply-rate endpoints, auto-reject competing quotes. AI extraction v2 (expanded body window, linehaul/accessorials fields). Rate suggestion banner in LoadSlideOver.
@@ -75,6 +78,14 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **History tab**: Rate IQ "History" tab — lazy-loads from `/api/rate-history`, groups applied rates by port group
 - **Directory port filter**: `<select>` dropdown filters carriers by port group membership
 - **Inbox rep chip**: Blue "Radka's Inbox ×" chip when filtered, `inboxInitialRep` added to Zustand store
+- **MGN column**: Dispatch table margin column with color coding (red <0, orange <10%, green ≥10%) + sortable via `calcMarginPct()`
+- **Margin summary bar**: Billing Pipeline section shows total rev/cost/margin/avg margin % across all priced active loads
+- **MP URL edit**: LoadSlideOver Quick Action Strip "Edit MP URL" button with inline input + PATCH to `/api/load/{efj}/mp-url`
+- **Inbox thread actions**: Rep assignment `<select>` dropdown + "Mark Actioned" button per thread, ACTIONED badge, actioned threads hidden from needs_reply
+- **Boviet Project Cards**: RepDashboardView per-project summary cards (Piedra/Hanson) — active/delivered/pending counts, pickups today, carrier count, last delivery
+- **Customer Rate Banner**: LoadSlideOver Financials section shows pending customer rate suggestion with Apply/Reject buttons
+- **Mobile layout (Phase 5)**: `useIsMobile()` hook (768px breakpoint), bottom nav bar (Home/Inbox/Rates/Billing/More), full-width slide-overs, card view for dispatch table, horizontal scroll stat cards with snap, CSS media queries
+- **Scoreboard tooltips**: Updated from "7d rolling" to "Active loads" / "Active revenue" + margin tooltip
 
 ### Rep Scoreboard v2 — Mar 12, 2026
 - **Backend**: `GET /api/rep-scoreboard` — 7 SQL queries computing per-rep metrics, polls every 2 min
@@ -87,7 +98,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
   - **Clickable cells**: COMMS → Inbox filtered by rep, DOCS → Rep Dashboard, STALE → Dispatch filtered by rep
 - **DB pattern**: Uses `database._pool.getconn()` directly (not context manager) for multi-query read-only endpoint
 - **Deferred**: WIN RATE (only 83 rate_quotes, 1 accepted — too sparse), carrier assignment speed + on-time delivery (needs delivered_at TIMESTAMPTZ migration), Account Health view (same data grouped by account — next build)
-- **Data gaps**: REV shows "--" until customer_rate populates via rate extraction pipeline. LOADS had migration batch issue (610 loads on Mar 6) — excluded via `created_at > '2026-03-07'` guard that becomes no-op naturally
+- **Data gaps**: REV shows "--" until customer_rate populates via rate extraction pipeline. LOADS/REV now use `archived = false` (removed 7d rolling + migration batch guard). `total_margin` added to response
 
 ### Mar 11, 2026 Dashboard Changes (condensed)
 - **Carrier Intelligence Suite**: Directory tab (cards + inline editing + capability pills), Lane Search (grouped results, inline rate editing, carrier enhancements), schema expansion (12 new columns), Sheet imports (35 carrier tabs, 40 rate tabs), doc dedup (SHA-256), MP→billing bridge, Loadboard rename, BOL systemd
@@ -135,9 +146,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 ### Large Items
 - **Tolead/Boviet full PG migration**: Resolved as non-issue — data originates from client sheets. Sync guard + write-back deployed instead (see above). ORD/JFK/DFW remain client-shared (no write-back).
 - **Customer Tracking Portal**: ✅ DONE
-- **Inbox polish**: ✅ Reply button + density + rep filter done. Thread detail assign/correction UI still unbuilt
-- **Margin Guard**: ✅ DONE — deployed Mar 11. **Margin Bridge** deployed Mar 11
-- **Rep Scoreboard**: ✅ DONE — v2 deployed Mar 12. LOADS/REV/COMMS/DOCS/STALE. Deferred: WIN RATE (sparse data), Account Health view (next build), delivered_at TIMESTAMPTZ migration
+- **Inbox polish**: ✅ DONE — Reply button, density, rep filter, assign-rep dropdown, mark-actioned button all deployed
+- **Margin Guard**: ✅ DONE — deployed Mar 11. **Margin Bridge** deployed Mar 11. **MGN column** + margin summary bar deployed Mar 12
+- **Rep Scoreboard**: ✅ DONE — v2 deployed Mar 12. REV window expanded to all active loads (not 7d). Deferred: WIN RATE (sparse data), Account Health view (next build), delivered_at TIMESTAMPTZ migration
 - **Account Health View**: NOT STARTED — same scoreboard data grouped by account instead of rep. Needed for strategic review (margin-to-friction ratio per customer)
 
 ### Rate IQ
@@ -147,9 +158,10 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ### Other
 - Tolead/Boviet slide-over fields (driver phone, delivery date, appt_id)
-- Phase 3: Boviet Project Cards (not started)
-- Phase 5: Mobile App Layout (not started)
+- Phase 3: Boviet Project Cards — ✅ DONE (deployed Mar 12, per-project summary in RepDashboardView)
+- Phase 5: Mobile App Layout — ✅ DONE (deployed Mar 12, bottom nav + card views + full-width panels)
 - Warehouse extract: `POST /api/warehouses/extract` handler
+- Customer rate extraction pipeline deployed (scanner handles customer_rate emails → rate_quotes with rate_type)
 
 ## Documents Created
 - **CSLogix Workflow Guide** (`Desktop/CSLogix_Work_flow_v2.pptx`): 8-slide dark-theme PPTX for Janice (JC), billing coordinator. Added Column Filters tip bar to slide 5 (Dispatch View) + split slide 7 (Inbox) bottom row into Unbilled Orders / Live Alerts 2×2 grid. XML-edited via unpack/pack workflow.
