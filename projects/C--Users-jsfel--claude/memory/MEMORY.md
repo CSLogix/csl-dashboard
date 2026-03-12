@@ -11,9 +11,10 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [patches-applied.md](patches-applied.md) — full list (67 patches)
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
+- [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
 
 ## Git — Mar 11, 2026
-- **Latest `ee1488a`** (Mar 11): Margin bridge + unbilled digest + team feedback fixes
+- **Latest `8e1419c`** (Mar 11): Margin bridge + AI extraction v2 + archive distance guard
 - **Repo**: `CSLogix/CSLogix_Bot` (private), single `master` branch
 - **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
@@ -69,6 +70,14 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Frontend**: Rate suggestion banner in both LoadSlideOver Financials sections (main + rep). Shows carrier name + amount with "✓ Apply" button. Auto-hides when carrier_pay already populated.
 - **Pipeline**: Email classified → AI extracts rate → `rate_quotes` INSERT → banner appears in slide-over → rep clicks Apply → `shipments.carrier_pay` updated → Margin Guard activates
 
+### Archive Distance Guard — FTL False-Positive Prevention — Mar 11, 2026
+- **Problem**: Macropoint fired a D1 (Delivered) event for `LAX1260309020` (EFJ107436) while truck was still at pickup in Vernon CA. FTL monitor archived the load immediately → disappeared from Dispatch. Root cause: MP auto-closed the original shipment; Tolead had created `-02` and `-1` re-tracks but original's D1 event matched the cache entry via suffix-stripping logic.
+- **`patch_archive_distance_guard.py`** applied to `ftl_monitor.py` + `app.py`:
+  - **FTL monitor**: Before calling `archive_ftl_row_pg()`, checks `distance_to_stop` from cache. If > 15 miles, blocks archive + logs warning instead.
+  - **Webhook D1 handler**: If D1 event arrives and `distance_to_stop > 15`, demotes status to `"Arrived at Delivery"` before writing to cache — prevents false status from propagating to next poll.
+- **Cache fixed**: EFJ107436 status reset `Delivered → In Transit`, URL updated to active `-1` tracking link, bogus `stop2_arrived/stop2_departed` cleared.
+- **What rep could do**: Nothing from dashboard currently — no "re-link MP URL" UI. Future: add update tracking link field to LoadSlideOver.
+
 ### Unbilled Weekly Digest — Mar 11, 2026
 - `unbilled_weekly_digest.py`: Outlook-safe HTML email to Janice (billing) with summary cards (total/avg age/new/cleared), aging buckets (0-7/8-14/15-30/30+), ⚠ approaching-30-day warning table, and customer breakdown with color-coded bucket counts
 - Cron: Monday 7:15 AM ET → `Janice.Cortes@evansdelivery.com` (cc: efj-operations)
@@ -116,7 +125,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **BOL systemd service**: `/etc/systemd/system/bol-webapp.service` created and enabled
 
 ### Ask AI — Command Palette — Mar 11, 2026
-- **Backend**: `ai_assistant.py` module — Claude Sonnet 4.6 tool-calling with 5 tools: `query_lane_history`, `query_carrier_db`, `check_efj_status`, `extract_rate_con`, `draft_new_load`. Each tool queries PG directly. Up to 3 tool iterations per query
+- **Backend**: `ai_assistant.py` module — Claude Sonnet 4.6 tool-calling with **11 tools** (5 original + 6 Tier 1). Up to 4 tool iterations per query. See [ai-tools-roadmap.md](ai-tools-roadmap.md) for full list + 14 more planned
 - **Endpoint**: `POST /api/ask-ai` in app.py — accepts `{ question, context }`, returns `{ answer, tool_calls, sources }`
 - **Frontend**: `AskAIOverlay` component — center-screen chat overlay (z-index 310), triggered by Ctrl+K or "Ask AI ⌘K" button. Quick-action chips, markdown rendering (tables, bold, lists, headers), tool call purple badges, session history
 - **Keyboard shortcuts**: Ctrl+K → Ask AI, Ctrl+F → shipment search CommandPalette
