@@ -51,6 +51,14 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 ## Recent Bot Changes (Deployed)
 
 ### Mar 12, 2026 Bot Changes
+- **FTL Monitor crash fix**: `archive_ftl_row_pg()` missing `stop_times` kwarg — FTL loads couldn't archive. Added parameter. **CRITICAL fix.**
+- **Ghost load prevention**: EFJ prefix guard in `csl_sheet_sync.py` — if Tolead efj column has container# (not `EFJ` prefix), treats as load_id to prevent ghost rows. Cleaned 4 ghosts (LAX1260309008 + 3 ORD).
+- **Stale load archive**: Archived 65 Delivered + Billed & Closed loads stuck as active. 10 "Ready to Close" left for billing pipeline.
+- **CSL Tracking email subject**: Now includes EFJ# — `CSL Tracking — Account — EFJ107xxx | LoadID — Status`
+- **Junk doc cleanup**: Deleted 69 embedded email images (image027.png etc.) misclassified as carrier_invoice. No new ones since Mar 6 (junk filter works).
+- **Container Update emails DISABLED**: `send_account_notification()` early-returns with log. Team no longer wants per-account container change emails.
+- **CC dedup fix**: `_send_email()` in csl_bot.py deduplicates CC addresses before sending (was sending "EFJ - J Feltz" x3).
+- **Payment Alert batching**: Converted per-load instant PAYMENT ALERT emails → single batched digest per rep. `_payment_alert_queue` collects during scan, `_flush_payment_alerts()` sends one table email at end.
 - **Sheet sync cron fix**: Was pointing to wrong file (`csl-doc-tracker/csl_sheet_sync.py` 19KB → `/root/csl-bot/csl_sheet_sync.py` 33KB). Prolog, MD Metal, Talatrans now sync.
 - **Revenue backfill**: `patch_revenue_backfill.py` — XLS commission report → PG `customer_rate` (596 shipments, $12M total via xlrd)
 - **Inbox rep filter**: `patch_inbox_rep_filter.py` — enriches `/api/inbox` threads with `rep` from shipments table JOIN, fixes `rep_filter`
@@ -73,6 +81,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 ## Recent Dashboard Changes (Deployed)
 
 ### Mar 12, 2026 Dashboard Changes
+- **Packing List doc type**: Added `packing_list` to DOC_TYPES_ADD, DOC_TYPE_LABELS, both reclassify dropdowns, both upload dropdowns, icon mapping (📦). Frontend + backend.
 - **COMMS click fix**: Scoreboard COMMS click → Inbox filtered by rep (was broken — passed rep as search text). Backend enriches threads with `rep` from shipments JOIN, frontend passes `&rep=` param
 - **Port group pills**: Lane Search — 12 port buttons (teal) + 6 rail buttons (purple) above search, click sets origin
 - **History tab**: Rate IQ "History" tab — lazy-loads from `/api/rate-history`, groups applied rates by port group
@@ -162,6 +171,21 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - Phase 5: Mobile App Layout — ✅ DONE (deployed Mar 12, bottom nav + card views + full-width panels)
 - Warehouse extract: `POST /api/warehouses/extract` handler
 - Customer rate extraction pipeline deployed (scanner handles customer_rate emails → rate_quotes with rate_type)
+
+### Radka Feedback Items (from Daily Agenda doc, Mar 12)
+- **Inbox "click does nothing"**: Thread detail panel opens on right (480px, z-index 35) — works but may not be obvious. Consider visual feedback or auto-scroll.
+- ✅ **"Don't need updates by account"**: FIXED — Container Update emails disabled in `send_account_notification()`. Changes still logged to console + visible in dashboard.
+- ✅ **"Emails CC'ing me multiple times"**: FIXED — CC dedup added to `_send_email()`. Payment alerts batched into single digest per rep.
+- **"No links in emails to team"**: Bot sends hyperlinks to tracking sites. Clarify if they want those removed.
+- **Rate IQ "not uploading properly"**: Endpoint exists, code looks correct. Need specific error/screenshot.
+- **Cadi load to Laredo workflow**: Needs clarification on what to do differently.
+- **BOL generator**: Service running (200 OK). Needs end-to-end test.
+
+## Health Check Baseline — Mar 12, 2026
+- **Server**: 6% disk (184G free), 2.3G/15G RAM, load 0.44, 8 days uptime
+- **DB**: 844 shipments (231→~166 active after archive), 904→835 docs, 2,344 emails, 92 rate quotes, 307 unbilled
+- **Status distribution after cleanup**: 27 distinct statuses → normalized to standard set (Title Case)
+- **Ghost prevention**: EFJ prefix guard deployed in sheet sync. Tolead container numbers no longer create ghost EFJ rows.
 
 ## Documents Created
 - **CSLogix Workflow Guide** (`Desktop/CSLogix_Work_flow_v2.pptx`): 8-slide dark-theme PPTX for Janice (JC), billing coordinator. Added Column Filters tip bar to slide 5 (Dispatch View) + split slide 7 (Inbox) bottom row into Unbilled Orders / Live Alerts 2×2 grid. XML-edited via unpack/pack workflow.
