@@ -87,6 +87,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 ## Recent Dashboard Changes (Deployed)
 
 ### Mar 12, 2026 Dashboard Changes (late)
+- **NEEDS REPLY → Load Indexing**: Clicking a thread in the NEEDS REPLY dropdown now opens the load's slide-over with emails auto-expanded + smooth-scrolled into view, AND pulse-highlights the matching row in the dispatch table (3s teal fade-out). `expandEmailsOnOpen` + `highlightedEfj` Zustand state, `handleLoadClick(s, { expandEmails, highlight })` opts pattern, `emailsSectionRef` + `useEffect` scroll, highlight applied across all 5 row render sites (RepDash dray/ops/FTL, DispatchView desktop, mobile cards).
 - **DispatchView crash fix**: `filteredShips` → `filtered` in mobile card view (line 6173). Wrong variable name caused error boundary crash on any navigation.
 - **Drag email → Ask AI**: Inbox rows are `draggable="true"`. Drag any thread onto the "Ask AI" button in top nav — it glows/scales with "Drop to Summarize" text. On drop, opens AskAIOverlay with pre-filled prompt including full thread context (subject, sender, messages, AI classification). `AskAIOverlay` accepts `initialQuery` + `onConsumeInitialQuery` props, auto-sends on open.
 - **AI Summary card**: Thread detail slide-over now shows `ai_summary` in a teal card at the top of the message list (was in data but never rendered).
