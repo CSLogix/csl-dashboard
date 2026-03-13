@@ -8,7 +8,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [rateiq.md](rateiq.md) — Dray IQ, FTL IQ, OOG IQ, Scorecard, Directory
 - [inbox-command-center.md](inbox-command-center.md) — thread grouping, reply detection, classification
 - [macropoint-integration.md](macropoint-integration.md) — webhook flow, tracking events, GPS inference, timeline
-- [patches-applied.md](patches-applied.md) — full list (99 patches)
+- [patches-applied.md](patches-applied.md) — full list (100+ patches)
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
@@ -50,15 +50,21 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ## Recent Bot Changes (Deployed)
 
+### Mar 13, 2026 Bot Changes (evening)
+- **Session security hardening**: Rotated `.session_secret` key to invalidate all sessions. Fixed fail-open bug in `verify_session_token()` — DB errors now reject sessions instead of allowing them through. Tokens without `user_id` now rejected (blocks pre-migration cookies).
+- **Forced password change**: `/change-password` GET+POST routes added to `routes/auth.py`. Login redirects to change-password when `password_gen <= 1`. Middleware blocks app access until password is set. `admin_reset_password()` bumps `password_gen`, new session token issued after change.
+- **Analytics router fix**: `routes/analytics.py` was not imported/mounted in `app.py` after monolith split — caused 404 on `/api/rep-scoreboard` and `/api/account-health`. Added `analytics` to route imports + `app.include_router(analytics.router)`.
+- **Eli termination**: Deactivated rep. 20 active loads (DSV, EShipping, Kischo, MAO) reassigned to John F in PG. ACCOUNT_REPS already mapped those accounts to John F.
+
 ### Mar 13, 2026 Bot Changes (latest)
-- **Auto-Status Email Drafter**: `routes/email_drafts.py` — new APIRouter. `email_drafts` PG table (id, efj, account, milestone, to/cc_email, subject, body_html, status draft/sent/dismissed, timestamps). `generate_milestone_draft()` called from v2.py on milestone status changes. SMTP send via existing Gmail credentials. DB permissions granted to `csl_admin`.
-- **Ask AI bulk_create_loads fix**: ai_assistant.py system prompt + tool description updated so AI uses `bulk_create_loads` (INSERT into PG) instead of `draft_new_load` (display-only) when user asks to create loads.
+- **Auto-Status Email Drafter**: `routes/email_drafts.py` — new APIRouter. `email_drafts` PG table. `generate_milestone_draft()` called from v2.py on milestone status changes. SMTP send via Gmail credentials.
+- **Ask AI bulk_create_loads fix**: AI uses `bulk_create_loads` (INSERT into PG) instead of `draft_new_load` (display-only).
 
 ### Mar 13, 2026 Bot Changes
-- **Multi-user auth**: PG `users` table (bcrypt), individual logins, session tokens carry user_id/role/rep_name. 7 users: CSLogix-EFJ+nancy (admin), radka/janice/allie/John N/Thirdy (rep). All passwords set to `CSLogixDispatch247`. `/api/me`, `/api/users` CRUD (admin), change-password. Frontend user menu + password modal. Dev key middleware → CSLogix-EFJ (user_id 1).
+- **Multi-user auth**: PG `users` table (bcrypt), individual logins, session tokens carry user_id/role/rep_name. 7 users: CSLogix-EFJ+nancy (admin), radka/janice/allie/John N/Thirdy (rep). `/api/me`, `/api/users` CRUD (admin), change-password. Dev key middleware → CSLogix-EFJ (user_id 1).
 - **Monolith split**: 9,794-line `app.py` → 15 APIRouter modules in `routes/` + `shared.py`. 142 obsolete patch files deleted.
-- **Async cache warming**: `patch_async_cache.py` (#96) — `SheetCache.refresh_if_needed()` returns stale data immediately, background thread refreshes. `/api/shipments` 20s→0.2s worst-case.
-- **Missing endpoints restored**: 6 endpoints lost in monolith split added to `routes/analytics.py` (#97): `/api/rep-scoreboard`, `/api/account-health`, `/api/port-groups`, `/api/rate-history`, `PATCH /api/inbox/{id}/assign-rep`, `PATCH /api/inbox/{id}/mark-actioned`.
+- **Async cache warming**: (#96) — `SheetCache.refresh_if_needed()` returns stale data immediately, background thread refreshes.
+- **Missing endpoints restored**: 6 endpoints lost in monolith split added to `routes/analytics.py` (#97).
 
 ### Mar 12, 2026 Bot Changes (night)
 - **Scanner 5-Tier Matching**: `match_email_to_efj()` upgraded from 2-tier to 5-tier. Was only matching EFJ pattern + searching `email_threads.body_preview` for containers (broken). Now: (1) EFJ pattern, (2) Tolead hub IDs (`LAX1260312023`) → `shipments.container`, (3) Container# (`MSCU1234567`) → `shipments.container`, (4) Bare 6-digit (`107330`) → `shipments.efj` (subject-only), (5) BOL/Booking → `shipments.bol`. Patch: `patch_scanner_matching.py` (#95). Rescue script matched 123/6702 unmatched emails (59 hub, 58 container, 6 BOL).
@@ -99,16 +105,16 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ## Recent Dashboard Changes (Deployed)
 
+### Mar 13, 2026 Dashboard Changes (evening)
+- **Save feedback toast**: LoadSlideOver now shows green "✓ [Field] saved" toast (2.2s) after every successful field/driver/financial save. Red "⚠ Failed to save" on errors. Covers: field edits, metadata (customer rate, carrier pay, notes), driver fields, MP URL. Header sync indicator upgraded from tiny dot to "All changes saved" / "Saving..." with pulse animation.
+
 ### Mar 13, 2026 Dashboard Changes (latest)
-- **Auto-Status Email Drafter** (patch #99): When reps change a load to a milestone status (`picked_up`, `in_transit`, `out_for_delivery`, `delivered`, `empty_return`), backend auto-generates HTML email draft with color-coded header (blue/indigo/orange/green/teal). New `routes/email_drafts.py` APIRouter: `generate_milestone_draft()` builds dark-theme HTML template, inserts into `email_drafts` PG table. 5 endpoints: GET list, GET detail, PATCH edit, POST send (SMTP), POST dismiss. Dedup: skips if draft already exists for same EFJ+milestone. v2.py status endpoint hooks milestone detection, returns `draft_id` in response. Frontend: blue "Drafts (N)" badge in top nav (30s polling), modal with draft list + detail view (editable To/CC/Subject, iframe HTML preview), Dismiss/Send Email buttons, toast notification on milestone status change. Zustand: `emailDrafts` + `draftToast` state.
-- **Ask AI load creation fix**: System prompt changed from "use draft_new_load for single loads" to "use bulk_create_loads when user asks to ADD/CREATE". `bulk_create_loads` description updated to clarify it works for single loads too. Fixes issue where "add this load" would only draft/display without saving.
+- **Auto-Status Email Drafter** (#99): Milestone status changes auto-generate HTML email drafts. Blue "Drafts (N)" badge in nav, modal with edit/send/dismiss. Zustand: `emailDrafts` + `draftToast`.
+- **Ask AI load creation fix**: `bulk_create_loads` used instead of display-only `draft_new_load`.
 
 ### Mar 13, 2026 Dashboard Changes
-- **Carrier Directory ↔ Quote Builder integration** (patch #98): Two new endpoints in `routes/directory.py`: `GET /api/directory/suggest` (ranked carrier suggestions with two-tier port matching exact>fuzzy, capability filtering, lane_rates JOIN) and `POST /api/directory/feedback` (updates carrier date_quoted + inserts lane_rates on quote save, auto-creates unknown carriers with `needs_review=true`). DB migration: `carriers.needs_review` boolean column. Frontend (`QuoteBuilder.jsx`): suggestion panel auto-fires on 3+ char port input (300ms debounce), capability auto-detection from shipment type + accessorials, carrier rows with color-matched capability badges (HAZ/OWT/Reefer/Bonded/OOG/WHS/Transload from directory CAP_OPTIONS), click-to-select + collapse/expand, shimmer loading skeleton, empty state, feedback loop fires on save with carrier_id (int PK) or carrier_name fallback.
-- **Overview layout centering**: Content wrapper switched from `flex-1` to CSS Grid centering (`display: grid, justifyContent: center`) with inner `maxWidth: 1400` div. Fixes off-center content when sidebar is present.
-- **Grid gutter alignment**: Row 1 (Rep Scoreboard + Account Health) and Row 2 (Today's Actions + Live Alerts) both standardized to `gridTemplateColumns: "6fr 4fr"` with `gap: 24`. Previously Row 1 used `1.1fr/0.9fr` causing misaligned center gutter.
-- **Scoreboard/Health data parsing**: Frontend `setRepScoreboard` and `setAccountHealth` now handle both array and object API responses (`Array.isArray(data) ? data : data.scoreboard || []`).
-- **OverviewView padding fix**: Removed duplicate 24px padding (content wrapper already provides it).
+- **Directory ↔ Quote Builder** (#98): Carrier suggestions with port matching + capability filtering. Feedback loop on save.
+- **Overview layout**: CSS Grid centering, gutter alignment, scoreboard/health data parsing fix, padding fix.
 
 ### Mar 12, 2026 Dashboard Changes (night)
 - **Emails expanded by default**: LoadSlideOver `emailsCollapsed` init changed from `true` → `false`. Emails section visible immediately when slide-over opens.
@@ -171,7 +177,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **State dedup**: JSON files (`ftl_sent_alerts.json`) prevent duplicate bot alerts. Thread-safe `fcntl.flock()`
 - **Quota handling**: `_retry_on_quota()` retries 429s with backoff
 - **Batched sheet writes**: ~12 API calls vs ~96
-- **API auth**: `csl_session` cookie OR `X-Dev-Key` + IP allowlist
+- **API auth**: `csl_session` cookie (HMAC-signed, password_gen checked, fail-closed) OR `X-Dev-Key` + IP allowlist. Forced pw change on first login (`password_gen <= 1` → `/change-password`)
 - **Vite dev**: proxy `/api/*` → production server with dev key header
 - **Zustand store**: `setShipments` supports function updaters
 - **Multi-provider tracking**: SeaRates → JSONCargo → Playwright. Cache `jsoncargo_cache.json` 6hr TTL
@@ -206,6 +212,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 - **Auto-Status Email Drafter**: ✅ DONE — deployed Mar 13. 5 milestone triggers, HTML templates, draft badge + modal + toast in frontend, SMTP send
 - **Carrier Auto-Quote Request**: PLANNED — when new load added, AI picks top 3 carriers from Directory and auto-drafts rate request emails. Not started.
+- **Container Update emails**: Still firing despite `send_account_notification()` early-return. Needs investigation — something else may be sending them. NOT YET FIXED.
 
 ### Rate IQ
 - ✅ Carrier Directory + Lane Search: DONE — inline editing deployed Mar 11
