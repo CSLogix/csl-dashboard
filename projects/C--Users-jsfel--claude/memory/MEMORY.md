@@ -8,7 +8,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [rateiq.md](rateiq.md) — Dray IQ, FTL IQ, OOG IQ, Scorecard, Directory
 - [inbox-command-center.md](inbox-command-center.md) — thread grouping, reply detection, classification
 - [macropoint-integration.md](macropoint-integration.md) — webhook flow, tracking events, GPS inference, timeline
-- [patches-applied.md](patches-applied.md) — full list (97 patches)
+- [patches-applied.md](patches-applied.md) — full list (98 patches)
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
@@ -96,6 +96,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 ## Recent Dashboard Changes (Deployed)
 
 ### Mar 13, 2026 Dashboard Changes
+- **Carrier Directory ↔ Quote Builder integration** (patch #98): Two new endpoints in `routes/directory.py`: `GET /api/directory/suggest` (ranked carrier suggestions with two-tier port matching exact>fuzzy, capability filtering, lane_rates JOIN) and `POST /api/directory/feedback` (updates carrier date_quoted + inserts lane_rates on quote save, auto-creates unknown carriers with `needs_review=true`). DB migration: `carriers.needs_review` boolean column. Frontend (`QuoteBuilder.jsx`): suggestion panel auto-fires on 3+ char port input (300ms debounce), capability auto-detection from shipment type + accessorials, carrier rows with color-matched capability badges (HAZ/OWT/Reefer/Bonded/OOG/WHS/Transload from directory CAP_OPTIONS), click-to-select + collapse/expand, shimmer loading skeleton, empty state, feedback loop fires on save with carrier_id (int PK) or carrier_name fallback.
 - **Overview layout centering**: Content wrapper switched from `flex-1` to CSS Grid centering (`display: grid, justifyContent: center`) with inner `maxWidth: 1400` div. Fixes off-center content when sidebar is present.
 - **Grid gutter alignment**: Row 1 (Rep Scoreboard + Account Health) and Row 2 (Today's Actions + Live Alerts) both standardized to `gridTemplateColumns: "6fr 4fr"` with `gap: 24`. Previously Row 1 used `1.1fr/0.9fr` causing misaligned center gutter.
 - **Scoreboard/Health data parsing**: Frontend `setRepScoreboard` and `setAccountHealth` now handle both array and object API responses (`Array.isArray(data) ? data : data.scoreboard || []`).
@@ -197,6 +198,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ### Rate IQ
 - ✅ Carrier Directory + Lane Search: DONE — inline editing deployed Mar 11
+- ✅ **Directory ↔ Quote Builder**: DONE — deployed Mar 13. Suggest endpoint + feedback loop + suggestion panel in QuoteBuilder
 - Phase 2 OOG IQ (real data), Phase 2 FTL IQ (not built)
 - Quote extractor v2 deployed (hub normalization + LoadMatch intelligence) — see [rateiq.md](rateiq.md)
 

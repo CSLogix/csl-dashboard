@@ -170,6 +170,29 @@ Upgraded `quote_extractor.py` from basic Haiku extraction to Sonnet 4.6 with ful
 - `source_quote_id` FK column in `rate_quotes` links back to `quotes.id`
 - `status` column added to `rate_quotes` (default 'received', set 'quoted' for won quotes)
 
+## Directory ↔ Quote Builder Integration (Mar 13, 2026)
+
+### Backend (`routes/directory.py`)
+- `GET /api/directory/suggest?port_code=X&caps=Y&destination=Z` — ranked carrier suggestions
+  - Two-tier port matching: exact `ports` ILIKE match (tier 1) > fuzzy `pickup_area`/`regions` ILIKE (tier 2)
+  - Capability filtering: `caps` param maps to `can_hazmat`, `can_dray`, `can_overweight`, etc.
+  - LEFT JOIN `lane_rates` per carrier for rate_min/rate_max/rate_range/lane_match
+  - Ranking: lane_match (yes first) → port_match (exact first) → tier_rank → carrier_name
+  - Response: `{ carriers: [{ carrier_id, name, capabilities, last_quoted, rate_range, lane_match, lane_rate, contact, tier_rank, port_match }], total }`
+- `POST /api/directory/feedback` — quote save → directory update
+  - Primary lookup by `carrier_id` (int PK), fallback to `carrier_name` ILIKE
+  - Found: UPDATE `date_quoted`, INSERT `lane_rates` row (source="quote")
+  - Not found: INSERT new carrier with `needs_review=true`, return `action: "added_for_review"`
+- DB migration: `ALTER TABLE carriers ADD COLUMN IF NOT EXISTS needs_review BOOLEAN DEFAULT false`
+
+### Frontend (`QuoteBuilder.jsx`)
+- State: `suggestedCarriers`, `suggestionsLoading`, `selectedCarrier`, `suggestionsExpanded`, `suggestionsSearched`
+- `detectedCaps` useMemo: auto-detects `dray`/`transload`/`overweight` from shipment type + accessorials
+- Auto-fetch: 300ms debounce on `route.pod` (3+ chars), preserves existing `carrierName`
+- Suggestion panel: shimmer skeleton loading, carrier rows with capability badges (exact CAP_OPTIONS colors), lane match green dot, highlighted row for current carrier (teal left border), collapsed/selected state with "Change" link
+- Feedback on save: `POST /api/directory/feedback` with `carrier_id` (from selectedCarrier) or null (manual entry)
+- Badge colors: HAZ `#f87171`, OWT `#FBBF24`, Reefer `#60a5fa`, Bonded `#a78bfa`, OOG `#fb923c`, WHS `#34d399`, Transload `#38bdf8` (no badge for `can_dray`)
+
 ## Dray IQ Layout (QuoteBuilder)
 - Quote Builder: `maxWidth: 1100, margin: "0 auto"`, flex with gap 40px
 - Builder panel: width 480, minWidth 420

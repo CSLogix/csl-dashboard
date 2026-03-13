@@ -94,3 +94,4 @@
 | `patch_async_cache.py` | app.py: Async cache warming — `refresh_if_needed()` returns stale data instantly, background thread refreshes Google Sheets cache. Eliminated 20s blocking on cache expiry |
 | `patch_scanner_matching.py` | csl_inbox_scanner.py: 5-tier email→EFJ matching (EFJ pattern, hub ID, container#, bare 6-digit, BOL/Booking) + rescue 123 unmatched |
 | `analytics_route.py` | routes/analytics.py: 6 missing endpoints from monolith split — rep-scoreboard, account-health, port-groups, rate-history, assign-rep, mark-actioned |
+| `patch_carrier_suggest.py` | routes/directory.py: GET /api/directory/suggest (ranked carrier suggestions with port matching + capability filter + lane rates) + POST /api/directory/feedback (quote save → directory update, auto-create unknown carriers with needs_review) + carriers.needs_review column |
