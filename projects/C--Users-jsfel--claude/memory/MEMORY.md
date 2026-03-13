@@ -32,7 +32,7 @@ Single-file React SPA (~10100 lines). Key components: `DispatchDashboard` (root)
 
 ### Systemd Services (always running)
 `csl-dashboard` (8080), `csl-boviet`, `csl-tolead`, `csl-inbox`, `csl-upload` (5001), `bol-webapp` (5002)
-Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated into app.py).
+Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated into app.py).
 
 ### Cron Jobs
 - **Dray Import/Export** (`--once`): 7:30 AM & 1:30 PM Mon-Fri — PG + Sheet dual-write
@@ -104,6 +104,10 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Other**: Boviet invoice writer, dray daily report HTML fix, MP alert subject rename ("CSL Tracking"), margin guard + date/terminal normalizers
 
 ## Recent Dashboard Changes (Deployed)
+
+### Mar 13, 2026 Dashboard Changes (night)
+- **Status update fix** (#100): `handleStatusUpdate` used index-based `id` (shifts on every 90s poll) — replaced with `efj`-based matching. Zustand `setSelectedShipment` didn't support function updaters (set the function literal instead of calling it, blanking slide-over fields) — added updater support in `store.js`. Also added `selectedShipment` synced-state updates after API callbacks so "Saving..." → "All changes saved" transitions correctly.
+- **csl-export service disabled**: Was running as persistent systemd daemon polling every 60min redundantly alongside cron. Stopped and disabled — cron-only now (7:30 AM & 1:30 PM Mon-Fri).
 
 ### Mar 13, 2026 Dashboard Changes (evening)
 - **Save feedback toast**: LoadSlideOver now shows green "✓ [Field] saved" toast (2.2s) after every successful field/driver/financial save. Red "⚠ Failed to save" on errors. Covers: field edits, metadata (customer rate, carrier pay, notes), driver fields, MP URL. Header sync indicator upgraded from tiny dot to "All changes saved" / "Saving..." with pulse animation.
