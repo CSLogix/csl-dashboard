@@ -105,6 +105,10 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 
 ## Recent Dashboard Changes (Deployed)
 
+### Mar 13, 2026 Dashboard Changes (late night)
+- **History view status changes**: HistoryView status badges now clickable — inline dropdown with all transport + billing statuses. `handleHistoryStatusUpdate()` calls `/api/v2/load/{efj}/status` (works on archived loads, no `archived` filter in SQL). Optimistic local state update with rollback on failure. Click-outside-to-close handler.
+- **Billing statuses always visible**: LoadSlideOver billing status buttons (Missing Invoice, Ppwk Needed, Billed & Closed, etc.) now show for ALL loads regardless of current status. Previously gated behind post-delivery status whitelist.
+
 ### Mar 13, 2026 Dashboard Changes (night)
 - **Status update fix** (#100): `handleStatusUpdate` used index-based `id` (shifts on every 90s poll) — replaced with `efj`-based matching. Zustand `setSelectedShipment` didn't support function updaters (set the function literal instead of calling it, blanking slide-over fields) — added updater support in `store.js`. Also added `selectedShipment` synced-state updates after API callbacks so "Saving..." → "All changes saved" transitions correctly.
 - **csl-export service disabled**: Was running as persistent systemd daemon polling every 60min redundantly alongside cron. Stopped and disabled — cron-only now (7:30 AM & 1:30 PM Mon-Fri).
@@ -216,7 +220,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 
 - **Auto-Status Email Drafter**: ✅ DONE — deployed Mar 13. 5 milestone triggers, HTML templates, draft badge + modal + toast in frontend, SMTP send
 - **Carrier Auto-Quote Request**: PLANNED — when new load added, AI picks top 3 carriers from Directory and auto-drafts rate request emails. Not started.
-- **Container Update emails**: Still firing despite `send_account_notification()` early-return. Needs investigation — something else may be sending them. NOT YET FIXED.
+- **Container Update emails**: ✅ RESOLVED — `send_account_notification()` early-return IS working (confirmed by `[SUPPRESSED]` logs in cron runs). Emails user saw on Mar 12 ~10:53 PM were from OLD `csl-import` systemd service (long-running process, hadn't reloaded code). Service stopped Mar 13 9:38 AM + disabled. Cron-only now.
 
 ### Rate IQ
 - ✅ Carrier Directory + Lane Search: DONE — inline editing deployed Mar 11
