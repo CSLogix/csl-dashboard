@@ -36,6 +36,10 @@ export const useAppStore = create((set) => ({
   // ── Current User ──
   currentUser: null,  // { id, username, email, role, rep_name }
 
+  // ── Email Drafts ──
+  emailDrafts: [],
+  draftToast: null,  // { id, efj, subject } — shown briefly after milestone status change
+
   // ── Data Source Fallback ──
   dataSource: "postgres",  // "postgres" or "sheets"
   systemHealth: null,
@@ -83,12 +87,14 @@ export const useAppStore = create((set) => ({
   setInboxInitialSearch: (v) => set({ inboxInitialSearch: v }),
   setInboxInitialRep: (v) => set({ inboxInitialRep: v }),
   setCurrentUser: (v) => set({ currentUser: v }),
+  setEmailDrafts: (v) => set({ emailDrafts: Array.isArray(v) ? v : [] }),
+  setDraftToast: (v) => set({ draftToast: v }),
   setDataSource: (v) => set({ dataSource: v }),
   setSystemHealth: (v) => set({ systemHealth: v }),
 
   setActiveView: (v) => set({ activeView: v }),
   setSelectedRep: (v) => set({ selectedRep: v }),
-  setSelectedShipment: (v) => set({ selectedShipment: v }),
+  setSelectedShipment: (v) => set(typeof v === 'function' ? (state) => ({ selectedShipment: v(state.selectedShipment) }) : { selectedShipment: v }),
   setExpandEmailsOnOpen: (v) => set({ expandEmailsOnOpen: v }),
   setHighlightedEfj: (v) => set({ highlightedEfj: v }),
 

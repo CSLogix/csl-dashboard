@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, Fragment } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from "react";
 
 // ─── API helper (same pattern as DispatchDashboard) ───
 const apiFetch = (url, opts = {}) =>
@@ -471,6 +471,13 @@ export default function QuoteBuilder() {
   // ── Carrier (internal) ──
   const [carrierName, setCarrierName] = useState("");
 
+  // ── Carrier Suggestions (Directory integration) ──
+  const [suggestedCarriers, setSuggestedCarriers] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [selectedCarrier, setSelectedCarrier] = useState(null);
+  const [suggestionsExpanded, setSuggestionsExpanded] = useState(true);
+  const [suggestionsSearched, setSuggestionsSearched] = useState(false);
+
   // Load defaults from server on mount
   useEffect(() => {
     apiFetch("/api/quotes/settings").then(r => r.json()).then(data => {
@@ -506,6 +513,48 @@ export default function QuoteBuilder() {
     }, 1200);
     return () => clearTimeout(mileageTimer.current);
   }, [route.pod, route.finalDelivery]);
+
+  // ── Capability auto-detection for carrier suggestions ──
+  const detectedCaps = useMemo(() => {
+    const caps = [];
+    if (["Dray", "Dray+Transload"].includes(route.shipmentType)) caps.push("dray");
+    if (["Transload", "Dray+Transload"].includes(route.shipmentType)) caps.push("transload");
+    if (accessorials.some(a => a.checked && /overweight/i.test(a.charge))) caps.push("overweight");
+    return caps;
+  }, [route.shipmentType, accessorials]);
+
+  // ── Carrier Suggestions — auto-fetch when port entered ──
+  const suggestTimer = useRef(null);
+  useEffect(() => {
+    if (!route.pod || route.pod.trim().length < 3) {
+      setSuggestedCarriers([]);
+      setSuggestionsLoading(false);
+      setSuggestionsSearched(false);
+      return;
+    }
+    if (suggestTimer.current) clearTimeout(suggestTimer.current);
+    suggestTimer.current = setTimeout(async () => {
+      setSuggestionsLoading(true);
+      try {
+        const params = new URLSearchParams({ port_code: route.pod.trim() });
+        if (detectedCaps.length) params.set("caps", detectedCaps.join(","));
+        if (route.finalDelivery) params.set("destination", route.finalDelivery);
+        const res = await apiFetch(`/api/directory/suggest?${params}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSuggestedCarriers(data.carriers || []);
+          setSuggestionsExpanded(true);
+          // If current carrier matches a suggestion, pre-select it
+          if (carrierName) {
+            const match = (data.carriers || []).find(c => c.name.toLowerCase() === carrierName.toLowerCase());
+            if (match) setSelectedCarrier(match);
+          }
+        }
+      } catch { /* suggest endpoint not available */ }
+      finally { setSuggestionsLoading(false); setSuggestionsSearched(true); }
+    }, 300);
+    return () => clearTimeout(suggestTimer.current);
+  }, [route.pod, route.finalDelivery, detectedCaps.join(",")]);
 
   // ── Rate Intelligence — auto-search when lane is entered ──
   const [rateIntel, setRateIntel] = useState(null); // { lane_groups, matches, carriers, stats }
@@ -760,6 +809,26 @@ export default function QuoteBuilder() {
       if (data.quote_number) setQuoteNumber(data.quote_number);
       if (data.id) setEditingId(data.id);
       setSaveMsg({ type: "success", text: `Saved as ${data.quote_number || "updated"}` });
+
+      // ── Directory feedback loop ──
+      if (carrierName && route.pod) {
+        apiFetch("/api/directory/feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            carrier_id: selectedCarrier?.carrier_id || null,
+            carrier_name: carrierName,
+            port_code: route.pod,
+            destination: route.finalDelivery || null,
+            rate: carrierSubtotal || null,
+            quote_id: data.id,
+          }),
+        }).then(r => r.json()).then(fb => {
+          if (fb.action === "added_for_review") {
+            setSaveMsg({ type: "success", text: `Saved — ${carrierName} added to directory (needs review)` });
+          }
+        }).catch(() => {});
+      }
     } catch (err) {
       setSaveMsg({ type: "error", text: err.message });
     } finally {
@@ -988,9 +1057,80 @@ export default function QuoteBuilder() {
 
             {/* ── Carrier (internal) ── */}
             <div style={{ marginTop: 8 }}>
-              <div style={labelStyle}>Carrier (internal only)</div>
-              <input value={carrierName} onChange={e => setCarrierName(e.target.value)} placeholder="Carrier name" style={inputStyle} />
+              <div style={labelStyle}>Carrier (internal only){selectedCarrier && !suggestionsExpanded && (
+                <span style={{ marginLeft: 6, fontSize: 10, color: "#5A6478" }}>
+                  {selectedCarrier.last_quoted ? `Last quoted $${selectedCarrier.last_quoted.toLocaleString()} at ${route.pod}` : ""}
+                </span>
+              )}</div>
+              <input value={carrierName} onChange={e => { setCarrierName(e.target.value); setSelectedCarrier(null); }} placeholder="Carrier name" style={inputStyle} />
             </div>
+
+            {/* ── Carrier Suggestion Panel ── */}
+            {(suggestionsLoading || suggestedCarriers.length > 0 || suggestionsSearched) && (() => {
+              const CAP_COLORS = {
+                hazmat: { label: "HAZ", color: "#f87171" }, overweight: { label: "OWT", color: "#FBBF24" },
+                reefer: { label: "Reefer", color: "#60a5fa" }, bonded: { label: "Bonded", color: "#a78bfa" },
+                oog: { label: "OOG", color: "#fb923c" }, warehousing: { label: "WHS", color: "#34d399" },
+                transload: { label: "Transload", color: "#38bdf8" },
+              };
+              const shimmerKeyframes = `@keyframes suggestShimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }`;
+
+              // Selected + collapsed state
+              if (selectedCarrier && !suggestionsExpanded) {
+                return (
+                  <div style={{ marginTop: 4, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(0,212,170,0.2)", background: "rgba(0,212,170,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#e0e0e0", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{selectedCarrier.name}</span>
+                      {selectedCarrier.capabilities?.filter(c => CAP_COLORS[c]).map(c => (
+                        <span key={c} style={{ padding: "1px 7px", borderRadius: 4, fontSize: 8, fontWeight: 700, background: CAP_COLORS[c].color + "18", color: CAP_COLORS[c].color, border: `1px solid ${CAP_COLORS[c].color}30` }}>{CAP_COLORS[c].label}</span>
+                      ))}
+                      {selectedCarrier.last_quoted && <span style={{ fontSize: 11, fontWeight: 700, color: "#00D4AA", fontFamily: "'JetBrains Mono', monospace" }}>${selectedCarrier.last_quoted.toLocaleString()}</span>}
+                    </div>
+                    <span onClick={() => setSuggestionsExpanded(true)} style={{ fontSize: 10, color: "#00D4AA", cursor: "pointer", fontWeight: 600 }}>Change</span>
+                  </div>
+                );
+              }
+
+              return (
+                <div style={{ marginTop: 4, border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8, overflow: "hidden", maxHeight: 200, overflowY: "auto" }}>
+                  <style>{shimmerKeyframes}</style>
+                  {suggestionsLoading ? (
+                    // Shimmer skeleton
+                    [0, 1, 2].map(i => (
+                      <div key={i} style={{ display: "flex", gap: 8, padding: "7px 10px", alignItems: "center" }}>
+                        <div style={{ width: 100 + i * 20, height: 10, borderRadius: 4, background: "linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%)", backgroundSize: "400px 100%", animation: "suggestShimmer 1.2s infinite linear" }} />
+                        <div style={{ marginLeft: "auto", width: 50, height: 10, borderRadius: 4, background: "linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%)", backgroundSize: "400px 100%", animation: "suggestShimmer 1.2s infinite linear" }} />
+                      </div>
+                    ))
+                  ) : suggestedCarriers.length === 0 ? (
+                    <div style={{ padding: "8px 10px", fontSize: 11, color: "#5A6478" }}>No carriers found for {route.pod}</div>
+                  ) : (
+                    suggestedCarriers.map(c => {
+                      const isHighlighted = carrierName && c.name.toLowerCase() === carrierName.toLowerCase();
+                      return (
+                        <div key={c.carrier_id}
+                          onClick={() => { setCarrierName(c.name); setSelectedCarrier(c); setSuggestionsExpanded(false); }}
+                          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", cursor: "pointer", fontSize: 11, transition: "background 0.1s", borderLeft: isHighlighted ? "3px solid #00D4AA" : "3px solid transparent", background: isHighlighted ? "rgba(0,212,170,0.06)" : "transparent" }}
+                          onMouseEnter={e => { if (!isHighlighted) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+                          onMouseLeave={e => { if (!isHighlighted) e.currentTarget.style.background = "transparent"; }}>
+                          <div style={{ display: "flex", gap: 5, alignItems: "center", minWidth: 0 }}>
+                            <span style={{ fontWeight: 600, color: "#e0e0e0", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 130 }}>{c.name}</span>
+                            {c.capabilities?.filter(cap => CAP_COLORS[cap]).map(cap => (
+                              <span key={cap} style={{ padding: "1px 7px", borderRadius: 4, fontSize: 8, fontWeight: 700, background: CAP_COLORS[cap].color + "18", color: CAP_COLORS[cap].color, border: `1px solid ${CAP_COLORS[cap].color}30` }}>{CAP_COLORS[cap].label}</span>
+                            ))}
+                            {c.lane_match && <span title="Lane match" style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />}
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flexShrink: 0 }}>
+                            {c.last_quoted ? <span style={{ fontWeight: 700, color: "#00D4AA", fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>${c.last_quoted.toLocaleString()}</span> : <span style={{ color: "#3D4557" }}>—</span>}
+                            {c.rate_range && <span style={{ fontSize: 9, color: "rgba(255,255,255,0.4)" }}>{c.rate_range}</span>}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              );
+            })()}
 
             {/* ── Route ── */}
             <div style={sectionTitle}>Route {fetchingMiles && <span style={{ fontSize: 10, color: "#00D4AA", fontWeight: 500, marginLeft: 8 }}>calculating miles...</span>}</div>

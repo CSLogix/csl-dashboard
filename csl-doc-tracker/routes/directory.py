@@ -794,3 +794,181 @@ async def api_import_excel(file: UploadFile = File(...)):
                 summary["warehouses"] += 1
 
     return JSONResponse(summary)
+
+
+# ═══════════════════════════════════════════════════════════════
+# ─── Carrier Suggestion Endpoint (Quote Builder integration) ──
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/api/directory/suggest")
+async def api_directory_suggest(
+    port_code: str = Query(..., min_length=3),
+    caps: str = Query(default=None),
+    destination: str = Query(default=None),
+):
+    """Return ranked carrier suggestions for a port, filtered by capabilities."""
+    cap_map = {
+        "hazmat": "can_hazmat", "dray": "can_dray", "overweight": "can_overweight",
+        "transload": "can_transload", "reefer": "can_reefer", "bonded": "can_bonded",
+        "oog": "can_oog", "warehousing": "can_warehousing",
+    }
+    cap_filters = []
+    if caps:
+        for c in caps.split(","):
+            col = cap_map.get(c.strip().lower())
+            if col:
+                cap_filters.append(col)
+
+    pc = port_code.strip()
+    pc_like = f"%{pc}%"
+
+    with db.get_cursor() as cur:
+        # Build WHERE: two-tier port match + DNU exclusion + capability filters
+        cap_sql = "".join(f" AND {col} IS TRUE" for col in cap_filters)
+        cur.execute(f"""
+            SELECT *,
+                CASE
+                    WHEN ports ILIKE %s THEN 1
+                    WHEN pickup_area ILIKE %s OR regions ILIKE %s THEN 2
+                    ELSE 3
+                END AS port_match_tier
+            FROM carriers
+            WHERE (dnu IS NOT TRUE)
+              AND (ports ILIKE %s OR pickup_area ILIKE %s OR regions ILIKE %s)
+              {cap_sql}
+            ORDER BY port_match_tier ASC, tier_rank ASC NULLS LAST, carrier_name ASC
+        """, (pc_like, pc_like, pc_like, pc_like, pc_like, pc_like))
+        rows = cur.fetchall()
+
+        if not rows:
+            return JSONResponse({"carriers": [], "port_code": pc, "total": 0})
+
+        # Gather lane_rates for matched carriers
+        carrier_names = list({r["carrier_name"] for r in rows if r.get("carrier_name")})
+        lanes_by_carrier = {}
+        if carrier_names:
+            ph = ",".join(["%s"] * len(carrier_names))
+            lane_params = list(carrier_names) + [pc_like]
+            dest_sql = ""
+            if destination and destination.strip():
+                dest_sql = " AND destination ILIKE %s"
+                lane_params.append(f"%{destination.strip()}%")
+            cur.execute(f"""
+                SELECT carrier_name, total, dray_rate, destination, created_at
+                FROM lane_rates
+                WHERE carrier_name IN ({ph}) AND port ILIKE %s {dest_sql}
+                ORDER BY created_at DESC
+            """, lane_params)
+            for lr in cur.fetchall():
+                cn = lr["carrier_name"]
+                lanes_by_carrier.setdefault(cn, []).append(lr)
+
+        # Build response
+        result = []
+        for r in rows:
+            cn = r.get("carrier_name", "")
+            lanes = lanes_by_carrier.get(cn, [])
+            rates = [float(l["total"] or l.get("dray_rate") or 0) for l in lanes if (l.get("total") or l.get("dray_rate"))]
+
+            # Capabilities list
+            capabilities = []
+            for cap_key, col in cap_map.items():
+                if r.get(col):
+                    capabilities.append(cap_key)
+
+            rate_min = min(rates) if rates else None
+            rate_max = max(rates) if rates else None
+            rate_range = f"${rate_min:,.0f} – ${rate_max:,.0f}" if rate_min is not None and rate_max is not None else None
+
+            # Lane match: did they run this exact destination?
+            lane_match = False
+            lane_rate = None
+            if destination and destination.strip():
+                dest_lower = destination.strip().lower()
+                for l in lanes:
+                    if dest_lower in (l.get("destination") or "").lower():
+                        lane_match = True
+                        lane_rate = float(l["total"] or l.get("dray_rate") or 0)
+                        break
+
+            result.append({
+                "carrier_id": r["id"],
+                "name": cn,
+                "capabilities": capabilities,
+                "last_quoted": float(rates[0]) if rates else None,
+                "rate_range": rate_range,
+                "rate_min": rate_min,
+                "rate_max": rate_max,
+                "lane_match": lane_match,
+                "lane_rate": lane_rate,
+                "contact": {
+                    "name": r.get("contact_name") or "",
+                    "phone": r.get("contact_phone") or "",
+                    "email": r.get("contact_email") or "",
+                },
+                "tier_rank": r.get("tier_rank"),
+                "port_match": "exact" if r["port_match_tier"] == 1 else "fuzzy",
+            })
+
+        # Final sort: lane_match first, then exact port, then tier
+        result.sort(key=lambda c: (
+            0 if c["lane_match"] else 1,
+            0 if c["port_match"] == "exact" else 1,
+            c["tier_rank"] if c["tier_rank"] is not None else 999,
+        ))
+
+    return JSONResponse({"carriers": result, "port_code": pc, "total": len(result)})
+
+
+# ═══════════════════════════════════════════════════════════════
+# ─── Feedback Endpoint (Quote → Directory) ────────────────────
+# ═══════════════════════════════════════════════════════════════
+
+@router.post("/api/directory/feedback")
+async def api_directory_feedback(request: Request):
+    """Update directory when a quote is saved. Creates carrier if unknown."""
+    body = await request.json()
+    carrier_id = body.get("carrier_id")  # int PK from suggestions, or None
+    carrier_name = (body.get("carrier_name") or "").strip()
+    port_code = (body.get("port_code") or "").strip()
+    destination = (body.get("destination") or "").strip()
+    rate = body.get("rate")
+    quote_id = body.get("quote_id")
+
+    if not carrier_name or not port_code:
+        raise HTTPException(400, "carrier_name and port_code required")
+
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            # Find carrier: by ID first, then name fallback
+            carrier_row = None
+            if carrier_id:
+                cur.execute("SELECT id, carrier_name FROM carriers WHERE id = %s", (carrier_id,))
+                carrier_row = cur.fetchone()
+            if not carrier_row:
+                cur.execute("SELECT id, carrier_name FROM carriers WHERE carrier_name ILIKE %s LIMIT 1",
+                            (carrier_name,))
+                carrier_row = cur.fetchone()
+
+            action = "updated"
+            if not carrier_row:
+                # Auto-create with needs_review flag
+                cur.execute("""
+                    INSERT INTO carriers (carrier_name, ports, needs_review, date_quoted)
+                    VALUES (%s, %s, TRUE, NOW()) RETURNING id, carrier_name
+                """, (carrier_name, port_code))
+                carrier_row = cur.fetchone()
+                action = "added_for_review"
+            else:
+                # Update date_quoted
+                cur.execute("UPDATE carriers SET date_quoted = NOW(), updated_at = NOW() WHERE id = %s",
+                            (carrier_row["id"],))
+
+            # Insert lane_rate if we have rate + destination
+            if rate and destination:
+                cur.execute("""
+                    INSERT INTO lane_rates (carrier_name, port, destination, total, source)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (carrier_row["carrier_name"], port_code, destination, rate, "quote"))
+
+    return JSONResponse({"ok": True, "action": action, "carrier_id": carrier_row["id"]})

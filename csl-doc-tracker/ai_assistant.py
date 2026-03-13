@@ -82,6 +82,11 @@ Use the provided tools to look up real data before answering. You have 24 tools 
 - Transit time estimates from historical delivery data
 - Daily briefings, customer-friendly explanations, and carrier emails
 
+When you receive document content (PDF, spreadsheet, email), extract all shipment/load details you can find.
+- If the user asks you to ADD or CREATE a load (single or multiple), use bulk_create_loads to INSERT them into the database. Always present the data first, then call bulk_create_loads.
+- Only use draft_new_load if the user explicitly asks to PREVIEW or DRAFT without saving.
+- Common document types: rate confirmations, load tenders, booking sheets, dispatch lists, customer POs.
+
 Be concise, direct, and data-driven. Format monetary values with $ signs. When showing rates, include accessorials if non-zero. If a query returns no results, say so clearly."""
 
 # ---------------------------------------------------------------------------
@@ -214,6 +219,43 @@ TOOLS = [
                 }
             },
             "required": ["move_type", "origin", "destination"]
+        }
+    },
+
+    {
+        "name": "bulk_create_loads",
+        "description": "Create one or more shipment loads and INSERT them into the database. Use this whenever the user asks to ADD or CREATE loads (single or multiple). Works for parsed documents, manual entries, or any load creation request. Always present the extracted data first, then call this tool to save.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "loads": {
+                    "type": "array",
+                    "description": "Array of load objects to create",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "efj": {"type": "string", "description": "EFJ number (e.g. EFJ-107500)"},
+                            "account": {"type": "string", "description": "Customer account name"},
+                            "move_type": {"type": "string", "enum": ["DRAY IMPORT", "DRAY EXPORT", "FTL"]},
+                            "carrier": {"type": "string", "description": "Carrier name"},
+                            "origin": {"type": "string", "description": "Origin terminal or city"},
+                            "destination": {"type": "string", "description": "Destination city"},
+                            "container": {"type": "string", "description": "Container # or load reference"},
+                            "bol": {"type": "string", "description": "BOL or booking number"},
+                            "customer_rate": {"type": "number", "description": "Customer rate in dollars"},
+                            "carrier_pay": {"type": "number", "description": "Carrier pay in dollars"},
+                            "eta": {"type": "string", "description": "ETA date"},
+                            "lfd": {"type": "string", "description": "Last Free Day"},
+                            "status": {"type": "string", "description": "Initial status (default: pending)"},
+                            "rep": {"type": "string", "description": "Assigned rep name"},
+                            "vessel": {"type": "string", "description": "Vessel or SSL name"},
+                            "notes": {"type": "string", "description": "Additional notes"}
+                        },
+                        "required": ["efj", "account"]
+                    }
+                }
+            },
+            "required": ["loads"]
         }
     },
 
@@ -856,6 +898,105 @@ def _exec_draft_new_load(move_type: str, origin: str, destination: str,
     return {
         "draft": {k: v for k, v in draft.items() if v is not None},
         "message": "Draft created. This has NOT been saved to the database. Use the Add Form in the dashboard to create the load."
+    }
+
+
+def _exec_bulk_create_loads(loads: list) -> dict:
+    """Insert multiple shipments into Postgres in one go."""
+    created = []
+    skipped = []
+    errors = []
+
+    # Rep mapping for auto-assignment
+    ACCOUNT_REPS = {
+        "Allround": "Radka", "Boviet": "Radka", "Cadi": "Radka",
+        "DHL": "Janice", "DSV": "Janice", "EShipping": "Janice",
+        "IWS": "Janice", "Kripke": "Janice", "MAO": "Janice",
+        "MGF": "John F", "Rose": "Radka", "USHA": "Radka",
+        "Tolead": "Radka", "Prolog": "Radka", "Talatrans": "Radka",
+        "LS Cargo": "Radka", "GW-World": "John F",
+    }
+
+    for load in loads:
+        efj = (load.get("efj") or "").strip()
+        account = (load.get("account") or "").strip()
+        if not efj or not account:
+            errors.append({"efj": efj, "reason": "Missing EFJ or account"})
+            continue
+
+        rep = load.get("rep") or ACCOUNT_REPS.get(account, "Unassigned")
+
+        try:
+            with db.get_conn() as conn:
+                with db.get_cursor(conn) as cur:
+                    cur.execute("""
+                        INSERT INTO shipments (
+                            efj, move_type, container, bol, vessel, carrier,
+                            origin, destination, eta, lfd, pickup_date, delivery_date,
+                            status, notes, driver, bot_notes, return_date,
+                            account, hub, rep, source, customer_rate, carrier_pay
+                        ) VALUES (
+                            %(efj)s, %(move_type)s, %(container)s, %(bol)s, %(vessel)s, %(carrier)s,
+                            %(origin)s, %(destination)s, %(eta)s, %(lfd)s, %(pickup_date)s, %(delivery_date)s,
+                            %(status)s, %(notes)s, %(driver)s, %(bot_notes)s, %(return_date)s,
+                            %(account)s, %(hub)s, %(rep)s, 'ai_bulk', %(customer_rate)s, %(carrier_pay)s
+                        )
+                        ON CONFLICT (efj) DO NOTHING
+                        RETURNING efj
+                    """, {
+                        "efj": efj,
+                        "move_type": load.get("move_type", ""),
+                        "container": load.get("container", ""),
+                        "bol": load.get("bol", ""),
+                        "vessel": load.get("vessel", ""),
+                        "carrier": load.get("carrier", ""),
+                        "origin": load.get("origin", ""),
+                        "destination": load.get("destination", ""),
+                        "eta": load.get("eta", ""),
+                        "lfd": load.get("lfd", ""),
+                        "pickup_date": load.get("pickup_date", ""),
+                        "delivery_date": load.get("delivery_date", ""),
+                        "status": load.get("status", "pending"),
+                        "notes": load.get("notes", ""),
+                        "driver": load.get("driver", ""),
+                        "bot_notes": f"Bulk-created via AI on {datetime.now().strftime('%m/%d %H:%M')}",
+                        "return_date": load.get("return_date", ""),
+                        "account": account,
+                        "hub": load.get("hub", ""),
+                        "rep": rep,
+                        "customer_rate": load.get("customer_rate"),
+                        "carrier_pay": load.get("carrier_pay"),
+                    })
+                    row = cur.fetchone()
+                    if row:
+                        created.append(efj)
+                    else:
+                        skipped.append({"efj": efj, "reason": "Already exists"})
+        except Exception as e:
+            errors.append({"efj": efj, "reason": str(e)})
+
+    # Fire-and-forget sheet writes for created loads
+    try:
+        import sys
+        if "/root/csl-bot" in sys.path:
+            from csl_sheet_writer import sheet_add_row
+            _SHARED = {"Boviet", "Tolead"}
+            for load in loads:
+                efj = (load.get("efj") or "").strip()
+                acct = (load.get("account") or "").strip()
+                if efj in created and acct and acct not in _SHARED:
+                    try:
+                        sheet_add_row(efj, acct, load)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    return {
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+        "summary": f"Created {len(created)} loads, skipped {len(skipped)}, errors {len(errors)}"
     }
 
 
@@ -2089,6 +2230,7 @@ TOOL_DISPATCH = {
     "check_efj_status": lambda args: _exec_check_efj_status(**args),
     "extract_rate_con": lambda args: _exec_extract_rate_con(**args),
     "draft_new_load": lambda args: _exec_draft_new_load(**args),
+    "bulk_create_loads": lambda args: _exec_bulk_create_loads(**args),
     "calculate_lane_iq_margin": lambda args: _exec_calculate_lane_iq_margin(**args),
     "carrier_compliance_guard": lambda args: _exec_carrier_compliance_guard(**args),
     "empty_return_scheduler": lambda args: _exec_empty_return_scheduler(**args),
@@ -2257,3 +2399,87 @@ async def ask_ai(question: str, context: dict = None) -> dict:
             "tool_calls": [],
             "sources": [],
         }
+
+
+async def ask_ai_with_image(question: str, image_b64: str, filename: str = "document") -> dict:
+    """Send a question to Claude with an image attachment (vision)."""
+    if not ANTHROPIC_API_KEY:
+        return {"answer": "AI assistant is not configured. ANTHROPIC_API_KEY is missing.", "tool_calls": [], "sources": []}
+
+    # Detect media type
+    media_type = "application/pdf" if filename.lower().endswith(".pdf") else "image/png"
+    if filename.lower().endswith((".jpg", ".jpeg")):
+        media_type = "image/jpeg"
+    elif filename.lower().endswith(".webp"):
+        media_type = "image/webp"
+    elif filename.lower().endswith(".gif"):
+        media_type = "image/gif"
+
+    messages = [{
+        "role": "user",
+        "content": [
+            {
+                "type": "image" if not filename.lower().endswith(".pdf") else "document",
+                "source": {"type": "base64", "media_type": media_type, "data": image_b64},
+            },
+            {"type": "text", "text": question},
+        ]
+    }]
+
+    system = SYSTEM_PROMPT + f"\n\nThe user has attached a file: {filename}. Extract all relevant information from it."
+    tool_calls_log = []
+    sources = []
+    api_client = _get_client()
+
+    try:
+        for iteration in range(MAX_TOOL_ITERATIONS + 1):
+            response = api_client.messages.create(
+                model=MODEL,
+                max_tokens=MAX_RESPONSE_TOKENS,
+                system=system,
+                tools=TOOLS,
+                messages=messages,
+            )
+
+            has_tool_use = any(b.type == "tool_use" for b in response.content)
+
+            if response.stop_reason == "end_turn" or not has_tool_use:
+                answer_parts = [b.text for b in response.content if b.type == "text"]
+                return {
+                    "answer": "\n".join(answer_parts) if answer_parts else "I wasn't able to generate a response.",
+                    "tool_calls": tool_calls_log,
+                    "sources": sources,
+                }
+
+            assistant_content = []
+            tool_results = []
+            for block in response.content:
+                if block.type == "text":
+                    assistant_content.append({"type": "text", "text": block.text})
+                elif block.type == "tool_use":
+                    assistant_content.append({"type": "tool_use", "id": block.id, "name": block.name, "input": block.input})
+                    log.info("AI(vision) tool call: %s(%s)", block.name, json.dumps(block.input, default=str)[:200])
+                    result_str = _run_tool(block.name, block.input)
+                    tool_calls_log.append({"tool": block.name, "input": block.input, "iteration": iteration})
+                    try:
+                        rd = json.loads(result_str)
+                        if rd.get("count"):
+                            sources.append(f"{block.name}: {rd['count']} results")
+                        elif rd.get("created"):
+                            sources.append(f"{block.name}: {len(rd['created'])} created")
+                    except Exception:
+                        pass
+                    tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": result_str})
+
+            messages.append({"role": "assistant", "content": assistant_content})
+            messages.append({"role": "user", "content": tool_results})
+
+        return {"answer": "Reached max tool iterations.", "tool_calls": tool_calls_log, "sources": sources}
+
+    except anthropic.RateLimitError:
+        return {"answer": "AI rate limited. Try again shortly.", "tool_calls": [], "sources": []}
+    except anthropic.APIError as e:
+        return {"answer": f"AI error: {e.message}", "tool_calls": [], "sources": []}
+    except Exception as e:
+        log.exception("ask_ai_with_image error")
+        return {"answer": f"Error: {str(e)}", "tool_calls": [], "sources": []}

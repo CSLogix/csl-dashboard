@@ -35,6 +35,7 @@ from routes import (
     webhooks,
     spa,
     users,
+    email_drafts,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -144,6 +145,7 @@ app.include_router(health.router)
 app.include_router(v2.router)
 app.include_router(webhooks.router)
 app.include_router(users.router)
+app.include_router(email_drafts.router)
 
 # ---------------------------------------------------------------------------
 # Startup / Shutdown
@@ -309,6 +311,30 @@ def startup():
         log.info("lane_rates table ready")
     except Exception as e:
         log.warning("Could not create lane_rates table: %s", e)
+
+    # Create email_drafts table
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS email_drafts (
+                        id          SERIAL PRIMARY KEY,
+                        efj         VARCHAR NOT NULL,
+                        account     VARCHAR,
+                        milestone   VARCHAR NOT NULL,
+                        to_email    VARCHAR NOT NULL,
+                        cc_email    VARCHAR,
+                        subject     VARCHAR NOT NULL,
+                        body_html   TEXT NOT NULL,
+                        status      VARCHAR DEFAULT 'draft',
+                        created_at  TIMESTAMPTZ DEFAULT NOW(),
+                        sent_at     TIMESTAMPTZ,
+                        sent_by     VARCHAR
+                    )
+                """)
+        log.info("email_drafts table ready")
+    except Exception as e:
+        log.warning("Could not create email_drafts table: %s", e)
 
     # Pre-populate sheet cache in background
     threading.Thread(target=sheet_cache.refresh_if_needed, daemon=True).start()

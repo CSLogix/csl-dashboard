@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from google.oauth2.service_account import Credentials
 
 import database as db
+from routes.email_drafts import generate_milestone_draft, MILESTONES
 from shared import (
     sheet_cache,
     SHEET_ID, CREDS_FILE, COL,
@@ -336,7 +337,19 @@ async def api_v2_update_status(efj: str, request: Request, background_tasks: Bac
         _archive_shipment_on_close(efj)
         log.info("billed_closed: no unbilled order for %s — archived directly", efj)
 
-    return {"ok": True, "efj": efj, "status": new_status}
+    # Auto-generate email draft for milestone statuses
+    draft_id = None
+    normalized = new_status.strip().lower().replace(" ", "_")
+    if normalized in MILESTONES:
+        try:
+            draft_id = generate_milestone_draft(efj, normalized)
+        except Exception as e:
+            log.warning("Email draft generation failed for %s/%s: %s", efj, normalized, e)
+
+    resp = {"ok": True, "efj": efj, "status": new_status}
+    if draft_id:
+        resp["draft_id"] = draft_id
+    return resp
 
 
 def _v2_write_status_to_sheet(efj: str, new_status: str, account: str, hub: str = None):

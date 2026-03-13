@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 
 import database as db
@@ -1000,4 +1000,121 @@ async def api_ask_ai(request: Request):
         return JSONResponse({"error": "No question provided"}, status_code=400)
     context = body.get("context", {})
     result = await ai_assistant.ask_ai(question, context)
+    return JSONResponse(result)
+
+
+@router.post("/api/ask-ai/upload")
+async def api_ask_ai_upload(
+    file: UploadFile = File(...),
+    question: str = Form(""),
+):
+    """Ask AI with a file attachment (PDF, image, Excel, CSV)."""
+    import base64
+
+    raw = await file.read()
+    if len(raw) > 20 * 1024 * 1024:
+        return JSONResponse({"error": "File too large (max 20 MB)"}, status_code=400)
+
+    fname = (file.filename or "").lower()
+    content_type = file.content_type or ""
+    extracted_text = None
+    image_b64 = None
+
+    # ── PDF extraction ──
+    if fname.endswith(".pdf") or "pdf" in content_type:
+        try:
+            import pdfplumber, io
+            text_parts = []
+            with pdfplumber.open(io.BytesIO(raw)) as pdf:
+                for page in pdf.pages[:50]:  # cap at 50 pages
+                    t = page.extract_text()
+                    if t:
+                        text_parts.append(t)
+                    # Also extract tables as text
+                    for tbl in (page.extract_tables() or []):
+                        rows = [" | ".join(str(c or "") for c in row) for row in tbl]
+                        text_parts.append("\n".join(rows))
+            extracted_text = "\n\n".join(text_parts)
+            if not extracted_text.strip():
+                # Scanned PDF — fall back to vision
+                image_b64 = base64.b64encode(raw).decode()
+        except Exception as e:
+            log.warning("pdfplumber failed for %s: %s — falling back to vision", fname, e)
+            image_b64 = base64.b64encode(raw).decode()
+
+    # ── Image extraction (use Claude vision) ──
+    elif any(fname.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp", ".gif")):
+        image_b64 = base64.b64encode(raw).decode()
+
+    # ── Excel / CSV extraction ──
+    elif any(fname.endswith(ext) for ext in (".xlsx", ".xls", ".csv", ".tsv")):
+        try:
+            import io
+            if fname.endswith(".csv") or fname.endswith(".tsv"):
+                sep = "\t" if fname.endswith(".tsv") else ","
+                lines = raw.decode("utf-8", errors="replace").splitlines()
+                extracted_text = "\n".join(lines[:500])
+            else:
+                try:
+                    import openpyxl
+                    wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+                    parts = []
+                    for ws in wb.worksheets[:5]:
+                        rows = []
+                        for row in ws.iter_rows(max_row=200, values_only=True):
+                            rows.append(" | ".join(str(c or "") for c in row))
+                        if rows:
+                            parts.append(f"Sheet: {ws.title}\n" + "\n".join(rows))
+                    extracted_text = "\n\n".join(parts)
+                    wb.close()
+                except Exception:
+                    import xlrd
+                    wb = xlrd.open_workbook(file_contents=raw)
+                    parts = []
+                    for ws in wb.sheets()[:5]:
+                        rows = []
+                        for r in range(min(ws.nrows, 200)):
+                            rows.append(" | ".join(str(ws.cell_value(r, c) or "") for c in range(ws.ncols)))
+                        if rows:
+                            parts.append(f"Sheet: {ws.name}\n" + "\n".join(rows))
+                    extracted_text = "\n\n".join(parts)
+        except Exception as e:
+            log.warning("Spreadsheet parse failed for %s: %s", fname, e)
+            extracted_text = f"[Could not parse spreadsheet: {e}]"
+
+    # ── Email (.msg / .eml) ──
+    elif fname.endswith(".eml"):
+        try:
+            import email as _email
+            msg = _email.message_from_bytes(raw)
+            subj = msg.get("Subject", "")
+            frm = msg.get("From", "")
+            body_parts = []
+            for part in msg.walk():
+                if part.get_content_type() == "text/plain":
+                    body_parts.append(part.get_payload(decode=True).decode("utf-8", errors="replace"))
+            extracted_text = f"Subject: {subj}\nFrom: {frm}\n\n" + "\n".join(body_parts)
+        except Exception as e:
+            extracted_text = f"[Could not parse .eml: {e}]"
+    else:
+        # Try as plain text
+        try:
+            extracted_text = raw.decode("utf-8", errors="replace")[:20000]
+        except Exception:
+            return JSONResponse({"error": f"Unsupported file type: {fname}"}, status_code=400)
+
+    # ── Build the AI question ──
+    user_q = question.strip() if question else ""
+    if not user_q:
+        user_q = "Read this document and extract all load/shipment details. Present them in a table with columns: EFJ, Account, Move Type, Carrier, Origin, Destination, Container/Load#, Rate. If there are multiple loads, list them all."
+
+    if image_b64:
+        # Use Claude vision — pass image directly
+        result = await ai_assistant.ask_ai_with_image(user_q, image_b64, fname)
+    elif extracted_text:
+        full_q = f"{user_q}\n\n--- Document: {file.filename} ---\n{extracted_text[:30000]}"
+        result = await ai_assistant.ask_ai(full_q)
+    else:
+        return JSONResponse({"error": "Could not extract content from file"}, status_code=400)
+
     return JSONResponse(result)

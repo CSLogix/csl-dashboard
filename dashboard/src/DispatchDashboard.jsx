@@ -78,6 +78,7 @@ const STATUS_MAP = {
   "missing invoice": "missing_invoice",
   "missing_invoice": "missing_invoice",
   "billed and closed": "billed_closed",
+  "billed & closed": "billed_closed",
   "billed_closed": "billed_closed",
   "ppwk needed": "ppwk_needed",
   "ppwk_needed": "ppwk_needed",
@@ -864,12 +865,15 @@ function CommandPalette({ open, query, setQuery, index, setIndex, shipments, onS
 // ═══════════════════════════════════════════════════════════════
 // ASK AI — Command palette overlay with Claude tool-calling
 // ═══════════════════════════════════════════════════════════════
-function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, initialQuery, onConsumeInitialQuery }) {
+function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, initialQuery, onConsumeInitialQuery, initialFiles, onConsumeInitialFiles, onBulkCreated }) {
   const inputRef = useRef(null);
   const scrollRef = useRef(null);
+  const fileInputRef = useRef(null);
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState([]);
+  const [dragOverBody, setDragOverBody] = useState(false);
 
   useEffect(() => { if (open && inputRef.current) setTimeout(() => inputRef.current.focus(), 80); }, [open]);
 
@@ -880,27 +884,60 @@ function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, initialQuery, onCon
       if (onConsumeInitialQuery) onConsumeInitialQuery();
     }
   }, [open, initialQuery]);
+
+  // Handle initial files (e.g. from drag onto Ask AI button)
+  useEffect(() => {
+    if (open && initialFiles && initialFiles.length > 0) {
+      setAttachedFiles(initialFiles);
+      if (onConsumeInitialFiles) onConsumeInitialFiles();
+      // Auto-send with default prompt
+      setTimeout(() => askAI("", initialFiles), 300);
+    }
+  }, [open, initialFiles]);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, loading]);
 
-  const askAI = useCallback(async (q) => {
-    if (!q.trim() || loading) return;
-    const userMsg = { role: "user", text: q.trim() };
+  const askAI = useCallback(async (q, filesOverride) => {
+    const files = filesOverride || attachedFiles;
+    const hasFiles = files && files.length > 0;
+    if (!q.trim() && !hasFiles) return;
+    if (loading) return;
+
+    const displayText = q.trim() || (hasFiles ? `📎 ${files.map(f => f.name).join(", ")}` : "");
+    const userMsg = { role: "user", text: displayText, files: hasFiles ? files.map(f => ({ name: f.name, size: f.size })) : undefined };
     setMessages(prev => [...prev, userMsg]);
     setQuery("");
+    setAttachedFiles([]);
     setLoading(true);
     try {
-      const res = await apiFetchFn(`${API_BASE}/api/ask-ai`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q.trim() }),
-      });
+      let res;
+      if (hasFiles) {
+        // Multipart upload
+        const fd = new FormData();
+        fd.append("file", files[0]); // primary file
+        fd.append("question", q.trim());
+        res = await apiFetchFn(`${API_BASE}/api/ask-ai/upload`, {
+          method: "POST",
+          body: fd,
+        });
+      } else {
+        res = await apiFetchFn(`${API_BASE}/api/ask-ai`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: q.trim() }),
+        });
+      }
       const data = await res.json();
-      setMessages(prev => [...prev, { role: "ai", text: data.answer || data.error || "No response", tool_calls: data.tool_calls || [], sources: data.sources || [] }]);
+      const aiMsg = { role: "ai", text: data.answer || data.error || "No response", tool_calls: data.tool_calls || [], sources: data.sources || [] };
+      setMessages(prev => [...prev, aiMsg]);
+      // If bulk_create_loads was called, notify parent to refresh
+      if (data.tool_calls && data.tool_calls.some(tc => tc.tool === "bulk_create_loads") && onBulkCreated) {
+        onBulkCreated();
+      }
     } catch (e) {
       setMessages(prev => [...prev, { role: "ai", text: `Error: ${e.message}` }]);
     }
     setLoading(false);
-  }, [loading, API_BASE, apiFetchFn]);
+  }, [loading, API_BASE, apiFetchFn, attachedFiles, onBulkCreated]);
 
   const handleKey = (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); askAI(query); }
@@ -989,7 +1026,14 @@ function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, initialQuery, onCon
     <div role="presentation" onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)", zIndex: Z.palette + 10, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "8vh" }}>
       <div role="dialog" aria-modal="true" aria-label="Ask AI"
         onClick={e => e.stopPropagation()}
-        style={{ width: 640, maxHeight: "78vh", background: "#0C1017", border: "1px solid rgba(0,212,170,0.25)", borderRadius: 16, overflow: "hidden", boxShadow: "0 0 60px rgba(0,212,170,0.12), 0 20px 60px rgba(0,0,0,0.6)", fontFamily: "'Plus Jakarta Sans', sans-serif", animation: "fade-in 0.15s ease", display: "flex", flexDirection: "column" }}>
+        onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "copy"; setDragOverBody(true); }}
+        onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverBody(false); }}
+        onDrop={e => {
+          e.preventDefault(); e.stopPropagation(); setDragOverBody(false);
+          const files = Array.from(e.dataTransfer.files || []);
+          if (files.length > 0) setAttachedFiles(prev => [...prev, ...files]);
+        }}
+        style={{ width: 640, maxHeight: "78vh", background: "#0C1017", border: dragOverBody ? "2px solid #00D4AA" : "1px solid rgba(0,212,170,0.25)", borderRadius: 16, overflow: "hidden", boxShadow: dragOverBody ? "0 0 40px rgba(0,212,170,0.3), 0 20px 60px rgba(0,0,0,0.6)" : "0 0 60px rgba(0,212,170,0.12), 0 20px 60px rgba(0,0,0,0.6)", fontFamily: "'Plus Jakarta Sans', sans-serif", animation: "fade-in 0.15s ease", display: "flex", flexDirection: "column", transition: "border 0.15s, box-shadow 0.15s" }}>
 
         {/* Header */}
         <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1028,7 +1072,16 @@ function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, initialQuery, onCon
           {messages.map((msg, i) => (
             <div key={i} style={{ marginBottom: 12, display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start" }}>
               {msg.role === "user" ? (
-                <div style={{ background: "rgba(0,212,170,0.1)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 12, padding: "8px 14px", maxWidth: "85%", color: "rgba(255,255,255,0.9)", fontSize: 12, lineHeight: 1.5 }}>{msg.text}</div>
+                <div style={{ background: "rgba(0,212,170,0.1)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 12, padding: "8px 14px", maxWidth: "85%", color: "rgba(255,255,255,0.9)", fontSize: 12, lineHeight: 1.5 }}>
+                  {msg.files && msg.files.length > 0 && (
+                    <div style={{ marginBottom: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {msg.files.map((f, fi) => (
+                        <span key={fi} style={{ fontSize: 9, padding: "2px 6px", borderRadius: 6, background: "rgba(0,212,170,0.15)", border: "1px solid rgba(0,212,170,0.25)" }}>📎 {f.name}</span>
+                      ))}
+                    </div>
+                  )}
+                  {msg.text}
+                </div>
               ) : (
                 <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "12px 16px", maxWidth: "95%", width: "100%" }}>
                   {msg.tool_calls && msg.tool_calls.length > 0 && (
@@ -1056,23 +1109,43 @@ function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, initialQuery, onCon
           )}
         </div>
 
+        {/* Attached files bar */}
+        {attachedFiles.length > 0 && (
+          <div style={{ padding: "6px 20px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {attachedFiles.map((f, i) => (
+              <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 8, background: "rgba(0,212,170,0.1)", border: "1px solid rgba(0,212,170,0.2)", fontSize: 10, color: "#00D4AA" }}>
+                📎 {f.name} <span style={{ opacity: 0.5 }}>({(f.size / 1024).toFixed(0)}KB)</span>
+                <span onClick={() => setAttachedFiles(prev => prev.filter((_, j) => j !== i))} style={{ cursor: "pointer", marginLeft: 2, opacity: 0.6 }}>✕</span>
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* Input area */}
-        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "12px 20px", display: "flex", gap: 10, alignItems: "flex-end" }}>
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "12px 20px", display: "flex", gap: 8, alignItems: "flex-end" }}>
+          <input ref={fileInputRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx,.csv,.tsv,.eml,.msg,.txt" style={{ display: "none" }}
+            onChange={e => { if (e.target.files?.[0]) { setAttachedFiles(prev => [...prev, e.target.files[0]]); e.target.value = ""; } }} />
+          <button onClick={() => fileInputRef.current?.click()} title="Attach file (PDF, image, spreadsheet)"
+            style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.4)", fontSize: 14, cursor: "pointer", flexShrink: 0, lineHeight: 1, transition: "all 0.15s" }}
+            onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,212,170,0.1)"; e.currentTarget.style.color = "#00D4AA"; e.currentTarget.style.borderColor = "rgba(0,212,170,0.3)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "rgba(255,255,255,0.4)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}>
+            📎
+          </button>
           <textarea ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={handleKey}
-            placeholder="Ask about carriers, rates, load status, or paste a rate con..."
+            placeholder={attachedFiles.length > 0 ? "Ask about the attached file, or press Enter to analyze..." : "Ask about carriers, rates, load status, or drag a PDF here..."}
             rows={1}
             style={{ flex: 1, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 14px", color: "rgba(255,255,255,0.9)", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none", resize: "none", lineHeight: 1.5, minHeight: 38, maxHeight: 100 }}
             onFocus={e => e.target.style.borderColor = "rgba(0,212,170,0.3)"}
             onBlur={e => e.target.style.borderColor = "rgba(255,255,255,0.08)"} />
-          <button onClick={() => askAI(query)} disabled={!query.trim() || loading}
-            style={{ padding: "10px 18px", borderRadius: 10, border: "none", background: query.trim() && !loading ? "linear-gradient(135deg, #00D4AA, #00B894)" : "rgba(255,255,255,0.06)", color: query.trim() && !loading ? "#0A0F1C" : "rgba(255,255,255,0.2)", fontSize: 12, fontWeight: 700, cursor: query.trim() && !loading ? "pointer" : "default", fontFamily: "inherit", transition: "all 0.15s", flexShrink: 0 }}>
+          <button onClick={() => askAI(query)} disabled={(!query.trim() && attachedFiles.length === 0) || loading}
+            style={{ padding: "10px 18px", borderRadius: 10, border: "none", background: (query.trim() || attachedFiles.length > 0) && !loading ? "linear-gradient(135deg, #00D4AA, #00B894)" : "rgba(255,255,255,0.06)", color: (query.trim() || attachedFiles.length > 0) && !loading ? "#0A0F1C" : "rgba(255,255,255,0.2)", fontSize: 12, fontWeight: 700, cursor: (query.trim() || attachedFiles.length > 0) && !loading ? "pointer" : "default", fontFamily: "inherit", transition: "all 0.15s", flexShrink: 0 }}>
             {loading ? "..." : "Ask"}
           </button>
         </div>
 
         {/* Footer */}
         <div style={{ padding: "6px 20px 10px", display: "flex", justifyContent: "space-between", fontSize: 9, color: "rgba(255,255,255,0.15)" }}>
-          <span>Enter to send · Shift+Enter for newline · ESC to close</span>
+          <span>Enter to send · Shift+Enter for newline · 📎 to attach · ESC to close</span>
           <span>Ctrl+K to toggle</span>
         </div>
       </div>
@@ -1163,6 +1236,7 @@ export default function DispatchDashboard() {
   const [cmdkIndex, setCmdkIndex] = useState(0);
   const [askAIOpen, setAskAIOpen] = useState(false);
   const [askAIInitialQuery, setAskAIInitialQuery] = useState(null);
+  const [askAIInitialFiles, setAskAIInitialFiles] = useState(null);
   const [askAIDragOver, setAskAIDragOver] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -1171,12 +1245,16 @@ export default function DispatchDashboard() {
   const [pwSuccess, setPwSuccess] = useState(false);
   const [repScoreboard, setRepScoreboard] = useState([]);
   const { accountHealth, setAccountHealth } = useAppStore();
+  const { emailDrafts, setEmailDrafts, draftToast, setDraftToast } = useAppStore();
+  const [showDraftModal, setShowDraftModal] = useState(false);
+  const [activeDraft, setActiveDraft] = useState(null);  // full draft being reviewed
+  const [draftSending, setDraftSending] = useState(false);
 
   // Fetch rep scoreboard
   const fetchScoreboard = useCallback(async () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/rep-scoreboard`);
-      if (res.ok) { const data = await res.json(); setRepScoreboard(data.scoreboard || []); }
+      if (res.ok) { const data = await res.json(); setRepScoreboard(Array.isArray(data) ? data : data.scoreboard || []); }
     } catch {}
   }, []);
 
@@ -1184,7 +1262,15 @@ export default function DispatchDashboard() {
   const fetchAccountHealth = useCallback(async () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/account-health`);
-      if (res.ok) { const data = await res.json(); setAccountHealth(data.accounts || []); }
+      if (res.ok) { const data = await res.json(); setAccountHealth(Array.isArray(data) ? data : data.accounts || []); }
+    } catch {}
+  }, []);
+
+  // Fetch pending email drafts
+  const fetchEmailDrafts = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/email-drafts?status=draft`);
+      if (res.ok) { const data = await res.json(); setEmailDrafts(Array.isArray(data) ? data : data.drafts || []); }
     } catch {}
   }, []);
 
@@ -1353,12 +1439,14 @@ export default function DispatchDashboard() {
     fetchProfiles();
     fetchScoreboard();
     fetchAccountHealth();
+    fetchEmailDrafts();
     const fallback = setTimeout(() => setLoaded(true), 10000);
     return () => clearTimeout(fallback);
-  }, [fetchData, fetchProfiles, fetchScoreboard, fetchAccountHealth]);
+  }, [fetchData, fetchProfiles, fetchScoreboard, fetchAccountHealth, fetchEmailDrafts]);
   useEffect(() => { const i = setInterval(fetchData, 90000); return () => clearInterval(i); }, [fetchData]);
   useEffect(() => { const i = setInterval(fetchScoreboard, 120000); return () => clearInterval(i); }, [fetchScoreboard]);
   useEffect(() => { const i = setInterval(fetchAccountHealth, 120000); return () => clearInterval(i); }, [fetchAccountHealth]);
+  useEffect(() => { const i = setInterval(fetchEmailDrafts, 30000); return () => clearInterval(i); }, [fetchEmailDrafts]);
 
   // Deep link support: ?view=billing&load=EFJ-XXXX
   useEffect(() => {
@@ -1497,47 +1585,58 @@ export default function DispatchDashboard() {
 
   const handleStatusUpdate = (shipmentId, newStatus) => {
     const ship = shipments.find(s => s.id === shipmentId);
-    const sList = ship && isFTLShipment(ship) ? FTL_STATUSES : STATUSES;
+    if (!ship) return;
+    const shipEfj = ship.efj;
+    const sList = isFTLShipment(ship) ? FTL_STATUSES : STATUSES;
     const statusLabel = sList.find(st => st.key === newStatus)?.label || BILLING_STATUSES.find(st => st.key === newStatus)?.label || newStatus;
     // Generate event alert
-    if (ship) {
-      setEventAlerts(prev => [{ id: `status_change-${ship.efj}-${newStatus}-${Date.now()}`, type: ALERT_TYPES.STATUS_CHANGE,
-        efj: ship.efj, account: ship.account, rep: resolveRepForShipment(ship),
-        message: `${ship.loadNumber || ship.efj} \u2192 ${statusLabel}`,
-        detail: `${ship.account}${ship.carrier ? " | " + ship.carrier : ""}`, timestamp: Date.now(), shipmentId: ship.id,
-      }, ...prev].slice(0, 200));
+    setEventAlerts(prev => [{ id: `status_change-${shipEfj}-${newStatus}-${Date.now()}`, type: ALERT_TYPES.STATUS_CHANGE,
+      efj: shipEfj, account: ship.account, rep: resolveRepForShipment(ship),
+      message: `${ship.loadNumber || shipEfj} \u2192 ${statusLabel}`,
+      detail: `${ship.account}${ship.carrier ? " | " + ship.carrier : ""}`, timestamp: Date.now(), shipmentId: ship.id,
+    }, ...prev].slice(0, 200));
+    // Update local state immediately
+    setShipments(prev => prev.map(s => s.efj === shipEfj ? { ...s, status: newStatus, rawStatus: statusLabel, synced: false } : s));
+    setSelectedShipment(prev => prev && prev.efj === shipEfj ? { ...prev, status: newStatus, rawStatus: statusLabel, synced: false } : prev);
+    addSheetLog(`Status -> ${statusLabel} | ${ship.loadNumber}`);
+    // Persist to backend
+    if (shipEfj) {
+      apiFetch(`${API_BASE}/api/v2/load/${shipEfj}/status`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      }).then(async r => {
+        if (r.ok) {
+          const resp = await r.json().catch(() => ({}));
+          setShipments(p => p.map(x => x.efj === shipEfj ? { ...x, synced: true } : x));
+          setSelectedShipment(prev => prev && prev.efj === shipEfj ? { ...prev, synced: true } : prev);
+          addSheetLog(`Synced -> Postgres | ${ship.loadNumber}`);
+          if (resp.draft_id) {
+            setDraftToast({ id: resp.draft_id, efj: shipEfj, loadNumber: ship.loadNumber });
+            fetchEmailDrafts();
+            setTimeout(() => setDraftToast(null), 8000);
+          }
+          // Delivered → auto-transition to Ready to Close Out
+          if (newStatus === "delivered") {
+            setTimeout(() => handleStatusUpdate(ship.id, "ready_to_close"), 1500);
+          }
+          // Billed & Closed → remove from active view
+          if (newStatus === "billed_closed") {
+            setTimeout(() => {
+              setShipments(p => p.filter(x => x.efj !== shipEfj));
+              setSelectedShipment(null);
+            }, 2000);
+          }
+        } else {
+          addSheetLog(`Sync failed (${r.status}) | ${ship.loadNumber}`);
+          setShipments(p => p.map(x => x.efj === shipEfj ? { ...x, synced: true } : x));
+          setSelectedShipment(prev => prev && prev.efj === shipEfj ? { ...prev, synced: true } : prev);
+        }
+      }).catch(() => {
+        addSheetLog(`Sync error | ${ship.loadNumber}`);
+        setShipments(p => p.map(x => x.efj === shipEfj ? { ...x, synced: true } : x));
+        setSelectedShipment(prev => prev && prev.efj === shipEfj ? { ...prev, synced: true } : prev);
+      });
     }
-    setShipments(prev => prev.map(s => {
-      if (s.id === shipmentId) {
-        addSheetLog(`Status -> ${statusLabel} | ${s.loadNumber}`);
-        if (s.efj) {
-          apiFetch(`${API_BASE}/api/v2/load/${s.efj}/status`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: statusLabel }),
-          }).then(r => {
-            if (r.ok) {
-              setShipments(p => p.map(x => x.id === shipmentId ? { ...x, synced: true } : x));
-              addSheetLog(`Synced -> Postgres | ${s.loadNumber}`);
-              // Delivered → auto-transition to Ready to Close Out
-              if (newStatus === "delivered") {
-                setTimeout(() => handleStatusUpdate(shipmentId, "ready_to_close"), 1500);
-              }
-              // Billed & Closed → remove from active view
-              if (newStatus === "billed_closed") {
-                setTimeout(() => {
-                  setShipments(p => p.filter(x => x.id !== shipmentId));
-                  setSelectedShipment(null);
-                }, 2000);
-              }
-            }
-            else { addSheetLog(`Sync failed (${r.status}) | ${s.loadNumber}`); setShipments(p => p.map(x => x.id === shipmentId ? { ...x, synced: true } : x)); }
-          }).catch(() => { addSheetLog(`Sync error | ${s.loadNumber}`); setShipments(p => p.map(x => x.id === shipmentId ? { ...x, synced: true } : x)); });
-        } else { setTimeout(() => { setShipments(p => p.map(x => x.id === shipmentId ? { ...x, synced: true } : x)); }, 800); }
-        return { ...s, status: newStatus, rawStatus: statusLabel, synced: false };
-      }
-      return s;
-    }));
-    setSelectedShipment(prev => prev ? { ...prev, status: newStatus, rawStatus: statusLabel, synced: false } : prev);
   };
 
   const handleFieldEdit = (shipmentId, field, value) => {
@@ -1568,8 +1667,9 @@ export default function DispatchDashboard() {
         if (r.ok) {
           setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, synced: true } : s));
           addSheetLog(`${field} saved | ${shipment.loadNumber}`);
-        } else { addSheetLog(`Save failed (${r.status}) | ${shipment.loadNumber}`); }
-      } catch { addSheetLog(`Save error | ${shipment.loadNumber}`); }
+          showSaveToast(`${field.charAt(0).toUpperCase() + field.slice(1)} saved`);
+        } else { addSheetLog(`Save failed (${r.status}) | ${shipment.loadNumber}`); showSaveToast(`Failed to save ${field}`, "error"); }
+      } catch { addSheetLog(`Save error | ${shipment.loadNumber}`); showSaveToast(`Failed to save ${field}`, "error"); }
     } else {
       setTimeout(() => setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, synced: true } : s)), 800);
     }
@@ -1577,6 +1677,7 @@ export default function DispatchDashboard() {
 
   // Inline metadata update — writes to Postgres via POST /api/v2/load/{efj}/update
   const META_TO_PG = { truckType: "equipment_type", customerRate: "customer_rate", carrierPay: "carrier_pay", notes: "notes" };
+  const FIELD_LABELS = { customerRate: "Customer Rate", carrierPay: "Carrier Pay", notes: "Notes", truckType: "Equipment" };
   const handleMetadataUpdate = async (shipment, field, value) => {
     const stateKey = field;
     setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, [stateKey]: value, synced: false } : s));
@@ -1591,8 +1692,9 @@ export default function DispatchDashboard() {
         if (r.ok) {
           setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, synced: true } : s));
           addSheetLog(`${field} saved | ${shipment.loadNumber}`);
-        } else { addSheetLog(`Save failed (${r.status}) | ${shipment.loadNumber}`); }
-      } catch { addSheetLog(`Save error | ${shipment.loadNumber}`); }
+          showSaveToast(`${FIELD_LABELS[field] || field} saved`);
+        } else { addSheetLog(`Save failed (${r.status}) | ${shipment.loadNumber}`); showSaveToast(`Failed to save ${FIELD_LABELS[field] || field}`, "error"); }
+      } catch { addSheetLog(`Save error | ${shipment.loadNumber}`); showSaveToast(`Failed to save ${FIELD_LABELS[field] || field}`, "error"); }
     } else {
       setTimeout(() => setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, synced: true } : s)), 800);
     }
@@ -1747,6 +1849,7 @@ export default function DispatchDashboard() {
         input, select, textarea { font-family: 'Plus Jakarta Sans', sans-serif; }
         @keyframes pulse-glow { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
         @keyframes slide-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slide-down { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes slide-right { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
         @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -1834,9 +1937,11 @@ export default function DispatchDashboard() {
         index={cmdkIndex} setIndex={setCmdkIndex} shipments={shipments}
         onSelect={(s) => handleLoadClick(s)} onClose={() => setCmdkOpen(false)} />
 
-      <AskAIOverlay open={askAIOpen} onClose={() => { setAskAIOpen(false); setAskAIInitialQuery(null); }}
+      <AskAIOverlay open={askAIOpen} onClose={() => { setAskAIOpen(false); setAskAIInitialQuery(null); setAskAIInitialFiles(null); }}
         API_BASE={API_BASE} apiFetchFn={apiFetch}
-        initialQuery={askAIInitialQuery} onConsumeInitialQuery={() => setAskAIInitialQuery(null)} />
+        initialQuery={askAIInitialQuery} onConsumeInitialQuery={() => setAskAIInitialQuery(null)}
+        initialFiles={askAIInitialFiles} onConsumeInitialFiles={() => setAskAIInitialFiles(null)}
+        onBulkCreated={() => fetchData()} />
 
       {/* ═══ MAIN CONTENT ═══ */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative", zIndex: Z.main }}>
@@ -1853,16 +1958,39 @@ export default function DispatchDashboard() {
               </div>
             )}
             <button onClick={() => setAskAIOpen(true)}
-              title="Ask AI — Ctrl+K — drag an inbox email here for instant summary"
+              title="Ask AI — Ctrl+K — drag files or inbox emails here"
               onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setAskAIDragOver(true); }}
               onDragLeave={() => setAskAIDragOver(false)}
               onDrop={e => {
                 e.preventDefault();
                 setAskAIDragOver(false);
+                // Check for file drops first (PDF from Outlook/desktop)
+                const files = Array.from(e.dataTransfer.files || []);
+                if (files.length > 0) {
+                  setAskAIInitialFiles(files);
+                  setAskAIOpen(true);
+                  return;
+                }
+                // Check for document hub drag
                 try {
-                  const thread = JSON.parse(e.dataTransfer.getData("application/json"));
+                  const data = JSON.parse(e.dataTransfer.getData("application/json"));
+                  if (data.type === "document") {
+                    // Fetch the document as a blob and pass as file
+                    (async () => {
+                      try {
+                        const res = await apiFetch(`${API_BASE}/api/load/${data.efj}/documents/${data.doc_id}/download?inline=true`);
+                        const blob = await res.blob();
+                        const file = new File([blob], data.original_name || "document.pdf", { type: blob.type });
+                        setAskAIInitialFiles([file]);
+                        setAskAIOpen(true);
+                      } catch { setAskAIOpen(true); }
+                    })();
+                    return;
+                  }
+                  // Inbox email thread drag (existing behavior)
+                  const thread = data;
                   const msgs = (thread.messages || []).map(m =>
-                    `[${m.direction === "sent" ? "CSL" : "External"}] ${(m.sender || "").replace(/<[^>]+>/g, "").trim()}: ${(m.body_preview || "").slice(0, 200)}`
+                    `[${m.direction === "sent" ? "CSL" : "External"}] ${(m.sender || "").replace(/<[^>]+>/g, "").trim()}: ${(m.body_text || m.body_preview || "").slice(0, 1000)}`
                   ).join("\n");
                   const prompt = `Summarize this email thread and tell me what action is needed:\n\nSubject: ${thread.latest_subject || "(no subject)"}\nFrom: ${(thread.latest_sender || "").replace(/<[^>]+>/g, "").trim()}\nEFJ: ${thread.efj || "unmatched"}\nType: ${thread.email_type || "general"}\nMessages (${thread.message_count || 1}):\n${msgs}\n\nAI classification: ${thread.ai_summary || "none"}`;
                   setAskAIInitialQuery(prompt);
@@ -1881,9 +2009,25 @@ export default function DispatchDashboard() {
               <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
                 <path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5z" />
               </svg>
-              {askAIDragOver ? "Drop to Summarize" : "Ask AI"}
+              {askAIDragOver ? "Drop to Analyze" : "Ask AI"}
               <span style={{ fontSize: 8, opacity: 0.5, marginLeft: 2 }}>⌘K</span>
             </button>
+            {/* Email Drafts badge */}
+            {emailDrafts.length > 0 && (
+              <button onClick={() => { setShowDraftModal(true); }}
+                style={{ position: "relative", display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, fontSize: 10, fontWeight: 700, cursor: "pointer",
+                  background: "rgba(37,99,235,0.10)", color: "#60a5fa", border: "1px solid rgba(37,99,235,0.25)", letterSpacing: "0.3px", transition: "all 0.15s" }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(37,99,235,0.18)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(37,99,235,0.10)"; }}>
+                <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" />
+                </svg>
+                Drafts
+                <span style={{ background: "#2563eb", color: "#fff", borderRadius: "50%", width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800 }}>
+                  {emailDrafts.length}
+                </span>
+              </button>
+            )}
             <ClockDisplay lastSyncTime={lastSyncTime} apiError={apiError} />
             {/* User menu */}
             {currentUser && (
@@ -1939,7 +2083,8 @@ export default function DispatchDashboard() {
         </div>
 
         {/* View Content */}
-        <div className="dash-content-area" style={{ flex: 1, overflow: "auto", padding: "0 32px 24px" }}>
+        <div className="dash-content-area" style={{ flex: 1, overflow: "auto", display: "grid", justifyContent: "center" }}>
+          <div style={{ maxWidth: 1400, width: "100vw", padding: "0 24px 24px", boxSizing: "border-box" }}>
           {apiError && (
             <div style={{ margin: "8px 0", padding: "10px 16px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", display: "flex", alignItems: "center", justifyContent: "space-between", animation: "slide-up 0.3s ease" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -2015,7 +2160,7 @@ export default function DispatchDashboard() {
               onBack={() => { setActiveView("dashboard"); setDateFilter(null); setActiveStatus("all"); setActiveAccount("All Accounts"); }} />
           )}
           {activeView === "history" && (
-            <HistoryView loaded={loaded} handleLoadClick={handleLoadClick} />
+            <HistoryView loaded={loaded} handleLoadClick={handleLoadClick} handleStatusUpdate={handleStatusUpdate} />
           )}
           {activeView === "inbox" && (
             <InboxView handleLoadClick={handleLoadClick} />
@@ -2039,6 +2184,7 @@ export default function DispatchDashboard() {
             <UserManagementView API_BASE={API_BASE} apiFetchFn={apiFetch} />
           )}
           </>)}
+          </div>
         </div>
       </div>
 
@@ -2177,6 +2323,137 @@ export default function DispatchDashboard() {
           );
         })}
       </nav>
+
+      {/* ═══ DRAFT TOAST ═══ */}
+      {draftToast && (
+        <div style={{ position: "fixed", top: 16, right: 24, zIndex: 9999, display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderRadius: 12,
+          background: "linear-gradient(135deg, rgba(37,99,235,0.15), rgba(37,99,235,0.08))", border: "1px solid rgba(37,99,235,0.3)", backdropFilter: "blur(12px)",
+          animation: "slide-down 0.3s ease", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>
+          <span style={{ fontSize: 16 }}>📧</span>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#60a5fa" }}>Email draft ready</div>
+            <div style={{ fontSize: 10, color: "#8B95A8" }}>{draftToast.loadNumber || draftToast.efj}</div>
+          </div>
+          <button onClick={() => {
+            setDraftToast(null);
+            // Open draft modal with this specific draft
+            apiFetch(`${API_BASE}/api/email-drafts/${draftToast.id}`).then(r => r.ok ? r.json() : null).then(d => {
+              if (d) { setActiveDraft(d); setShowDraftModal(true); }
+            });
+          }} style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(37,99,235,0.2)", border: "1px solid rgba(37,99,235,0.3)", color: "#60a5fa", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
+            Review
+          </button>
+          <button onClick={() => setDraftToast(null)} style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 14, padding: "0 4px" }}>✕</button>
+        </div>
+      )}
+
+      {/* ═══ EMAIL DRAFT MODAL ═══ */}
+      {showDraftModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal, animation: "fade-in 0.2s ease" }}
+          onClick={() => { setShowDraftModal(false); setActiveDraft(null); }}>
+          <div role="dialog" aria-modal="true" onClick={e => e.stopPropagation()} className="glass-strong"
+            style={{ borderRadius: 20, padding: 28, width: 600, maxHeight: "85vh", overflow: "auto", animation: "slide-up 0.3s ease", border: "1px solid rgba(37,99,235,0.2)" }}>
+            {/* Header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 10, background: "linear-gradient(135deg, #2563eb, #3b82f6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📧</div>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: "#F0F2F5" }}>Email Drafts</div>
+                  <div style={{ fontSize: 11, color: "#8B95A8" }}>{emailDrafts.length} pending</div>
+                </div>
+              </div>
+              <button onClick={() => { setShowDraftModal(false); setActiveDraft(null); }}
+                style={{ background: "none", border: "none", color: "#8B95A8", cursor: "pointer", fontSize: 18, padding: "2px 6px" }}>✕</button>
+            </div>
+
+            {/* Draft list or detail */}
+            {activeDraft ? (
+              <div>
+                <button onClick={() => setActiveDraft(null)} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: "#60a5fa", cursor: "pointer", fontSize: 11, fontWeight: 600, marginBottom: 12, padding: 0 }}>
+                  ← Back to list
+                </button>
+                {/* Editable fields */}
+                <div style={{ display: "grid", gap: 10, marginBottom: 16 }}>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px" }}>To</label>
+                    <input value={activeDraft.to_email} onChange={e => setActiveDraft({...activeDraft, to_email: e.target.value})}
+                      style={{ width: "100%", padding: "8px 12px", borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#F0F2F5", fontSize: 12, outline: "none", boxSizing: "border-box" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px" }}>CC</label>
+                    <input value={activeDraft.cc_email || ""} onChange={e => setActiveDraft({...activeDraft, cc_email: e.target.value})}
+                      style={{ width: "100%", padding: "8px 12px", borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#F0F2F5", fontSize: 12, outline: "none", boxSizing: "border-box" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px" }}>Subject</label>
+                    <input value={activeDraft.subject} onChange={e => setActiveDraft({...activeDraft, subject: e.target.value})}
+                      style={{ width: "100%", padding: "8px 12px", borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#F0F2F5", fontSize: 12, outline: "none", boxSizing: "border-box" }} />
+                  </div>
+                </div>
+                {/* HTML preview */}
+                <div style={{ borderRadius: 12, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)", marginBottom: 16, maxHeight: 320, overflowY: "auto" }}>
+                  <iframe srcDoc={activeDraft.body_html} style={{ width: "100%", height: 300, border: "none", background: "#fff" }} title="Email Preview" />
+                </div>
+                {/* Actions */}
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                  <button onClick={async () => {
+                    try {
+                      await apiFetch(`${API_BASE}/api/email-drafts/${activeDraft.id}/dismiss`, { method: "POST" });
+                      setActiveDraft(null); fetchEmailDrafts();
+                      addSheetLog(`Draft dismissed | ${activeDraft.efj}`);
+                    } catch {}
+                  }} style={{ padding: "8px 16px", borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                    Dismiss
+                  </button>
+                  <button disabled={draftSending} onClick={async () => {
+                    setDraftSending(true);
+                    try {
+                      // Save any edits first
+                      await apiFetch(`${API_BASE}/api/email-drafts/${activeDraft.id}`, {
+                        method: "PATCH", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ to_email: activeDraft.to_email, cc_email: activeDraft.cc_email, subject: activeDraft.subject }),
+                      });
+                      // Send
+                      const res = await apiFetch(`${API_BASE}/api/email-drafts/${activeDraft.id}/send`, { method: "POST" });
+                      if (res.ok) {
+                        addSheetLog(`Email sent | ${activeDraft.efj}`);
+                        setActiveDraft(null); fetchEmailDrafts();
+                      } else {
+                        const err = await res.json().catch(() => ({}));
+                        addSheetLog(`Email send failed: ${err.detail || res.status} | ${activeDraft.efj}`);
+                      }
+                    } catch (e) { addSheetLog(`Email send error | ${activeDraft.efj}`); }
+                    finally { setDraftSending(false); }
+                  }} style={{ padding: "8px 20px", borderRadius: 8, background: draftSending ? "rgba(34,197,94,0.08)" : "linear-gradient(135deg, #16a34a, #22c55e)",
+                    border: "none", color: "#fff", fontSize: 11, fontWeight: 700, cursor: draftSending ? "wait" : "pointer", opacity: draftSending ? 0.6 : 1, display: "flex", alignItems: "center", gap: 6 }}>
+                    {draftSending ? "Sending..." : "Send Email"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {emailDrafts.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "32px 0", color: "#5A6478", fontSize: 12 }}>No pending drafts</div>
+                ) : emailDrafts.map(d => (
+                  <div key={d.id} onClick={async () => {
+                    const res = await apiFetch(`${API_BASE}/api/email-drafts/${d.id}`);
+                    if (res.ok) { const full = await res.json(); setActiveDraft(full); }
+                  }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 10, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", cursor: "pointer", transition: "all 0.15s" }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(37,99,235,0.06)"; e.currentTarget.style.borderColor = "rgba(37,99,235,0.2)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.02)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)"; }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: d.milestone === "delivered" ? "#16a34a" : d.milestone === "picked_up" ? "#2563eb" : d.milestone === "in_transit" ? "#4f46e5" : d.milestone === "out_for_delivery" ? "#ea580c" : "#0d9488", flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#F0F2F5", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.subject}</div>
+                      <div style={{ fontSize: 10, color: "#5A6478", marginTop: 2 }}>{d.efj} · {d.milestone?.replace(/_/g, " ")} · {new Date(d.created_at).toLocaleTimeString()}</div>
+                    </div>
+                    <svg width="14" height="14" fill="none" stroke="#5A6478" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6" /></svg>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Change Password Modal */}
       {showChangePassword && (
@@ -2458,7 +2735,7 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
 
 
   return (
-    <div style={{ animation: loaded ? "fade-in 0.5s ease" : "none" }}>
+    <div style={{ animation: loaded ? "fade-in 0.5s ease" : "none", width: "100%" }}>
       {/* Title */}
       <div style={{ padding: "16px 0 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
@@ -2529,7 +2806,7 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
       </div>
 
       {/* Row 1: Rep Scoreboard + Account Health */}
-      <div className="dash-grid-2" style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 14, marginBottom: 14, animation: loaded ? "slide-up 0.4s ease 0.1s both" : "none" }}>
+      <div className="dash-grid-2" style={{ display: "grid", gridTemplateColumns: "6fr 4fr", gap: 24, marginBottom: 14, animation: loaded ? "slide-up 0.4s ease 0.1s both" : "none" }}>
         {/* Rep Scoreboard v2 — Offense + Defense */}
         <div className="dash-panel" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -2541,11 +2818,11 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
             </div>
           </div>
           {/* Column headers — Offense | Defense divider */}
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 1fr) 52px 64px 1px 60px 48px 48px", gap: 2, marginBottom: 6, padding: "0 10px", alignItems: "center" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 1fr) 56px 68px 1px 64px 52px 52px", gap: 4, marginBottom: 6, padding: "0 10px", alignItems: "center" }}>
             <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Rep</div>
             <div style={{ fontSize: 9, color: "#3B82F6", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active loads (not archived)">Loads</div>
             <div style={{ fontSize: 9, color: "#3B82F6", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active revenue (all priced loads)">Rev</div>
-            <div style={{ background: "rgba(255,255,255,0.06)", height: 20 }} />
+            <div style={{ background: "rgba(255,255,255,0.06)", width: 1, height: 16, justifySelf: "center" }} />
             <div style={{ fontSize: 9, color: "#F59E0B", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Unreplied threads + avg response speed">Comms</div>
             <div style={{ fontSize: 9, color: "#F59E0B", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Delivered loads missing POD or carrier invoice">Docs</div>
             <div style={{ fontSize: 9, color: "#F59E0B", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Loads with no update > 24h">Stale</div>
@@ -2590,7 +2867,7 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
               return (
                 <div key={r.name} className="rep-card"
                   onClick={() => onSelectRep(r.name)}
-                  style={{ display: "grid", gridTemplateColumns: "minmax(120px, 1fr) 52px 64px 1px 60px 48px 48px", gap: 2, alignItems: "center", padding: "7px 10px", borderRadius: 10,
+                  style={{ display: "grid", gridTemplateColumns: "minmax(120px, 1fr) 56px 68px 1px 64px 52px 52px", gap: 4, alignItems: "center", padding: "7px 10px", borderRadius: 10,
                     background: onFire ? "rgba(239,68,68,0.04)" : "rgba(255,255,255,0.02)",
                     border: `1px solid ${onFire ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.06)"}`, cursor: "pointer",
                     transition: "border-color 0.15s" }}>
@@ -2632,7 +2909,7 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
                   </div>
 
                   {/* Divider */}
-                  <div style={{ background: "rgba(255,255,255,0.04)", height: "100%", minHeight: 24 }} />
+                  <div style={{ background: "rgba(255,255,255,0.06)", width: 1, height: 28, justifySelf: "center" }} />
 
                   {/* COMMS (defense — merged unreplied + speed) */}
                   <div style={{ textAlign: "center", cursor: unreplied > 0 ? "pointer" : "default", borderRadius: 6, padding: "3px 2px", background: commsBg, transition: "background 0.15s" }}
@@ -2711,18 +2988,18 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
                   const pct = maxLoads > 0 ? (acct.loads / maxLoads) * 100 : 0;
                   return (
                     <div key={i} onClick={() => onFilterAccount && onFilterAccount(acct.name)}
-                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderRadius: 8, transition: "background 0.15s ease", cursor: "pointer" }}
+                      style={{ display: "grid", gridTemplateColumns: "24px 1fr 40px 36px", gap: 10, alignItems: "center", padding: "6px 10px", borderRadius: 8, transition: "background 0.15s ease", cursor: "pointer" }}
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
                       onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                       <div style={{ width: 24, height: 24, borderRadius: 6, background: `linear-gradient(135deg, ${acct.color}33, ${acct.color}66)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{acct.name[0]}</div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, color: "#F0F2F5", fontWeight: 600, marginBottom: 4 }}>{acct.name}</div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: "#F0F2F5", fontWeight: 600, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acct.name}</div>
                         <div style={{ height: 3, borderRadius: 100, background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
                           <div style={{ height: "100%", width: `${pct}%`, borderRadius: 100, background: `linear-gradient(90deg, ${acct.color}, ${acct.color}88)`, transition: "width 0.8s ease" }} />
                         </div>
                       </div>
-                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, fontSize: 13 }}>{acct.loads}</span>
-                      {acct.alerts > 0 && <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 6, background: "#EF444418", color: "#F87171", fontWeight: 700, border: "1px solid #EF444422", fontFamily: "'JetBrains Mono', monospace" }}>{acct.alerts}</span>}
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, fontSize: 13, textAlign: "right" }}>{acct.loads}</span>
+                      <span style={{ minWidth: 36, textAlign: "center" }}>{acct.alerts > 0 ? <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 6, background: "#EF444418", color: "#F87171", fontWeight: 700, border: "1px solid #EF444422", fontFamily: "'JetBrains Mono', monospace" }}>{acct.alerts}</span> : null}</span>
                     </div>
                   );
                 })}
@@ -2747,7 +3024,7 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
                 </span>
               </div>
               {/* Column headers */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 38px 46px 36px 42px", gap: 2, marginBottom: 4, padding: "0 8px", alignItems: "center" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 44px 52px 42px 48px", gap: 4, marginBottom: 4, padding: "0 10px", alignItems: "center" }}>
                 <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Account</div>
                 <div style={{ fontSize: 9, color: "#3B82F6", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active loads">Lds</div>
                 <div style={{ fontSize: 9, color: "#3B82F6", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Revenue">Rev</div>
@@ -2755,11 +3032,11 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
                 <div style={{ fontSize: 9, color: "#10B981", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Health score (loads − friction)">HS</div>
               </div>
               {/* Account rows */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 340, overflowY: "auto" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 3, maxHeight: 340, overflowY: "auto", scrollbarGutter: "stable" }}>
                 {sortedAccounts.map(a => (
                   <div key={a.account}
                     onClick={() => onFilterAccount && onFilterAccount(a.account)}
-                    style={{ display: "grid", gridTemplateColumns: "1fr 38px 46px 36px 42px", gap: 2, alignItems: "center", padding: "5px 8px", borderRadius: 8,
+                    style={{ display: "grid", gridTemplateColumns: "1fr 44px 52px 42px 48px", gap: 4, alignItems: "center", padding: "6px 10px", borderRadius: 8,
                       background: hsBg(a.health_score), border: `1px solid ${hsBorder(a.health_score)}`, cursor: "pointer", transition: "border-color 0.15s" }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.15)"; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = hsBorder(a.health_score); }}>
@@ -2798,7 +3075,7 @@ function OverviewView({ loaded, shipments, apiStats, accountOverview, apiError, 
       </div>
 
       {/* Row 2: Today's Actions + Live Alerts */}
-      <div className="dash-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, animation: loaded ? "slide-up 0.4s ease 0.2s both" : "none" }}>
+      <div className="dash-grid-2" style={{ display: "grid", gridTemplateColumns: "6fr 4fr", gap: 24, animation: loaded ? "slide-up 0.4s ease 0.2s both" : "none" }}>
         {/* Today's Action Items */}
         <div className="dash-panel" style={{ padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -3184,9 +3461,23 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
                     <td style={{ ...tdBase, position: "relative" }}
                       onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                       {isEditing && inlineEditField === "status" ? (
-                        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 220, overflowY: "auto", minWidth: 120 }}>
+                        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
                           {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                             const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
+                            return (
+                              <button key={st.key} onClick={(e) => { e.stopPropagation(); handleStatusUpdate(s.id, st.key); setInlineEditId(null); }}
+                                style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", padding: "4px 7px", borderRadius: 4, border: "none",
+                                  background: s.status === st.key ? `${stc.main}18` : "transparent",
+                                  color: s.status === st.key ? stc.main : "#8B95A8", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                                <span style={{ width: 4, height: 4, borderRadius: "50%", background: stc.main, flexShrink: 0 }} />
+                                {st.label}
+                              </button>
+                            );
+                          })}
+                          <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />
+                          <div style={{ fontSize: 8, fontWeight: 700, color: "#5A6478", letterSpacing: "1.5px", padding: "2px 7px", textTransform: "uppercase" }}>Billing</div>
+                          {BILLING_STATUSES.map(st => {
+                            const stc = BILLING_STATUS_COLORS[st.key] || { main: "#94a3b8" };
                             return (
                               <button key={st.key} onClick={(e) => { e.stopPropagation(); handleStatusUpdate(s.id, st.key); setInlineEditId(null); }}
                                 style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", padding: "4px 7px", borderRadius: 4, border: "none",
@@ -3918,7 +4209,7 @@ function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, hand
 // ═══════════════════════════════════════════════════════════════
 // HISTORY VIEW — Completed/Archived Loads
 // ═══════════════════════════════════════════════════════════════
-function HistoryView({ loaded, handleLoadClick }) {
+function HistoryView({ loaded, handleLoadClick, handleStatusUpdate }) {
   const [completedLoads, setCompletedLoads] = useState([]);
   const [historySearch, setHistorySearch] = useState("");
   const [historyRep, setHistoryRep] = useState("all");
@@ -3926,6 +4217,36 @@ function HistoryView({ loaded, handleLoadClick }) {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
+  const [inlineStatusId, setInlineStatusId] = useState(null);
+
+  const handleHistoryStatusUpdate = async (load, newStatusKey) => {
+    setInlineStatusId(null);
+    const allStatuses = [...STATUSES, ...FTL_STATUSES, ...BILLING_STATUSES];
+    const statusLabel = allStatuses.find(st => st.key === newStatusKey)?.label || newStatusKey;
+    // Optimistic local update
+    setCompletedLoads(prev => prev.map(l => l.efj === load.efj ? { ...l, status: statusLabel } : l));
+    // API call
+    try {
+      const r = await apiFetch(`${API_BASE}/api/v2/load/${load.efj}/status`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatusKey }),
+      });
+      if (!r.ok) setCompletedLoads(prev => prev.map(l => l.efj === load.efj ? { ...l, status: load.status } : l));
+    } catch { setCompletedLoads(prev => prev.map(l => l.efj === load.efj ? { ...l, status: load.status } : l)); }
+    // Also update in parent shipments if present
+    if (handleStatusUpdate) {
+      const mapped = mapShipment(load, 9999);
+      if (mapped?.id) handleStatusUpdate(mapped.id, newStatusKey);
+    }
+  };
+
+  // Close inline status dropdown on outside click
+  useEffect(() => {
+    if (!inlineStatusId) return;
+    const close = () => setInlineStatusId(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [inlineStatusId]);
 
   const fetchHistory = useCallback(async () => {
     setLoading(true);
@@ -4011,12 +4332,32 @@ function HistoryView({ loaded, handleLoadClick }) {
                       <span style={{ color: "#F0F2F5" }}>{l.destination}</span>
                     </td>
                     <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{l.delivery_date || l.delivery}</td>
-                    <td style={{ padding: "8px 14px" }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 20, fontSize: 9, fontWeight: 700,
-                        color: sc.main, background: `${sc.main}12`, border: `1px solid ${sc.main}22`, textTransform: "uppercase" }}>
-                        <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
-                        {l.status}
-                      </span>
+                    <td style={{ padding: "8px 14px", position: "relative" }}
+                      onClick={(e) => { e.stopPropagation(); setInlineStatusId(inlineStatusId === l.efj ? null : l.efj); }}>
+                      {inlineStatusId === l.efj ? (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 3, position: "absolute", left: 0, top: 0, zIndex: 20,
+                          background: "#161B26", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "8px 10px",
+                          boxShadow: "0 8px 32px rgba(0,0,0,0.6)", minWidth: 200 }}
+                          onClick={e => e.stopPropagation()}>
+                          {[...STATUSES, ...BILLING_STATUSES].filter(st => st.key !== "all").map(st => {
+                            const stc = STATUS_COLORS[st.key] || BILLING_STATUS_COLORS[st.key] || { main: "#94a3b8" };
+                            const isActive = normalizeStatus(l.status) === st.key;
+                            return (
+                              <button key={st.key} onClick={(e) => { e.stopPropagation(); handleHistoryStatusUpdate(l, st.key); }}
+                                style={{ padding: "3px 8px", fontSize: 8, fontWeight: 700, borderRadius: 14, cursor: "pointer",
+                                  border: `1px solid ${isActive ? stc.main + "66" : "rgba(255,255,255,0.06)"}`,
+                                  background: isActive ? `${stc.main}18` : "transparent",
+                                  color: isActive ? stc.main : "#64748b", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{st.label}</button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 20, fontSize: 9, fontWeight: 700,
+                          color: sc.main, background: `${sc.main}12`, border: `1px solid ${sc.main}22`, textTransform: "uppercase", cursor: "pointer" }}>
+                          <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
+                          {l.status}
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: "8px 14px", fontSize: 10, color: "#8B95A8" }}>{l.rep}</td>
                   </tr>
@@ -5074,6 +5415,15 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
   const [editingMpUrl, setEditingMpUrl] = useState(false);
   const [mpUrlVal, setMpUrlVal] = useState("");
 
+  // Save feedback toast
+  const [saveToast, setSaveToast] = useState(null); // { message, type: "success"|"error" }
+  const saveToastTimer = useRef(null);
+  const showSaveToast = (message, type = "success") => {
+    if (saveToastTimer.current) clearTimeout(saveToastTimer.current);
+    setSaveToast({ message, type });
+    saveToastTimer.current = setTimeout(() => setSaveToast(null), 2200);
+  };
+
   // Auto-expand emails section + scroll when opened from NEEDS REPLY
   useEffect(() => {
     if (expandEmailsOnOpen && loadEmails.length > 0) {
@@ -5154,17 +5504,21 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
     return () => document.removeEventListener("keydown", handleKey, true);
   }, [previewDoc]);
 
+  const DRIVER_LABELS = { driverName: "Driver", driverPhone: "Phone", driverEmail: "Driver Email", carrierEmail: "Carrier Email", trailerNumber: "Trailer", macropointUrl: "MP URL" };
   const saveDriverField = async (field, value) => {
     if (!selectedShipment?.efj) return;
     setDriverSaving(true);
     try {
-      await apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/driver`, {
+      const r = await apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/driver`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [field]: value }),
       });
-      setDriverInfo(prev => ({ ...prev, [field]: value }));
-    } catch {}
+      if (r.ok) {
+        setDriverInfo(prev => ({ ...prev, [field]: value }));
+        showSaveToast?.(`${DRIVER_LABELS[field] || field} saved`);
+      } else { showSaveToast?.(`Failed to save ${DRIVER_LABELS[field] || field}`, "error"); }
+    } catch { showSaveToast?.(`Failed to save ${DRIVER_LABELS[field] || field}`, "error"); }
     setDriverSaving(false);
     setDriverEditing(null);
   };
@@ -5232,7 +5586,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
           hub: selectedShipment.hub, project: selectedShipment.project, mpStatus: selectedShipment.mpStatus,
         },
         emails: loadEmails.slice(0, 10).map(e => ({
-          subject: e.subject, sender: e.sender, body_preview: e.body_preview,
+          subject: e.subject, sender: e.sender, body_preview: e.body_text || e.body_preview,
           has_attachments: e.has_attachments, attachment_names: e.attachment_names, sent_at: e.sent_at,
         })),
         documents: loadDocs.map(d => ({ doc_type: d.doc_type, original_name: d.original_name, size_bytes: d.size_bytes, uploaded_at: d.uploaded_at })),
@@ -5337,8 +5691,8 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 800, color: "#F0F2F5" }}>{selectedShipment.loadNumber}</div>
               <div style={{ fontSize: 10, color: "#8B95A8", marginTop: 2 }}>{selectedShipment.container} | {selectedShipment.moveType}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4 }}>
-                <span style={{ width: 5, height: 5, borderRadius: "50%", background: selectedShipment.synced ? "#34d399" : "#fbbf24" }} />
-                <span style={{ fontSize: 9, color: selectedShipment.synced ? "#34d399" : "#fbbf24", fontWeight: 600 }}>{selectedShipment.synced ? "Synced" : "Syncing..."}</span>
+                <span style={{ width: 5, height: 5, borderRadius: "50%", background: selectedShipment.synced ? "#34d399" : "#fbbf24", animation: selectedShipment.synced ? "none" : "pulse 1s ease infinite" }} />
+                <span style={{ fontSize: 9, color: selectedShipment.synced ? "#34d399" : "#fbbf24", fontWeight: 600 }}>{selectedShipment.synced ? "All changes saved" : "Saving..."}</span>
               </div>
               {/* Trip Progress Bar */}
               {(selectedShipment.moveType === "FTL") && (() => {
@@ -5573,7 +5927,7 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                         );
                       })}
                     </div>
-                    {(["delivered", "empty_return", "need_pod", "pod_received", "driver_paid", "ready_to_close", "missing_invoice", "billed_closed", "ppwk_needed", "waiting_confirmation", "waiting_cx_approval", "cx_approved"].includes(selectedShipment.status)) && (
+                    {(true) && (
                       <>
                         <div style={{ fontSize: 8, fontWeight: 700, color: "#5A6478", letterSpacing: "2px", marginTop: 10, marginBottom: 6, textTransform: "uppercase" }}>Billing</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
@@ -5990,7 +6344,14 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
                   const size = doc.size_bytes < 1024 ? `${doc.size_bytes}B` : doc.size_bytes < 1048576 ? `${Math.round(doc.size_bytes / 1024)}KB` : `${(doc.size_bytes / 1048576).toFixed(1)}MB`;
                   const date = doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString("en-US", { month: "numeric", day: "numeric" }) : "";
                   return (
-                    <div key={doc.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                    <div key={doc.id} draggable="true"
+                      onDragStart={e => {
+                        e.dataTransfer.setData("application/json", JSON.stringify({ type: "document", efj: slideShipment?.efj, doc_id: doc.id, doc_type: doc.doc_type, original_name: doc.original_name }));
+                        e.dataTransfer.effectAllowed = "copy";
+                        e.currentTarget.style.opacity = "0.5";
+                      }}
+                      onDragEnd={e => { e.currentTarget.style.opacity = "1"; }}
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, cursor: "pointer" }}
                         onClick={() => setPreviewDoc(doc)}>
                         <span style={{ fontSize: 12, flexShrink: 0 }}>{icon}</span>
@@ -6144,6 +6505,23 @@ function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setSh
           </div>
         </div>
       )}
+      {/* Save toast notification */}
+      {saveToast && (
+        <div style={{
+          position: "fixed", bottom: 24, right: isMobile ? 16 : 16, zIndex: Z.panel + 10,
+          display: "flex", alignItems: "center", gap: 8,
+          background: saveToast.type === "error" ? "rgba(239,68,68,0.95)" : "rgba(16,185,129,0.95)",
+          color: "#fff", padding: "10px 18px", borderRadius: 10,
+          fontSize: 12, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          animation: "fade-in 0.15s ease",
+          backdropFilter: "blur(8px)",
+          maxWidth: isMobile ? "calc(100vw - 32px)" : 340,
+        }}>
+          <span style={{ fontSize: 16 }}>{saveToast.type === "error" ? "\u26A0" : "\u2713"}</span>
+          {saveToast.message}
+        </div>
+      )}
     </>
   );
 }
@@ -6277,17 +6655,21 @@ function DispatchView({
     return () => document.removeEventListener("keydown", handleKey, true);
   }, [previewDoc]);
 
+  const DRIVER_LABELS = { driverName: "Driver", driverPhone: "Phone", driverEmail: "Driver Email", carrierEmail: "Carrier Email", trailerNumber: "Trailer", macropointUrl: "MP URL" };
   const saveDriverField = async (field, value) => {
     if (!selectedShipment?.efj) return;
     setDriverSaving(true);
     try {
-      await apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/driver`, {
+      const r = await apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/driver`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [field]: value }),
       });
-      setDriverInfo(prev => ({ ...prev, [field]: value }));
-    } catch {}
+      if (r.ok) {
+        setDriverInfo(prev => ({ ...prev, [field]: value }));
+        showSaveToast?.(`${DRIVER_LABELS[field] || field} saved`);
+      } else { showSaveToast?.(`Failed to save ${DRIVER_LABELS[field] || field}`, "error"); }
+    } catch { showSaveToast?.(`Failed to save ${DRIVER_LABELS[field] || field}`, "error"); }
     setDriverSaving(false);
     setDriverEditing(null);
   };
@@ -6738,9 +7120,23 @@ function DispatchView({
                   <td style={{ ...cellStyle(colIdx++), position: "relative" }}
                     onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                     {isInlineEditing && inlineEditField === "status" ? (
-                      <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 220, overflowY: "auto", minWidth: 120 }}>
+                      <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
                         {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                           const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
+                          return (
+                            <button key={st.key} onClick={(e) => { e.stopPropagation(); handleStatusUpdate(s.id, st.key); setInlineEditId(null); }}
+                              style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", padding: "4px 7px", borderRadius: 4, border: "none",
+                                background: s.status === st.key ? `${stc.main}18` : "transparent",
+                                color: s.status === st.key ? stc.main : "#8B95A8", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                              <span style={{ width: 4, height: 4, borderRadius: "50%", background: stc.main, flexShrink: 0 }} />
+                              {st.label}
+                            </button>
+                          );
+                        })}
+                        <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />
+                        <div style={{ fontSize: 8, fontWeight: 700, color: "#5A6478", letterSpacing: "1.5px", padding: "2px 7px", textTransform: "uppercase" }}>Billing</div>
+                        {BILLING_STATUSES.map(st => {
+                          const stc = BILLING_STATUS_COLORS[st.key] || { main: "#94a3b8" };
                           return (
                             <button key={st.key} onClick={(e) => { e.stopPropagation(); handleStatusUpdate(s.id, st.key); setInlineEditId(null); }}
                               style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", padding: "4px 7px", borderRadius: 4, border: "none",
@@ -7394,7 +7790,14 @@ function DispatchView({
                       const size = doc.size_bytes < 1024 ? `${doc.size_bytes}B` : doc.size_bytes < 1048576 ? `${Math.round(doc.size_bytes / 1024)}KB` : `${(doc.size_bytes / 1048576).toFixed(1)}MB`;
                       const date = doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString("en-US", { month: "numeric", day: "numeric" }) : "";
                       return (
-                        <div key={doc.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                        <div key={doc.id} draggable="true"
+                          onDragStart={e => {
+                            e.dataTransfer.setData("application/json", JSON.stringify({ type: "document", efj: slideShipment?.efj, doc_id: doc.id, doc_type: doc.doc_type, original_name: doc.original_name }));
+                            e.dataTransfer.effectAllowed = "copy";
+                            e.currentTarget.style.opacity = "0.5";
+                          }}
+                          onDragEnd={e => { e.currentTarget.style.opacity = "1"; }}
+                          style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, cursor: "pointer" }}
                             onClick={() => setPreviewDoc(doc)}>
                             <span style={{ fontSize: 12, flexShrink: 0 }}>{icon}</span>
