@@ -51,7 +51,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 ## Recent Bot Changes (Deployed)
 
 ### Mar 13, 2026 Bot Changes
-- **Multi-user auth**: PG `users` table (bcrypt), individual logins, session tokens carry user_id/role/rep_name. 7 users: CSLogix-EFJ+nancy (admin), radka/janice/allie/John N/Thirdy (rep). Default pw `evans2026`. `/api/me`, `/api/users` CRUD (admin), change-password. Frontend user menu + password modal.
+- **Multi-user auth**: PG `users` table (bcrypt), individual logins, session tokens carry user_id/role/rep_name. 7 users: CSLogix-EFJ+nancy (admin), radka/janice/allie/John N/Thirdy (rep). All passwords set to `CSLogixDispatch247`. `/api/me`, `/api/users` CRUD (admin), change-password. Frontend user menu + password modal. Dev key middleware → CSLogix-EFJ (user_id 1).
 - **Monolith split**: 9,794-line `app.py` → 15 APIRouter modules in `routes/` + `shared.py`. 142 obsolete patch files deleted.
 - **Async cache warming**: `patch_async_cache.py` (#96) — `SheetCache.refresh_if_needed()` returns stale data immediately, background thread refreshes. `/api/shipments` 20s→0.2s worst-case.
 - **Missing endpoints restored**: 6 endpoints lost in monolith split added to `routes/analytics.py` (#97): `/api/rep-scoreboard`, `/api/account-health`, `/api/port-groups`, `/api/rate-history`, `PATCH /api/inbox/{id}/assign-rep`, `PATCH /api/inbox/{id}/mark-actioned`.
