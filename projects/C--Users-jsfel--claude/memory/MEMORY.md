@@ -106,6 +106,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 ## Recent Dashboard Changes (Deployed)
 
 ### Mar 13, 2026 Dashboard Changes (late night)
+- **Smart Inbox Auto-Actions** (#102): Actions column in inbox table with contextual one-click buttons. `getAutoAction(thread)` maps email_type → suggested action. Buttons: "Save [type]" (teal, for doc emails with attachments), "Delivered" (green, delivery confirmations), "Draft" (blue, opens Ask AI with reply context), "Done" (gray, marks actioned). Thread detail panel: "Draft Reply" + "Save Docs" buttons. Backend `POST /api/inbox/{thread_id}/auto-action` — 3 actions: save_attachment (Gmail API download → load_documents + SHA-256 dedup + billing advance check), mark_delivered, mark_actioned. Optimistic UI updates + flash animation.
 - **Status key fix**: `handleStatusUpdate` sends `newStatus` (key) not `statusLabel`. STATUS_MAP added `"billed & closed": "billed_closed"`. HistoryView status dropdown same fix. Drag-to-Ask prompt uses `body_text` (1000 chars) instead of `body_preview` (200 chars). AI summary context uses body_text.
 - **Status update fix** (#100): efj-based matching (not index). Zustand `setSelectedShipment` updater support. Save toast + sync indicator.
 - **csl-export service disabled**: cron-only now.
