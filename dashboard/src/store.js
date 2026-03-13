@@ -33,6 +33,9 @@ export const useAppStore = create((set) => ({
   inboxInitialSearch: null, // set before navigating to inbox to pre-fill search
   inboxInitialRep: null,   // set before navigating to inbox to filter by rep
 
+  // ── Current User ──
+  currentUser: null,  // { id, username, email, role, rep_name }
+
   // ── Data Source Fallback ──
   dataSource: "postgres",  // "postgres" or "sheets"
   systemHealth: null,
@@ -79,6 +82,7 @@ export const useAppStore = create((set) => ({
   setInboxInitialTab: (v) => set({ inboxInitialTab: v }),
   setInboxInitialSearch: (v) => set({ inboxInitialSearch: v }),
   setInboxInitialRep: (v) => set({ inboxInitialRep: v }),
+  setCurrentUser: (v) => set({ currentUser: v }),
   setDataSource: (v) => set({ dataSource: v }),
   setSystemHealth: (v) => set({ systemHealth: v }),
 
