@@ -544,6 +544,10 @@ ACCOUNT_REPS = {
     "Texas International": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "USHA":     {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "MD Metal": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Prolog":  {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "Talatrans": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "LS Cargo": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
+    "GW-World": {"rep": "John F", "email": "John.Feltz@evansdelivery.com"},
 }
 
 
@@ -780,31 +784,60 @@ DATE_RE = re.compile(
 )
 
 ETA_KEYWORDS    = ["eta", "estimated arrival", "est. arrival", "vessel arrival",
-                   "arrival date", "arrives", "port arrival", "ata", "atd"]
-PICKUP_KEYWORDS = ["pickup", "pick up", "pick-up", "available", "lfd",
-                   "last free day", "free time", "available for pickup", "avail",
-                   "gate out", "out gate", "out-gate", "full out"]
+                   "arrival at destination", "destination eta", "pod eta",
+                   "discharge date", "port of discharge", "final arrival",
+                   "port arrival", "ata"]
+# LFD terms checked first; if found, that date wins over discharge/available
+_LFD_TERMS      = ["lfd", "last free day", "free time expires", "per diem starts",
+                   "demurrage starts", "free time"]
+PICKUP_KEYWORDS = ["pickup", "pick up", "pick-up", "available for pickup",
+                   "gate out", "out gate", "out-gate", "full out",
+                   "discharged", "available"] + _LFD_TERMS
 RETURN_KEYWORDS = ["return", "empty return", "empty due", "return date",
                    "empty out", "empty in", "gate in empty"]
 
 
 def _find_date_near_keyword(text, keywords):
-    """Return the first date found on the keyword line itself, or the immediately
-    following line only.  The old 3-line window caused dates from the next field
-    to bleed into the wrong column when carrier pages list fields tightly.
+    """Return the date closest to the matched keyword on the same line,
+    or the first date on the immediately following line.
+
+    When keywords is PICKUP_KEYWORDS, LFD-specific terms (_LFD_TERMS) take
+    priority: if an LFD line is found, its date overrides any earlier
+    discharge/available date.
     """
     lines = [l.strip() for l in text.split("\n") if l.strip()]
+    # For PICKUP_KEYWORDS, try LFD terms first — they should win over discharge
+    if keywords is PICKUP_KEYWORDS:
+        lfd_date = _find_date_near_keyword(text, _LFD_TERMS)
+        if lfd_date:
+            return lfd_date
+        # Fall through to check remaining pickup keywords (excluding LFD terms)
+        keywords = [kw for kw in keywords if kw not in _LFD_TERMS]
+
     for i, line in enumerate(lines):
-        if any(kw in line.lower() for kw in keywords):
-            # Prefer date on the same line (e.g. "ETA: 03/15")
-            m = DATE_RE.search(line)
+        line_lower = line.lower()
+        # Find which keyword matched and its position
+        kw_end = None
+        for kw in keywords:
+            idx = line_lower.find(kw)
+            if idx != -1:
+                kw_end = idx + len(kw)
+                break
+        if kw_end is None:
+            continue
+        # Prefer the closest date after the keyword on same line
+        matches = list(DATE_RE.finditer(line))
+        if matches:
+            after = [m for m in matches if m.start() >= kw_end]
+            if after:
+                return after[0].group(0)
+            # Fall back to last date before keyword (e.g. "03/15 ETA")
+            return matches[-1].group(0)
+        # No date on this line — check the next line only
+        if i + 1 < len(lines):
+            m = DATE_RE.search(lines[i + 1])
             if m:
                 return m.group(0)
-            # Fall back to next line only -- avoids grabbing dates 2+ rows away
-            if i + 1 < len(lines):
-                m = DATE_RE.search(lines[i + 1])
-                if m:
-                    return m.group(0)
     return None
 
 
@@ -1864,6 +1897,9 @@ def _send_email(to_email, cc_email, subject, body):
     msg["From"]    = SMTP_USER
     msg["To"]      = to_email
     if cc_email and cc_email != to_email:
+        # Deduplicate CC addresses
+        cc_list = list(dict.fromkeys(addr.strip() for addr in cc_email.split(",") if addr.strip()))
+        cc_email = ", ".join(cc_list)
         msg["Cc"] = cc_email
     msg.attach(MIMEText(body, "html"))
 
@@ -1883,9 +1919,13 @@ def _send_email(to_email, cc_email, subject, body):
 
 
 def send_account_notification(account_name, account_lookup, changes):
-    """Route a change-alert email to the rep assigned to this account tab."""
+    """Route a change-alert email to the rep assigned to this account tab.
+    DISABLED 2026-03-12: Team requested no more per-account container update emails.
+    Changes still logged to console but email suppressed."""
     if not changes:
         return
+    print(f"  [SUPPRESSED] Container Update email for {account_name} ({len(changes)} changes) — disabled per team request")
+    return  # Email disabled — changes visible in dashboard + bot logs
 
     info      = account_lookup.get(account_name, {})
     rep_email = info.get("email", "")

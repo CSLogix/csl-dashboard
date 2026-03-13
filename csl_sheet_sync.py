@@ -269,6 +269,13 @@ def sync_tolead(gc, creds):
                 load_id = _cell(cols["load_id"])
                 status = _cell(cols["status"])
 
+                # Guard: if efj column has a container/load number (not EFJ prefix),
+                # treat it as load_id to prevent ghost rows with container# as EFJ
+                if efj and not efj.upper().startswith("EFJ"):
+                    if not load_id:
+                        load_id = efj
+                    efj = ""
+
                 if not load_id:
                     continue
 

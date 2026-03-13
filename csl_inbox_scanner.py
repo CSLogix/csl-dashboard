@@ -72,6 +72,7 @@ SMTP_PORT = 587
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 EMAIL_CC = os.getenv("EMAIL_CC", "efj-operations@evansdelivery.com")
+_payment_alert_queue = []  # Batched payment escalation alerts
 
 # Rep → email mapping (matches Account Rep tab in Google Sheet)
 REP_EMAILS = {
@@ -137,6 +138,10 @@ EFJ_PATTERN = re.compile(r"EFJ[\s\-]?(\d{5,6})", re.IGNORECASE)
 CONTAINER_PATTERN = re.compile(r"\b([A-Z]{4}\d{7})\b")
 # BOL/Booking pattern
 BOL_PATTERN = re.compile(r"\b(\d{9,12})\b")
+# Tolead hub ID pattern: LAX/ORD/JFK/DFW + 7-13 digits
+HUB_ID_PATTERN = re.compile(r"\b((?:LAX|ORD|JFK|DFW)\d{7,13})\b", re.IGNORECASE)
+# Prefix-less EFJ: standalone 6-digit number starting with 10 (e.g. 107330)
+BARE_EFJ_PATTERN = re.compile(r"\b(10\d{4})\b")
 
 # Doc type classification by filename (rate handled in classify_doc_type)
 DOC_CLASSIFIERS = [
@@ -144,6 +149,7 @@ DOC_CLASSIFIERS = [
     (re.compile(r"pod|proof.of.delivery|delivery.receipt", re.IGNORECASE), "pod"),
     (re.compile(r"invoice|inv\b", re.IGNORECASE), "invoice"),
     (re.compile(r"screenshot|screen.?shot|snap", re.IGNORECASE), "screenshot"),
+    (re.compile(r"pack(?:ing)?[_\s-]?list", re.IGNORECASE), "packing_list"),
 ]
 
 # Senders that indicate carrier invoices
@@ -583,33 +589,85 @@ def load_reference_cache():
 # ── Matching ──
 def match_email_to_efj(subject, body, attachment_names=None):
     """
-    Try to match an email to a load by EFJ#, container#, or BOL#.
+    Try to match an email to a load by EFJ#, hub ID, container#, bare number, or BOL#.
     Returns the matched EFJ string or None.
     """
     text = f"{subject or ''} {body or ''} {' '.join(attachment_names or [])}"
 
-    # Primary: EFJ# in text
+    # 1. Primary: EFJ# in text (e.g. EFJ107484)
     efj_matches = EFJ_PATTERN.findall(text)
     for num in efj_matches:
-        efj = f"EFJ{num}"
-        return efj  # Return first match
+        return f"EFJ{num}"
 
-    # Secondary: container# lookup
+    # 2. Tolead hub IDs: LAX1260312023, ORD1260301008, etc. → shipments.container
+    hub_matches = HUB_ID_PATTERN.findall(text)
+    if hub_matches:
+        conn = get_conn()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                for hub_id in hub_matches:
+                    cur.execute(
+                        "SELECT efj FROM shipments WHERE container = %s LIMIT 1",
+                        (hub_id.upper(),),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        log.info("Hub ID %s → %s", hub_id, row["efj"])
+                        return row["efj"]
+        finally:
+            put_conn(conn)
+
+    # 3. Container# (MSCU1234567) → shipments.container
     container_matches = CONTAINER_PATTERN.findall(text.upper())
     if container_matches:
-        # Try to find container in sheet data via DB
         conn = get_conn()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 for container in container_matches:
-                    # Search load_documents for this container in original_name
-                    # or search the shipments cache
                     cur.execute(
-                        "SELECT efj FROM email_threads WHERE body_preview ILIKE %s LIMIT 1",
-                        (f"%{container}%",),
+                        "SELECT efj FROM shipments WHERE container = %s LIMIT 1",
+                        (container,),
                     )
                     row = cur.fetchone()
                     if row:
+                        log.info("Container %s → %s", container, row["efj"])
+                        return row["efj"]
+        finally:
+            put_conn(conn)
+
+    # 4. Bare 6-digit EFJ (107330) — only from subject line to reduce false positives
+    bare_matches = BARE_EFJ_PATTERN.findall(subject or "")
+    if bare_matches:
+        conn = get_conn()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                for num in bare_matches:
+                    # Check both with and without EFJ prefix
+                    cur.execute(
+                        "SELECT efj FROM shipments WHERE efj = %s OR efj = %s LIMIT 1",
+                        (f"EFJ{num}", num),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        log.info("Bare number %s → %s", num, row["efj"])
+                        return row["efj"]
+        finally:
+            put_conn(conn)
+
+    # 5. BOL/Booking number → shipments.bol
+    bol_matches = BOL_PATTERN.findall(text)
+    if bol_matches:
+        conn = get_conn()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                for bol in bol_matches:
+                    cur.execute(
+                        "SELECT efj FROM shipments WHERE bol = %s LIMIT 1",
+                        (bol,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        log.info("BOL %s → %s", bol, row["efj"])
                         return row["efj"]
         finally:
             put_conn(conn)
@@ -658,6 +716,188 @@ def classify_doc_type(filename, sender="", subject="", body=""):
         if pattern.search(filename):
             return doc_type
     return "other"
+
+
+# ═══════════════════════════════════════════════════════════════
+# AI DOCUMENT CLASSIFIER — Sonnet vision for ambiguous attachments
+# ═══════════════════════════════════════════════════════════════
+
+_AI_CLASSIFY_VALID_TYPES = {"pod", "carrier_invoice", "bol", "carrier_rate", "customer_rate", "packing_list", "screenshot", "other"}
+_AI_CLASSIFY_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".tiff", ".tif", ".bmp"}
+
+def ai_classify_document(file_data, filename, sender="", subject="", efj=""):
+    """
+    Use Claude Sonnet 4.6 vision to classify a document that regex couldn't identify.
+    Returns a doc_type string. Falls back to "other" on any error.
+    """
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in _AI_CLASSIFY_EXTENSIONS:
+        return "other"
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        encoded = base64.standard_b64encode(file_data).decode("utf-8")
+
+        # Determine media type
+        if ext == ".pdf":
+            media_type = "application/pdf"
+            content_block = {"type": "document", "source": {"type": "base64", "media_type": media_type, "data": encoded}}
+        elif ext in (".jpg", ".jpeg"):
+            media_type = "image/jpeg"
+            content_block = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": encoded}}
+        elif ext == ".png":
+            media_type = "image/png"
+            content_block = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": encoded}}
+        elif ext == ".gif":
+            media_type = "image/gif"
+            content_block = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": encoded}}
+        elif ext == ".webp":
+            media_type = "image/webp"
+            content_block = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": encoded}}
+        elif ext in (".tiff", ".tif"):
+            # Anthropic doesn't support TIFF natively — skip
+            return "other"
+        elif ext == ".bmp":
+            return "other"
+        else:
+            return "other"
+
+        # Limit file size to 5MB for API
+        if len(file_data) > 5 * 1024 * 1024:
+            log.info("  AI classify: skipping %s (>5MB)", filename)
+            return "other"
+
+        prompt = f"""Classify this logistics document into exactly ONE of these types:
+
+- pod (Proof of Delivery — signed delivery receipt, delivery confirmation, receiver signature)
+- carrier_invoice (carrier's freight bill/invoice for payment)
+- bol (Bill of Lading — shipping document, pickup receipt)
+- carrier_rate (rate confirmation, rate agreement from a carrier)
+- customer_rate (rate quote or pricing sent TO a customer)
+- packing_list (itemized list of goods being shipped)
+- screenshot (screenshot of a tracking page or system)
+- other (none of the above, or unreadable)
+
+Context: This was emailed to a freight brokerage (Evans Delivery).
+Filename: {filename}
+Sender: {sender}
+Subject: {subject}
+Load: {efj}
+
+Reply with ONLY the doc_type, nothing else. Example: pod"""
+
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=20,
+            messages=[{"role": "user", "content": [content_block, {"type": "text", "text": prompt}]}],
+        )
+
+        result = resp.content[0].text.strip().lower().replace(" ", "_")
+        # Map common variations
+        if result in ("carrier_invoice", "invoice", "freight_invoice", "freight_bill"):
+            result = "carrier_invoice"
+        elif result in ("pod", "proof_of_delivery", "delivery_receipt"):
+            result = "pod"
+        elif result in ("bol", "bill_of_lading"):
+            result = "bol"
+        elif result in ("rate_confirmation", "rate_con", "carrier_rate"):
+            result = "carrier_rate"
+
+        if result in _AI_CLASSIFY_VALID_TYPES:
+            log.info("  AI classify: %s -> %s (was other)", filename, result)
+            return result
+        else:
+            log.warning("  AI classify: unexpected result '%s' for %s, defaulting to other", result, filename)
+            return "other"
+
+    except Exception as e:
+        log.error("  AI classify error for %s: %s", filename, e)
+        return "other"
+
+
+# ═══════════════════════════════════════════════════════════════
+# AUTO-STATUS ADVANCEMENT — POD + Invoice → Delivered → Ready to Close
+# ═══════════════════════════════════════════════════════════════
+
+_ADVANCE_STATUSES = {
+    "in_transit", "out_for_delivery", "at_delivery",
+    "in transit", "out for delivery", "at delivery",
+}
+_DELIVERED_STATUSES = {"delivered", "completed", "need_pod", "need pod"}
+_TERMINAL_STATUSES = {"billed_closed", "billed & closed", "empty_return", "empty_returned", "cancelled", "ready_to_close", "ready to close"}
+
+def check_and_advance_billing(efj, conn_func, put_conn_func):
+    """
+    After docs are saved for a load, check if POD + carrier_invoice are present.
+    If both exist and load is in a qualifying status, auto-advance.
+    """
+    conn = conn_func()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Check what docs exist for this load
+            cur.execute(
+                "SELECT doc_type, COUNT(*) as cnt FROM load_documents WHERE efj = %s GROUP BY doc_type",
+                (efj,),
+            )
+            doc_counts = {row["doc_type"]: row["cnt"] for row in cur.fetchall()}
+
+            has_pod = doc_counts.get("pod", 0) > 0
+            has_invoice = doc_counts.get("carrier_invoice", 0) > 0
+
+            if not (has_pod and has_invoice):
+                return  # Not ready yet
+
+            # Get current shipment status
+            cur.execute("SELECT status FROM shipments WHERE efj = %s", (efj,))
+            row = cur.fetchone()
+            if not row:
+                return
+
+            current_status = (row["status"] or "").strip().lower()
+
+            if current_status in _TERMINAL_STATUSES:
+                return  # Already past billing
+
+            if current_status in _ADVANCE_STATUSES:
+                # In transit/at delivery → mark delivered, then ready to close
+                cur.execute(
+                    "UPDATE shipments SET status = 'delivered', updated_at = NOW() WHERE efj = %s",
+                    (efj,),
+                )
+                log.info("  Auto-advance: %s status %s -> delivered (POD + invoice present)", efj, current_status)
+                conn.commit()
+
+                # Brief pause then advance to ready_to_close
+                cur.execute(
+                    "UPDATE shipments SET status = 'ready_to_close', updated_at = NOW() WHERE efj = %s AND LOWER(status) = 'delivered'",
+                    (efj,),
+                )
+                log.info("  Auto-advance: %s delivered -> ready_to_close", efj)
+                conn.commit()
+
+            elif current_status in _DELIVERED_STATUSES:
+                # Already delivered → advance to ready_to_close
+                cur.execute(
+                    "UPDATE shipments SET status = 'ready_to_close', updated_at = NOW() WHERE efj = %s",
+                    (efj,),
+                )
+                log.info("  Auto-advance: %s %s -> ready_to_close (POD + invoice present)", efj, current_status)
+                conn.commit()
+
+            else:
+                # Status is something else (pending, at_port, on_vessel, etc.)
+                # Don't auto-advance — the load hasn't been picked up yet
+                log.info("  Auto-advance: skipping %s (status=%s, not qualifying)", efj, current_status)
+
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        log.error("  Auto-advance error for %s: %s", efj, e)
+    finally:
+        put_conn_func(conn)
 
 
 _SIG_STRIP = re.compile(
@@ -926,7 +1166,7 @@ def extract_rate_from_email(subject, body, sender, lane, email_type):
     Extract rate data from carrier email using AI (Haiku) with regex fallback.
     Returns dict with rate_amount, rate_unit, move_type, origin, dest, miles.
     """
-    if email_type != "carrier_rate":
+    if email_type not in ("carrier_rate", "customer_rate"):
         return None
 
     text = f"{subject} {body[:2500]}"
@@ -969,6 +1209,7 @@ def extract_rate_from_email(subject, body, sender, lane, email_type):
 
     result["carrier_name"] = result.get("carrier_name") or sender_name
     result["carrier_email"] = carrier_email
+    result["rate_type"] = "customer" if email_type == "customer_rate" else "carrier"
     return result if result.get("rate_amount") or result.get("origin") else None
 
 
@@ -1202,6 +1443,44 @@ def _send_alert_email(to_email, subject, body_html):
         log.info("Alert email sent to %s: %s", to_email, subject)
     except Exception as e:
         log.error("Failed to send alert email to %s: %s", to_email, e)
+
+
+def _flush_payment_alerts():
+    """Send a single batched email for all queued payment alerts."""
+    global _payment_alert_queue
+    if not _payment_alert_queue:
+        return
+    alerts = _payment_alert_queue[:]
+    _payment_alert_queue = []
+    
+    # Group by rep
+    from collections import defaultdict
+    by_rep = defaultdict(list)
+    for a in alerts:
+        rep_email = _get_rep_email_for_efj(a["efj"])
+        by_rep[rep_email].append(a)
+    
+    for rep_email, items in by_rep.items():
+        efj_list = ", ".join(a["efj"] for a in items)
+        rows = ""
+        for a in items:
+            rows += (f'<tr>'
+                     f'<td style="padding:4px 8px;border-bottom:1px solid #eee;"><b>{a["efj"]}</b></td>'
+                     f'<td style="padding:4px 8px;border-bottom:1px solid #eee;">{a["sender"][:40]}</td>'
+                     f'<td style="padding:4px 8px;border-bottom:1px solid #eee;">{a["summary"][:80]}</td>'
+                     f'</tr>')
+        body = (f'<div style="font-family:Arial,sans-serif;max-width:700px;">'
+                f'<div style="background:#c62828;color:white;padding:10px 14px;border-radius:6px 6px 0 0;">'
+                f'<b>⚠ Payment Alerts ({len(items)})</b></div>'
+                f'<table style="border-collapse:collapse;width:100%;border:1px solid #ddd;border-top:none;">'
+                f'<tr style="background:#c62828;color:white;">'
+                f'<th style="padding:4px 8px;text-align:left;">EFJ</th>'
+                f'<th style="padding:4px 8px;text-align:left;">From</th>'
+                f'<th style="padding:4px 8px;text-align:left;">Summary</th></tr>'
+                f'{rows}</table></div>')
+        subject = f"⚠ PAYMENT ALERTS: {len(items)} loads — {efj_list[:80]}"
+        _send_alert_email(rep_email, subject, body)
+        log.info("Sent batched payment digest to %s (%d alerts)", rep_email, len(items))
 
 
 def _get_rep_email_for_efj(efj):
@@ -1505,6 +1784,12 @@ def process_message(service, msg_id):
                 safe_name = save_attachment(efj, att["filename"], data)
                 doc_type = classify_doc_type(att["filename"], sender=sender, subject=subject, body=body_preview)
 
+                # AI vision fallback for ambiguous docs
+                if doc_type in ("other", "unclassified"):
+                    ai_type = ai_classify_document(data, att["filename"], sender=sender, subject=subject, efj=efj)
+                    if ai_type != "other":
+                        doc_type = ai_type
+
                 # Compute file hash for dedup
                 import hashlib as _hl
                 file_hash = _hl.sha256(data).hexdigest()
@@ -1539,6 +1824,13 @@ def process_message(service, msg_id):
                     put_conn(conn)
             except Exception as e:
                 log.error("  Download failed for %s: %s", att["filename"], e)
+
+        # Auto-advance billing if POD + carrier_invoice now present
+        if saved_docs and efj:
+            try:
+                check_and_advance_billing(efj, get_conn, put_conn)
+            except Exception as _adv_err:
+                log.error("  Billing advance check failed for %s: %s", efj, _adv_err)
 
         # Classify the email itself (carrier/customer quote, lane detection)
         email_type, lane = classify_email_type(sender, subject, body_preview, has_attachments, attachment_names=attachment_names)
@@ -1611,22 +1903,12 @@ def process_message(service, msg_id):
             except Exception as e:
                 log.error("  Rate response detection failed: %s", e)
 
-        # ── Immediate email alert for payment_escalation ──
+        # ── Queue payment alerts for batched digest (not per-load) ──
         if final_email_type == 'payment_escalation' and email_thread_db_id:
-            try:
-                rep_email = _get_rep_email_for_efj(efj)
-                _send_alert_email(
-                    rep_email,
-                    f"⚠ PAYMENT ALERT: {efj} — {subject[:60]}",
-                    f"<h3>Payment Escalation</h3>"
-                    f"<p><b>EFJ:</b> {efj}<br>"
-                    f"<b>From:</b> {sender}<br>"
-                    f"<b>Subject:</b> {subject}<br>"
-                    f"<b>Summary:</b> {ai_summary_text or 'CarrierPay flagged non-payment'}</p>"
-                    
-                )
-            except Exception as e:
-                log.error("  Payment alert email failed: %s", e)
+            _payment_alert_queue.append({
+                "efj": efj, "sender": sender, "subject": subject,
+                "summary": ai_summary_text or "CarrierPay flagged non-payment",
+            })
 
         # ── Digest queue insert for actionable types ──
         _DIGEST_TYPES = {'carrier_rate_response', 'carrier_invoice',
@@ -1960,6 +2242,7 @@ def scan_inbox(service):
         except Exception as e:
             log.error("Error processing %s: %s", msg_id[:12], e)
 
+    _flush_payment_alerts()
     log.info("Processed %d/%d messages", processed, len(messages))
     return processed
 

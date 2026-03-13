@@ -319,7 +319,7 @@ def send_pro_alert(row: list, tab_name: str, account_lookup: dict):
 
 # ── Archive (Postgres only) ────────────────────────────────────────────────────
 def archive_ftl_row_pg(efj, load_num, dest, tab_name, pickup_val, delivery_val,
-                       account_lookup, mp_load_id=None):
+                       account_lookup, mp_load_id=None, stop_times=None):
     """Archive FTL row — Postgres only (no sheet writes)."""
     rep_info = account_lookup.get(tab_name, {})
     rep_email = rep_info.get("email", "")

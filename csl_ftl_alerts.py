@@ -167,7 +167,7 @@ def send_ftl_email(efj: str, load_num: str, status: str, tab_name: str,
     is_failure = any(k in status for k in ("Can't Make It", "Phone Unresponsive", "Unresponsive"))
     hdr_color = "#c62828" if (behind or is_failure) else "#1b5e20"
 
-    subject = f"CSL Tracking \u2014 {tab_name} \u2014 {load_display} \u2014 {status}"
+    subject = f"CSL Tracking \u2014 {tab_name} \u2014 {efj} | {load_display} \u2014 {status}"
 
     rows = ""
     rows += f"<tr><td style=\"padding:4px 8px;color:#555;\">Account</td><td style=\"padding:4px 8px;\">{tab_name}</td></tr>"

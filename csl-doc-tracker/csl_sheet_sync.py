@@ -15,6 +15,33 @@ Designed to run as cron or systemd service.
 import argparse
 import json
 import logging
+
+# ── Status normalizer (sheet title-case → PG snake_case) ──
+_STATUS_NORM = {
+    "at port": "at_port", "pending": "pending", "vessel": "vessel",
+    "on vessel": "vessel", "vessel arrived": "vessel_arrived",
+    "discharged": "discharged", "released": "released", "at delivery": "at_delivery",
+    "in transit": "in_transit", "intransit": "in_transit", "delivered": "delivered",
+    "empty return": "empty_return", "empty returned": "empty_return",
+    "issue": "issue", "returned to port": "returned_to_port", "at yard": "at_yard",
+    "completed": "delivered", "scheduled": "scheduled", "rail": "rail",
+    "transload": "transload", "on site loading": "on_site_loading",
+    "on-site loading": "on_site_loading", "unassigned": "unassigned",
+    "assigned": "assigned", "picking up": "picking_up", "on-site": "on_site",
+    "on site": "on_site", "out for delivery": "out_for_delivery",
+    "need pod": "need_pod", "pod rc'd": "pod_received", "pod received": "pod_received",
+    "driver paid": "driver_paid", "cargo claim": "issue",
+    "cancelled": "cancelled", "canceled": "cancelled",
+    "cancelled tonu": "cancelled_tonu", "canceled tonu": "cancelled_tonu",
+    "ready to close out": "ready_to_close", "ready to close": "ready_to_close",
+    "missing invoice": "missing_invoice", "billed and closed": "billed_closed",
+    "ppwk needed": "ppwk_needed", "waiting on confirmation": "waiting_confirmation",
+    "waiting cx approval": "waiting_cx_approval", "cx approved": "cx_approved",
+}
+def _normalize_status(raw):
+    if not raw:
+        return ""
+    return _STATUS_NORM.get(raw.strip().lower(), raw.strip())
 import os
 import re
 import sys
@@ -133,6 +160,8 @@ def _get_pg_shipments(account: str, hub: str = None) -> dict:
 
 def _upsert_shipment(data: dict):
     """Insert or update a shipment in Postgres."""
+    if "status" in data:
+        data["status"] = _normalize_status(data.get("status", ""))
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
             cur.execute("""
