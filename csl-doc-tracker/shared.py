@@ -446,10 +446,13 @@ BOT_SERVICES = [
 ]
 
 REP_STYLES = {
-    "Eli": {"color": "var(--accent-blue)", "bg": "linear-gradient(135deg,#3b82f6,#2563eb)", "initials": "EL"},
     "Radka": {"color": "var(--accent-green)", "bg": "linear-gradient(135deg,#22c55e,#16a34a)", "initials": "RK"},
     "John F": {"color": "var(--accent-purple)", "bg": "linear-gradient(135deg,#8b5cf6,#7c3aed)", "initials": "JF"},
     "Janice": {"color": "var(--accent-cyan)", "bg": "linear-gradient(135deg,#06b6d4,#0891b2)", "initials": "JC"},
+    "Nancy": {"color": "var(--accent-blue)", "bg": "linear-gradient(135deg,#3b82f6,#2563eb)", "initials": "NF"},
+    "Allie": {"color": "var(--accent-pink)", "bg": "linear-gradient(135deg,#ec4899,#db2777)", "initials": "AM"},
+    "John N": {"color": "var(--accent-indigo)", "bg": "linear-gradient(135deg,#6366f1,#4f46e5)", "initials": "JN"},
+    "Climaco": {"color": "var(--accent-teal)", "bg": "linear-gradient(135deg,#14b8a6,#0d9488)", "initials": "CC"},
     "Boviet": {"color": "var(--accent-amber)", "bg": "linear-gradient(135deg,#f59e0b,#d97706)", "initials": "BV"},
     "Tolead": {"color": "var(--accent-red)", "bg": "linear-gradient(135deg,#ef4444,#dc2626)", "initials": "TL"},
 }

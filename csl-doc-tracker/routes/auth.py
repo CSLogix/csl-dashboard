@@ -46,8 +46,6 @@ def _auth_page_style():
 
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, error: str = Query(default="")):
-    if not auth.is_configured():
-        return RedirectResponse("/setup", status_code=302)
     token = request.cookies.get("csl_session")
     if auth.verify_session_token(token):
         return RedirectResponse("/", status_code=302)
@@ -74,9 +72,10 @@ def login_submit(request: Request, username: str = Form(...), password: str = Fo
     locked, remaining = auth.check_lockout(ip)
     if locked:
         return RedirectResponse(f"/login?error=Too+many+attempts.+Try+again+in+{remaining}+seconds.", status_code=302)
-    if auth.verify_login(username, password):
+    user = auth.verify_login(username, password)
+    if user:
         auth.clear_failed_attempts(ip)
-        token = auth.create_session_token(username)
+        token = auth.create_session_token(user)
         resp = RedirectResponse("/", status_code=302)
         resp.set_cookie("csl_session", token, max_age=86400*7, httponly=True, secure=True, samesite="lax")
         return resp
@@ -89,38 +88,3 @@ def logout():
     resp = RedirectResponse("/login", status_code=302)
     resp.delete_cookie("csl_session")
     return resp
-
-
-@router.get("/setup", response_class=HTMLResponse)
-def setup_page(error: str = Query(default="")):
-    if auth.is_configured():
-        return RedirectResponse("/login", status_code=302)
-    error_html = f'<div class="error-msg">{error}</div>' if error else ""
-    return f"""<!DOCTYPE html><html><head><title>Setup - CSL Dispatch</title>{_auth_page_style()}</head><body>
-    <div class="auth-card">
-        <div class="logo-row"><img src="/logo.svg" alt="logo"><span>CSL Dispatch</span></div>
-        <h1>Create Admin Account</h1>
-        <p>Set your username and password. This can only be done once.</p>
-        {error_html}
-        <form method="POST" action="/setup">
-            <label>Username</label>
-            <input name="username" type="text" required autofocus placeholder="e.g. admin">
-            <label>Password</label>
-            <input name="password" type="password" required minlength="8" placeholder="Min 8 characters">
-            <label>Confirm Password</label>
-            <input name="confirm" type="password" required minlength="8">
-            <button type="submit">Create Account</button>
-        </form>
-    </div></body></html>"""
-
-
-@router.post("/setup")
-def setup_submit(username: str = Form(...), password: str = Form(...), confirm: str = Form(...)):
-    if auth.is_configured():
-        return RedirectResponse("/login", status_code=302)
-    if len(password) < 8:
-        return RedirectResponse("/setup?error=Password+must+be+at+least+8+characters.", status_code=302)
-    if password != confirm:
-        return RedirectResponse("/setup?error=Passwords+do+not+match.", status_code=302)
-    auth.setup_password(username, password)
-    return RedirectResponse("/login", status_code=302)

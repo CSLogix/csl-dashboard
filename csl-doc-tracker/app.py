@@ -34,6 +34,7 @@ from routes import (
     v2,
     webhooks,
     spa,
+    users,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -45,7 +46,7 @@ app = FastAPI(title="CSL AI Dispatch")
 # Authentication middleware
 # ---------------------------------------------------------------------------
 PUBLIC_PATHS = {
-    "/login", "/setup", "/health", "/logo.svg", "/app", "/assets",
+    "/login", "/health", "/logo.svg", "/app", "/assets",
     "/", "/macropoint-webhook", "/webhook-test", "/track",
 }
 
@@ -68,18 +69,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if dev_key and request.headers.get("x-dev-key") == dev_key:
                 client_ip = request.headers.get("x-real-ip", "")
                 if client_ip in dev_ips:
+                    request.state.user = {"user_id": 2, "username": "jsfel", "role": "admin", "rep_name": "John F"}
                     return await call_next(request)
             token = request.cookies.get("csl_session")
             user = auth.verify_session_token(token)
             if not user:
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
+            request.state.user = user
             return await call_next(request)
-        if not auth.is_configured():
-            return RedirectResponse("/setup", status_code=302)
         token = request.cookies.get("csl_session")
         user = auth.verify_session_token(token)
         if not user:
             return RedirectResponse("/login", status_code=302)
+        request.state.user = user
         return await call_next(request)
 
 
@@ -141,6 +143,7 @@ app.include_router(quotes.router)
 app.include_router(health.router)
 app.include_router(v2.router)
 app.include_router(webhooks.router)
+app.include_router(users.router)
 
 # ---------------------------------------------------------------------------
 # Startup / Shutdown
@@ -149,6 +152,7 @@ app.include_router(webhooks.router)
 @app.on_event("startup")
 def startup():
     db.init_pool()
+    auth.init()
 
     # Create driver_contacts table if not exists
     try:
