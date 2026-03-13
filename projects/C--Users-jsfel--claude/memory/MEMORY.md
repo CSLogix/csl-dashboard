@@ -8,7 +8,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [rateiq.md](rateiq.md) — Dray IQ, FTL IQ, OOG IQ, Scorecard, Directory
 - [inbox-command-center.md](inbox-command-center.md) — thread grouping, reply detection, classification
 - [macropoint-integration.md](macropoint-integration.md) — webhook flow, tracking events, GPS inference, timeline
-- [patches-applied.md](patches-applied.md) — full list (94 patches)
+- [patches-applied.md](patches-applied.md) — full list (95 patches)
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
@@ -50,6 +50,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ## Recent Bot Changes (Deployed)
 
+### Mar 12, 2026 Bot Changes (night)
+- **Scanner 5-Tier Matching**: `match_email_to_efj()` upgraded from 2-tier to 5-tier. Was only matching EFJ pattern + searching `email_threads.body_preview` for containers (broken). Now: (1) EFJ pattern, (2) Tolead hub IDs (`LAX1260312023`) → `shipments.container`, (3) Container# (`MSCU1234567`) → `shipments.container`, (4) Bare 6-digit (`107330`) → `shipments.efj` (subject-only), (5) BOL/Booking → `shipments.bol`. Patch: `patch_scanner_matching.py` (#95). Rescue script matched 123/6702 unmatched emails (59 hub, 58 container, 6 BOL).
+
 ### Mar 12, 2026 Bot Changes (late)
 - **Inbox 500 fix**: `psycopg2.InterfaceError: cursor already closed` at `app.py:7239` — inbox enrichment query (`SELECT efj, rep, account FROM shipments`) ran after `with db.get_cursor()` block exited. Fixed with new `cur2` + dict key access. Patches: `fix_inbox_cursor.py` + `fix_inbox_cursor2.py`.
 - **Doc reclassify backfill**: `backfill_reclassify_other_docs.py` — Sonnet 4.6 vision reclassified 192/284 "other" docs (64 BOL, 55 POD, 34 carrier_rate, 27 screenshot, 8 carrier_invoice, 2 packing_list, 2 customer_rate). 9 loads auto-advanced to `ready_to_close`. 82 correctly stayed "other" (logos, signatures, embedded images).
@@ -85,6 +88,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Other**: Boviet invoice writer, dray daily report HTML fix, MP alert subject rename ("CSL Tracking"), margin guard + date/terminal normalizers
 
 ## Recent Dashboard Changes (Deployed)
+
+### Mar 12, 2026 Dashboard Changes (night)
+- **Emails expanded by default**: LoadSlideOver `emailsCollapsed` init changed from `true` → `false`. Emails section visible immediately when slide-over opens.
 
 ### Mar 12, 2026 Dashboard Changes (latest)
 - **Account Health View**: New panel in OverviewView Row 1 right column (next to Rep Scoreboard), replacing old Account Overview bar chart. Backend `GET /api/account-health` (`patch_account_health.py`, patch #94) — 5 SQL queries GROUP BY account: active loads+revenue+margin, unreplied threads, docs needed, neglected loads, rep mapping (DISTINCT ON + ORDER BY updated_at DESC). Grid columns: Account, Loads, Revenue, Friction, Health Score. Health Score = margin_pct - friction_score (friction = unreplied×2 + docs_needed×1.5 + neglected×1). Sort toggle cycles Health→Revenue→Friction. Clickable rows → dispatch filtered by account (Boviet/Tolead → rep dashboard). Fallback to old bar chart if API empty. Margin% column intentionally hidden (owner preference). Grid ratio 1.1fr/0.9fr, content padding 32px. `accountHealth` + `setAccountHealth` in Zustand store, 2-min polling.
@@ -191,9 +197,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Billing Flow**: ✅ DONE — Smart auto-advance (doc-aware), AI doc classifier (Sonnet vision), auto-status advancement (POD+invoice→delivered→ready_to_close), bulk close, Close Ready filter. Full hands-free pipeline until final close click.
 
 ### Radka Feedback Items (from Daily Agenda doc, Mar 12)
-- **Inbox "click does nothing"**: Thread detail panel opens on right (480px, z-index 35) — works but may not be obvious. Consider visual feedback or auto-scroll.
-- ✅ **"Don't need updates by account"**: FIXED — Container Update emails disabled in `send_account_notification()`. Changes still logged to console + visible in dashboard.
-- ✅ **"Emails CC'ing me multiple times"**: FIXED — CC dedup added to `_send_email()`. Payment alerts batched into single digest per rep.
+- ✅ **Inbox "click does nothing"**: FIXED — emails now expanded by default in LoadSlideOver + NEEDS REPLY click indexes to load
+- ✅ **"Don't need updates by account"**: FIXED — Container Update emails disabled
+- ✅ **"Emails CC'ing me multiple times"**: FIXED — CC dedup + payment alert batching
 - **"No links in emails to team"**: Bot sends hyperlinks to tracking sites. Clarify if they want those removed.
 - **Rate IQ "not uploading properly"**: Endpoint exists, code looks correct. Need specific error/screenshot.
 - **Cadi load to Laredo workflow**: Needs clarification on what to do differently.
