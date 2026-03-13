@@ -50,6 +50,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ## Recent Bot Changes (Deployed)
 
+### Mar 13, 2026 Bot Changes
+- **Async cache warming**: `patch_async_cache.py` (#96) — `SheetCache.refresh_if_needed()` now returns stale data immediately and spawns a background thread to refresh from Google Sheets API. Previously blocked requests for ~20s on cache expiry. `/api/shipments` went from 20s→0.2s worst-case.
+
 ### Mar 12, 2026 Bot Changes (night)
 - **Scanner 5-Tier Matching**: `match_email_to_efj()` upgraded from 2-tier to 5-tier. Was only matching EFJ pattern + searching `email_threads.body_preview` for containers (broken). Now: (1) EFJ pattern, (2) Tolead hub IDs (`LAX1260312023`) → `shipments.container`, (3) Container# (`MSCU1234567`) → `shipments.container`, (4) Bare 6-digit (`107330`) → `shipments.efj` (subject-only), (5) BOL/Booking → `shipments.bol`. Patch: `patch_scanner_matching.py` (#95). Rescue script matched 123/6702 unmatched emails (59 hub, 58 container, 6 BOL).
 
