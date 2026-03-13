@@ -50,21 +50,21 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 
 ## Recent Bot Changes (Deployed)
 
-### Mar 13, 2026 Bot Changes (evening)
-- **Session security hardening**: Rotated `.session_secret` key to invalidate all sessions. Fixed fail-open bug in `verify_session_token()` — DB errors now reject sessions instead of allowing them through. Tokens without `user_id` now rejected (blocks pre-migration cookies).
-- **Forced password change**: `/change-password` GET+POST routes added to `routes/auth.py`. Login redirects to change-password when `password_gen <= 1`. Middleware blocks app access until password is set. `admin_reset_password()` bumps `password_gen`, new session token issued after change.
-- **Analytics router fix**: `routes/analytics.py` was not imported/mounted in `app.py` after monolith split — caused 404 on `/api/rep-scoreboard` and `/api/account-health`. Added `analytics` to route imports + `app.include_router(analytics.router)`.
-- **Eli termination**: Deactivated rep. 20 active loads (DSV, EShipping, Kischo, MAO) reassigned to John F in PG. ACCOUNT_REPS already mapped those accounts to John F.
+### Mar 13, 2026 Bot Changes (late night)
+- **Status label→key normalization** (#100): `_STATUS_LABEL_TO_KEY` + `_normalize_status()` in v2.py. `_SHEET_STATUS_MAP` + `_normalize_sheet_status()` in sheet sync. Archive check expanded to include "billed & closed". Fixed EFJ107285 reappearing after Billed & Closed. Normalized 370+ PG rows.
+- **Ask AI body_text + PDF vision** (#101): `body_text` TEXT column on both email tables. Scanner `get_full_body_text()` extracts full plain text or HTML→text. `read_load_document` tool in ai_assistant.py — PDF→image via pdftoppm + Claude Sonnet vision. COALESCE(body_text, body_preview) in AI queries. body_text in inbox API responses. Remaining: backfill body_text for ~6700 existing emails.
 
-### Mar 13, 2026 Bot Changes (latest)
-- **Auto-Status Email Drafter**: `routes/email_drafts.py` — new APIRouter. `email_drafts` PG table. `generate_milestone_draft()` called from v2.py on milestone status changes. SMTP send via Gmail credentials.
-- **Ask AI bulk_create_loads fix**: AI uses `bulk_create_loads` (INSERT into PG) instead of `draft_new_load` (display-only).
+### Mar 13, 2026 Bot Changes (evening)
+- **Session security hardening**: Rotated `.session_secret`, fail-closed verify_session_token(), reject tokens without user_id.
+- **Forced password change**: `/change-password` routes, login redirect when `password_gen <= 1`.
+- **Analytics router fix**: `routes/analytics.py` not mounted after monolith split — added import + include_router.
+- **Eli termination**: Deactivated rep. 20 loads reassigned to John F.
 
 ### Mar 13, 2026 Bot Changes
-- **Multi-user auth**: PG `users` table (bcrypt), individual logins, session tokens carry user_id/role/rep_name. 7 users: CSLogix-EFJ+nancy (admin), radka/janice/allie/John N/Thirdy (rep). `/api/me`, `/api/users` CRUD (admin), change-password. Dev key middleware → CSLogix-EFJ (user_id 1).
-- **Monolith split**: 9,794-line `app.py` → 15 APIRouter modules in `routes/` + `shared.py`. 142 obsolete patch files deleted.
-- **Async cache warming**: (#96) — `SheetCache.refresh_if_needed()` returns stale data immediately, background thread refreshes.
-- **Missing endpoints restored**: 6 endpoints lost in monolith split added to `routes/analytics.py` (#97).
+- **Auto-Status Email Drafter**: `routes/email_drafts.py` — milestone triggers → HTML email drafts. Ask AI `bulk_create_loads` fix.
+- **Multi-user auth**: PG `users` table (bcrypt), 7 users, session tokens carry user_id/role/rep_name.
+- **Monolith split**: 9,794-line `app.py` → 15 APIRouter modules in `routes/` + `shared.py`.
+- **Async cache warming** (#96) + **Missing endpoints restored** (#97).
 
 ### Mar 12, 2026 Bot Changes (night)
 - **Scanner 5-Tier Matching**: `match_email_to_efj()` upgraded from 2-tier to 5-tier. Was only matching EFJ pattern + searching `email_threads.body_preview` for containers (broken). Now: (1) EFJ pattern, (2) Tolead hub IDs (`LAX1260312023`) → `shipments.container`, (3) Container# (`MSCU1234567`) → `shipments.container`, (4) Bare 6-digit (`107330`) → `shipments.efj` (subject-only), (5) BOL/Booking → `shipments.bol`. Patch: `patch_scanner_matching.py` (#95). Rescue script matched 123/6702 unmatched emails (59 hub, 58 container, 6 BOL).
@@ -106,23 +106,13 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 ## Recent Dashboard Changes (Deployed)
 
 ### Mar 13, 2026 Dashboard Changes (late night)
-- **History view status changes**: HistoryView status badges now clickable — inline dropdown with all transport + billing statuses. `handleHistoryStatusUpdate()` calls `/api/v2/load/{efj}/status` (works on archived loads, no `archived` filter in SQL). Optimistic local state update with rollback on failure. Click-outside-to-close handler.
-- **Billing statuses always visible**: LoadSlideOver billing status buttons (Missing Invoice, Ppwk Needed, Billed & Closed, etc.) now show for ALL loads regardless of current status. Previously gated behind post-delivery status whitelist.
-
-### Mar 13, 2026 Dashboard Changes (night)
-- **Status update fix** (#100): `handleStatusUpdate` used index-based `id` (shifts on every 90s poll) — replaced with `efj`-based matching. Zustand `setSelectedShipment` didn't support function updaters (set the function literal instead of calling it, blanking slide-over fields) — added updater support in `store.js`. Also added `selectedShipment` synced-state updates after API callbacks so "Saving..." → "All changes saved" transitions correctly.
-- **csl-export service disabled**: Was running as persistent systemd daemon polling every 60min redundantly alongside cron. Stopped and disabled — cron-only now (7:30 AM & 1:30 PM Mon-Fri).
-
-### Mar 13, 2026 Dashboard Changes (evening)
-- **Save feedback toast**: LoadSlideOver now shows green "✓ [Field] saved" toast (2.2s) after every successful field/driver/financial save. Red "⚠ Failed to save" on errors. Covers: field edits, metadata (customer rate, carrier pay, notes), driver fields, MP URL. Header sync indicator upgraded from tiny dot to "All changes saved" / "Saving..." with pulse animation.
-
-### Mar 13, 2026 Dashboard Changes (latest)
-- **Auto-Status Email Drafter** (#99): Milestone status changes auto-generate HTML email drafts. Blue "Drafts (N)" badge in nav, modal with edit/send/dismiss. Zustand: `emailDrafts` + `draftToast`.
-- **Ask AI load creation fix**: `bulk_create_loads` used instead of display-only `draft_new_load`.
-
-### Mar 13, 2026 Dashboard Changes
-- **Directory ↔ Quote Builder** (#98): Carrier suggestions with port matching + capability filtering. Feedback loop on save.
-- **Overview layout**: CSS Grid centering, gutter alignment, scoreboard/health data parsing fix, padding fix.
+- **Status key fix**: `handleStatusUpdate` sends `newStatus` (key) not `statusLabel`. STATUS_MAP added `"billed & closed": "billed_closed"`. HistoryView status dropdown same fix. Drag-to-Ask prompt uses `body_text` (1000 chars) instead of `body_preview` (200 chars). AI summary context uses body_text.
+- **Status update fix** (#100): efj-based matching (not index). Zustand `setSelectedShipment` updater support. Save toast + sync indicator.
+- **csl-export service disabled**: cron-only now.
+- **Auto-Status Email Drafter** (#99): Milestone triggers → HTML email drafts. Drafts badge + modal.
+- **Directory ↔ Quote Builder** (#98): Carrier suggestions + feedback loop.
+- **Billing statuses always visible**: All loads show billing status buttons regardless of current status.
+- **Save feedback toast**: Green "✓ saved" / Red "⚠ Failed" per field save.
 
 ### Mar 12, 2026 Dashboard Changes (night)
 - **Emails expanded by default**: LoadSlideOver `emailsCollapsed` init changed from `true` → `false`. Emails section visible immediately when slide-over opens.

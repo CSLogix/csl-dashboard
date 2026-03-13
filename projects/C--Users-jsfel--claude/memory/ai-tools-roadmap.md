@@ -1,10 +1,10 @@
 ---
 name: AI Tools Roadmap
-description: Ask AI tool inventory — 23 tools deployed across 4 tiers in ai_assistant.py
+description: Ask AI tool inventory — 24 tools deployed across 4 tiers in ai_assistant.py
 type: project
 ---
 
-## Deployed (23 tools in ai_assistant.py)
+## Deployed (24 tools in ai_assistant.py)
 
 ### Original 5
 - `query_lane_history` — lane rate search
@@ -38,6 +38,7 @@ type: project
 ### Tier 4 — "Outside the Box" (deployed Mar 11, 2026)
 - `daily_briefing` — morning standup: arriving loads, expiring LFDs, containers to return, missing docs, low-margin alerts
 - `smart_dispatch_suggest` — "need carrier for 40HC PNCT→ATL" — combines lane rates + carrier DB + compliance into ranked suggestions
+- `read_load_document` — PDF/image vision: downloads doc from uploads dir, converts PDF→image via pdftoppm, sends to Claude Sonnet vision. Can read rate confirmations, BOLs, PODs, invoices. Deployed Mar 13, 2026.
 
 ### Not implemented (covered by existing tools)
 - `port_schedule_lookup` — functionality covered by existing vessel schedule data in check_efj_status
