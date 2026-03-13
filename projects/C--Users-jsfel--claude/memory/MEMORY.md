@@ -8,15 +8,15 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [rateiq.md](rateiq.md) — Dray IQ, FTL IQ, OOG IQ, Scorecard, Directory
 - [inbox-command-center.md](inbox-command-center.md) — thread grouping, reply detection, classification
 - [macropoint-integration.md](macropoint-integration.md) — webhook flow, tracking events, GPS inference, timeline
-- [patches-applied.md](patches-applied.md) — full list (95 patches)
+- [patches-applied.md](patches-applied.md) — full list (97 patches)
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
 
-## Git — Mar 12, 2026
-- **Latest**: Mar 12 — Inbox fixes + drag-to-AI + AI summary card + filteredShips crash fix
+## Git — Mar 13, 2026
+- **Latest**: Mar 13 — Multi-user auth (frontend+backend), app.py monolith split, user account consolidation
 - **Repo**: `CSLogix/CSLogix_Bot` (private), single `master` branch
-- **VPS, GitHub, Local** all in sync
+- **VPS, GitHub, Local** all in sync at `781d7d6`
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
 - **State files** (`ftl_sent_alerts.json`, `last_check.json`, `export_state.json`) are runtime dedup/state — gitignored, live on VPS only
 
@@ -51,7 +51,10 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 ## Recent Bot Changes (Deployed)
 
 ### Mar 13, 2026 Bot Changes
-- **Async cache warming**: `patch_async_cache.py` (#96) — `SheetCache.refresh_if_needed()` now returns stale data immediately and spawns a background thread to refresh from Google Sheets API. Previously blocked requests for ~20s on cache expiry. `/api/shipments` went from 20s→0.2s worst-case.
+- **Multi-user auth**: PG `users` table (bcrypt), individual logins, session tokens carry user_id/role/rep_name. 7 users: CSLogix-EFJ+nancy (admin), radka/janice/allie/John N/Thirdy (rep). Default pw `evans2026`. `/api/me`, `/api/users` CRUD (admin), change-password. Frontend user menu + password modal.
+- **Monolith split**: 9,794-line `app.py` → 15 APIRouter modules in `routes/` + `shared.py`. 142 obsolete patch files deleted.
+- **Async cache warming**: `patch_async_cache.py` (#96) — `SheetCache.refresh_if_needed()` returns stale data immediately, background thread refreshes. `/api/shipments` 20s→0.2s worst-case.
+- **Missing endpoints restored**: 6 endpoints lost in monolith split added to `routes/analytics.py` (#97): `/api/rep-scoreboard`, `/api/account-health`, `/api/port-groups`, `/api/rate-history`, `PATCH /api/inbox/{id}/assign-rep`, `PATCH /api/inbox/{id}/mark-actioned`.
 
 ### Mar 12, 2026 Bot Changes (night)
 - **Scanner 5-Tier Matching**: `match_email_to_efj()` upgraded from 2-tier to 5-tier. Was only matching EFJ pattern + searching `email_threads.body_preview` for containers (broken). Now: (1) EFJ pattern, (2) Tolead hub IDs (`LAX1260312023`) → `shipments.container`, (3) Container# (`MSCU1234567`) → `shipments.container`, (4) Bare 6-digit (`107330`) → `shipments.efj` (subject-only), (5) BOL/Booking → `shipments.bol`. Patch: `patch_scanner_matching.py` (#95). Rescue script matched 123/6702 unmatched emails (59 hub, 58 container, 6 BOL).
@@ -91,6 +94,12 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Other**: Boviet invoice writer, dray daily report HTML fix, MP alert subject rename ("CSL Tracking"), margin guard + date/terminal normalizers
 
 ## Recent Dashboard Changes (Deployed)
+
+### Mar 13, 2026 Dashboard Changes
+- **Overview layout centering**: Content wrapper switched from `flex-1` to CSS Grid centering (`display: grid, justifyContent: center`) with inner `maxWidth: 1400` div. Fixes off-center content when sidebar is present.
+- **Grid gutter alignment**: Row 1 (Rep Scoreboard + Account Health) and Row 2 (Today's Actions + Live Alerts) both standardized to `gridTemplateColumns: "6fr 4fr"` with `gap: 24`. Previously Row 1 used `1.1fr/0.9fr` causing misaligned center gutter.
+- **Scoreboard/Health data parsing**: Frontend `setRepScoreboard` and `setAccountHealth` now handle both array and object API responses (`Array.isArray(data) ? data : data.scoreboard || []`).
+- **OverviewView padding fix**: Removed duplicate 24px padding (content wrapper already provides it).
 
 ### Mar 12, 2026 Dashboard Changes (night)
 - **Emails expanded by default**: LoadSlideOver `emailsCollapsed` init changed from `true` → `false`. Emails section visible immediately when slide-over opens.
@@ -162,7 +171,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 
 ## SeaRates APIs
 - **Container Tracking** (`tracking.searates.com`): INTEGRATED via `_searates_container_track()`
-- **Ship Schedules v2** (`schedules.searates.com/api/v2`): NOT YET INTEGRATED. User has OpenAPI spec
+- **Ship Schedules v2** (`schedules.searates.com/api/v2`): NOT YET INTEGRATED. Full OpenAPI spec saved → [searates-schedules-api.md](searates-schedules-api.md)
 
 ## Tool Preferences
 - **Always use Vite preview tools** for verification. Preview server: port 5173

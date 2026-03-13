@@ -92,3 +92,5 @@
 | `backfill_reclassify_other_docs.py` | One-time: Sonnet 4.6 vision reclassified 192/284 "other" docs + auto-advanced 9 loads to ready_to_close |
 | `patch_account_health.py` | app.py: GET /api/account-health — 5 SQL queries GROUP BY account (loads, revenue, margin, unreplied, docs_needed, neglected, rep mapping via DISTINCT ON) |
 | `patch_async_cache.py` | app.py: Async cache warming — `refresh_if_needed()` returns stale data instantly, background thread refreshes Google Sheets cache. Eliminated 20s blocking on cache expiry |
+| `patch_scanner_matching.py` | csl_inbox_scanner.py: 5-tier email→EFJ matching (EFJ pattern, hub ID, container#, bare 6-digit, BOL/Booking) + rescue 123 unmatched |
+| `analytics_route.py` | routes/analytics.py: 6 missing endpoints from monolith split — rep-scoreboard, account-health, port-groups, rate-history, assign-rep, mark-actioned |
