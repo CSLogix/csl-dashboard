@@ -69,7 +69,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if dev_key and request.headers.get("x-dev-key") == dev_key:
                 client_ip = request.headers.get("x-real-ip", "")
                 if client_ip in dev_ips:
-                    request.state.user = {"user_id": 2, "username": "jsfel", "role": "admin", "rep_name": "John F"}
+                    request.state.user = {"user_id": 1, "username": "CSLogix-EFJ", "role": "admin", "rep_name": "John F"}
                     return await call_next(request)
             token = request.cookies.get("csl_session")
             user = auth.verify_session_token(token)
