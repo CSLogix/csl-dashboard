@@ -95,3 +95,4 @@
 | `patch_scanner_matching.py` | csl_inbox_scanner.py: 5-tier email→EFJ matching (EFJ pattern, hub ID, container#, bare 6-digit, BOL/Booking) + rescue 123 unmatched |
 | `analytics_route.py` | routes/analytics.py: 6 missing endpoints from monolith split — rep-scoreboard, account-health, port-groups, rate-history, assign-rep, mark-actioned |
 | `patch_carrier_suggest.py` | routes/directory.py: GET /api/directory/suggest (ranked carrier suggestions with port matching + capability filter + lane rates) + POST /api/directory/feedback (quote save → directory update, auto-create unknown carriers with needs_review) + carriers.needs_review column |
+| `email_drafts.py` | routes/email_drafts.py: Auto-Status Email Drafter — milestone status changes → HTML email draft. 5 endpoints (list/get/patch/send/dismiss) + generate_milestone_draft() + SMTP send. email_drafts PG table. v2.py milestone hook. Ask AI bulk_create_loads prompt fix |

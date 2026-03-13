@@ -8,7 +8,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [rateiq.md](rateiq.md) — Dray IQ, FTL IQ, OOG IQ, Scorecard, Directory
 - [inbox-command-center.md](inbox-command-center.md) — thread grouping, reply detection, classification
 - [macropoint-integration.md](macropoint-integration.md) — webhook flow, tracking events, GPS inference, timeline
-- [patches-applied.md](patches-applied.md) — full list (98 patches)
+- [patches-applied.md](patches-applied.md) — full list (99 patches)
 - [tolead-hub-fix.md](tolead-hub-fix.md) — ORD/JFK/LAX/DFW column fixes
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
@@ -26,7 +26,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - **SSH key**: `~/.ssh/id_ed25519` added to GitHub (`CSLogix` account)
 
 ## Dashboard Component Map (DispatchDashboard.jsx)
-Single-file React SPA (~8500 lines). Key components: `DispatchDashboard` (root), `OverviewView`, `RepDashboardView`, `DispatchView`, `InboxView`, `LoadSlideOver`, `AnalyticsView`, `UnbilledView`, `HistoryView`, `AddForm`, `AskAIOverlay`, `RateIQView` (with Directory, Lane Search, Scorecard tabs).
+Single-file React SPA (~10100 lines). Key components: `DispatchDashboard` (root), `OverviewView`, `RepDashboardView`, `DispatchView`, `InboxView`, `LoadSlideOver`, `AnalyticsView`, `UnbilledView`, `HistoryView`, `AddForm`, `AskAIOverlay`, `RateIQView` (with Directory, Lane Search, Scorecard tabs), `UserManagementView`.
 
 ## Services Architecture (as of Mar 2026)
 
@@ -49,6 +49,10 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - `cron_log_parser.py` + `health_check.py` + dashboard "Scheduled Jobs" cron cards
 
 ## Recent Bot Changes (Deployed)
+
+### Mar 13, 2026 Bot Changes (latest)
+- **Auto-Status Email Drafter**: `routes/email_drafts.py` — new APIRouter. `email_drafts` PG table (id, efj, account, milestone, to/cc_email, subject, body_html, status draft/sent/dismissed, timestamps). `generate_milestone_draft()` called from v2.py on milestone status changes. SMTP send via existing Gmail credentials. DB permissions granted to `csl_admin`.
+- **Ask AI bulk_create_loads fix**: ai_assistant.py system prompt + tool description updated so AI uses `bulk_create_loads` (INSERT into PG) instead of `draft_new_load` (display-only) when user asks to create loads.
 
 ### Mar 13, 2026 Bot Changes
 - **Multi-user auth**: PG `users` table (bcrypt), individual logins, session tokens carry user_id/role/rep_name. 7 users: CSLogix-EFJ+nancy (admin), radka/janice/allie/John N/Thirdy (rep). All passwords set to `CSLogixDispatch247`. `/api/me`, `/api/users` CRUD (admin), change-password. Frontend user menu + password modal. Dev key middleware → CSLogix-EFJ (user_id 1).
@@ -94,6 +98,10 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Other**: Boviet invoice writer, dray daily report HTML fix, MP alert subject rename ("CSL Tracking"), margin guard + date/terminal normalizers
 
 ## Recent Dashboard Changes (Deployed)
+
+### Mar 13, 2026 Dashboard Changes (latest)
+- **Auto-Status Email Drafter** (patch #99): When reps change a load to a milestone status (`picked_up`, `in_transit`, `out_for_delivery`, `delivered`, `empty_return`), backend auto-generates HTML email draft with color-coded header (blue/indigo/orange/green/teal). New `routes/email_drafts.py` APIRouter: `generate_milestone_draft()` builds dark-theme HTML template, inserts into `email_drafts` PG table. 5 endpoints: GET list, GET detail, PATCH edit, POST send (SMTP), POST dismiss. Dedup: skips if draft already exists for same EFJ+milestone. v2.py status endpoint hooks milestone detection, returns `draft_id` in response. Frontend: blue "Drafts (N)" badge in top nav (30s polling), modal with draft list + detail view (editable To/CC/Subject, iframe HTML preview), Dismiss/Send Email buttons, toast notification on milestone status change. Zustand: `emailDrafts` + `draftToast` state.
+- **Ask AI load creation fix**: System prompt changed from "use draft_new_load for single loads" to "use bulk_create_loads when user asks to ADD/CREATE". `bulk_create_loads` description updated to clarify it works for single loads too. Fixes issue where "add this load" would only draft/display without saving.
 
 ### Mar 13, 2026 Dashboard Changes
 - **Carrier Directory ↔ Quote Builder integration** (patch #98): Two new endpoints in `routes/directory.py`: `GET /api/directory/suggest` (ranked carrier suggestions with two-tier port matching exact>fuzzy, capability filtering, lane_rates JOIN) and `POST /api/directory/feedback` (updates carrier date_quoted + inserts lane_rates on quote save, auto-creates unknown carriers with `needs_review=true`). DB migration: `carriers.needs_review` boolean column. Frontend (`QuoteBuilder.jsx`): suggestion panel auto-fires on 3+ char port input (300ms debounce), capability auto-detection from shipment type + accessorials, carrier rows with color-matched capability badges (HAZ/OWT/Reefer/Bonded/OOG/WHS/Transload from directory CAP_OPTIONS), click-to-select + collapse/expand, shimmer loading skeleton, empty state, feedback loop fires on save with carrier_id (int PK) or carrier_name fallback.
@@ -195,6 +203,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-webhook` DISABLED (migrated in
 - **Margin Guard**: ✅ DONE — deployed Mar 11. **Margin Bridge** deployed Mar 11. **MGN column** + margin summary bar deployed Mar 12
 - **Rep Scoreboard**: ✅ DONE — v2 deployed Mar 12. REV window expanded to all active loads (not 7d). Deferred: WIN RATE (sparse data), delivered_at TIMESTAMPTZ migration
 - **Account Health View**: ✅ DONE — deployed Mar 12. `GET /api/account-health` (5 SQL queries GROUP BY account). Health Score = margin_pct - friction_score. Grid in OverviewView next to Rep Scoreboard, clickable rows → dispatch/rep dashboard
+
+- **Auto-Status Email Drafter**: ✅ DONE — deployed Mar 13. 5 milestone triggers, HTML templates, draft badge + modal + toast in frontend, SMTP send
+- **Carrier Auto-Quote Request**: PLANNED — when new load added, AI picks top 3 carriers from Directory and auto-drafts rate request emails. Not started.
 
 ### Rate IQ
 - ✅ Carrier Directory + Lane Search: DONE — inline editing deployed Mar 11
