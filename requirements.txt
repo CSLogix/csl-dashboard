@@ -1,0 +1,28 @@
+# CSL AI Dispatch — Python dependencies
+# csl-doc-tracker (FastAPI dashboard)
+fastapi
+uvicorn[standard]
+psycopg2-binary
+python-dotenv
+python-multipart
+gspread
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+anthropic
+requests
+Pillow
+pdf2image
+pdfplumber
+openpyxl
+xlrd
+jinja2
+cryptography
+starlette
+
+# csl-bot (monitors + upload server)
+flask
+playwright
+playwright-stealth
+bcrypt
