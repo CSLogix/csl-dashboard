@@ -54,7 +54,7 @@ _BOL_ACCOUNTS = {
 }
 
 BOL_WEBAPP_URL = "http://localhost:5002"
-BOL_WEBAPP_PASSWORD = os.getenv("BOL_PASSWORD", "evans2026")
+BOL_WEBAPP_PASSWORD = os.getenv("BOL_PASSWORD", "")
 
 
 @router.get("/api/bol/accounts")
