@@ -172,7 +172,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
 
   // Inline edit styles (reuse dispatch pattern)
   const inlineInputStyle = { background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 4, color: "#F0F2F5", padding: "2px 5px", fontSize: 11, width: 90, outline: "none", fontFamily: "'JetBrains Mono', monospace" };
-  const thStyle = { padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: Z.table };
+  const thStyle = { padding: "10px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: Z.table };
 
   // Total count for toggle badges (both views show same data, different layout)
   const totalCount = displayShipsFiltered.length;
@@ -287,7 +287,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                               <button key={st.key} onClick={(e) => { e.stopPropagation(); handleStatusUpdate(s.id, st.key); setInlineEditId(null); }}
                                 style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", padding: "4px 7px", borderRadius: 4, border: "none",
                                   background: s.status === st.key ? `${stc.main}18` : "transparent",
-                                  color: s.status === st.key ? stc.main : "#8B95A8", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                                  color: s.status === st.key ? stc.main : "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
                                 <span style={{ width: 4, height: 4, borderRadius: "50%", background: stc.main, flexShrink: 0 }} />
                                 {st.label}
                               </button>
@@ -301,17 +301,17 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                               <button key={st.key} onClick={(e) => { e.stopPropagation(); handleStatusUpdate(s.id, st.key); setInlineEditId(null); }}
                                 style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", padding: "4px 7px", borderRadius: 4, border: "none",
                                   background: s.status === st.key ? `${stc.main}18` : "transparent",
-                                  color: s.status === st.key ? stc.main : "#8B95A8", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                                  color: s.status === st.key ? stc.main : "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
                                 <span style={{ width: 4, height: 4, borderRadius: "50%", background: stc.main, flexShrink: 0 }} />
                                 {st.label}
                               </button>
                             );
                           })}
                           <button onClick={(e) => { e.stopPropagation(); setInlineEditId(null); }}
-                            style={{ display: "block", width: "100%", padding: "3px 7px", marginTop: 2, borderRadius: 4, border: "none", background: "rgba(255,255,255,0.03)", color: "#5A6478", fontSize: 9, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+                            style={{ display: "block", width: "100%", padding: "3px 7px", marginTop: 2, borderRadius: 4, border: "none", background: "rgba(255,255,255,0.03)", color: "#5A6478", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
                         </div>
                       ) : null}
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 12, fontSize: 9, fontWeight: 700,
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700,
                         color: sc.main, background: `${sc.main}0D`, border: `1px solid ${sc.main}18`, textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap" }}>
                         <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
                         {resolveStatusLabel(s)}
@@ -330,10 +330,10 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                       </div>
                     </td>
                     {/* Container/Load # */}
-                    <td style={{ ...tdBase, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
+                    <td style={{ ...tdBase, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}>{s.container}</td>
                     {/* MP Status */}
                     <td style={tdBase}>
-                      {(s.moveType === "FTL" || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} mpLastUpdated={s.mpLastUpdated} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
+                      {(s.moveType === "FTL" || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} mpLastUpdated={s.mpLastUpdated} /> : <span style={{ color: "#5A6478", fontSize: 11, fontStyle: "italic" }}>No MP</span>}
                     </td>
                     {/* Pickup (inline-editable, DD-MM + time) */}
                     <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
@@ -353,16 +353,16 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                             style={{ ...inlineInputStyle, width: 70 }} />
                         </div>
                       ) : (
-                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                        <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
                           <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>{formatDDMM(s.pickupDate) || "\u2014"}</span>
                           {pu.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickupTime"); setInlineEditValue(pu.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{pu.time}</span> : null}
                         </span>
                       )}
                     </td>
                     {/* Origin */}
-                    <td style={{ ...tdBase, fontSize: 10, color: "#F0F2F5", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.origin}>{s.origin || "\u2014"}</td>
+                    <td style={{ ...tdBase, fontSize: 11, color: "#F0F2F5", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.origin}>{s.origin || "\u2014"}</td>
                     {/* Destination */}
-                    <td style={{ ...tdBase, fontSize: 10, color: "#F0F2F5", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.destination}>{s.destination || "\u2014"}</td>
+                    <td style={{ ...tdBase, fontSize: 11, color: "#F0F2F5", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.destination}>{s.destination || "\u2014"}</td>
                     {/* Delivery (inline-editable, DD-MM + time) */}
                     <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                       {isEditing && inlineEditField === "delivery" ? (
@@ -381,7 +381,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                             style={{ ...inlineInputStyle, width: 70 }} />
                         </div>
                       ) : (
-                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                        <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
                           <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>{formatDDMM(s.deliveryDate) || "\u2014"}</span>
                           {del.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("deliveryTime"); setInlineEditValue(del.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{del.time}</span> : null}
                         </span>
@@ -397,7 +397,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                           {TRUCK_TYPES.map(t => <option key={t} value={t}>{t || "\u2014"}</option>)}
                         </select>
                       ) : (
-                        <span style={{ fontSize: 10, color: s.truckType ? "#F0F2F5" : "#3D4557", cursor: "pointer" }}>{s.truckType || "\u2014"}</span>
+                        <span style={{ fontSize: 11, color: s.truckType ? "#F0F2F5" : "#3D4557", cursor: "pointer" }}>{s.truckType || "\u2014"}</span>
                       )}
                     </td>
                     {/* Trailer # (inline-editable) */}
@@ -408,7 +408,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                           onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                           style={{ ...inlineInputStyle, width: 70 }} onClick={e => e.stopPropagation()} placeholder="Trailer" />
                       ) : (
-                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{s.trailerNumber || tracking?.trailer || "\u2014"}</span>
+                        <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{s.trailerNumber || tracking?.trailer || "\u2014"}</span>
                       )}
                     </td>
                     {/* Driver Phone (inline-editable) */}
@@ -419,7 +419,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                           onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                           style={{ ...inlineInputStyle, width: 100 }} onClick={e => e.stopPropagation()} placeholder="Phone" />
                       ) : (
-                        <span style={{ fontSize: 10, color: (s.driverPhone || tracking?.driverPhone) ? "#F0F2F5" : "#3D4557", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{s.driverPhone || tracking?.driverPhone || "\u2014"}</span>
+                        <span style={{ fontSize: 11, color: (s.driverPhone || tracking?.driverPhone) ? "#F0F2F5" : "#3D4557", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{s.driverPhone || tracking?.driverPhone || "\u2014"}</span>
                       )}
                     </td>
                     {/* Carrier Email (inline-editable) */}
@@ -430,7 +430,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                           onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                           style={{ ...inlineInputStyle, width: 140 }} onClick={e => e.stopPropagation()} placeholder="email@carrier.com" />
                       ) : (
-                        <span style={{ fontSize: 10, color: s.carrierEmail ? "#8B95A8" : "#3D4557", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.carrierEmail || ""}>{s.carrierEmail || "\u2014"}</span>
+                        <span style={{ fontSize: 11, color: s.carrierEmail ? "#8B95A8" : "#3D4557", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.carrierEmail || ""}>{s.carrierEmail || "\u2014"}</span>
                       )}
                     </td>
                     {/* Rate (inline-editable) */}
@@ -441,18 +441,18 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                           onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
                           style={{ ...inlineInputStyle, width: 65 }} onClick={e => e.stopPropagation()} placeholder="$0.00" />
                       ) : (
-                        <span style={{ fontSize: 10, color: s.customerRate ? "#22C55E" : "#3D4557", fontFamily: "'JetBrains Mono', monospace", cursor: "text", fontWeight: s.customerRate ? 600 : 400 }}>{s.customerRate || "\u2014"}</span>
+                        <span style={{ fontSize: 11, color: s.customerRate ? "#22C55E" : "#3D4557", fontFamily: "'JetBrains Mono', monospace", cursor: "text", fontWeight: s.customerRate ? 600 : 400 }}>{s.customerRate || "\u2014"}</span>
                       )}
                     </td>
                     {/* Margin (MGN) — color-coded */}
                     <td style={{ ...tdBase, textAlign: "center" }}>
                       {dispMarginPct !== null ? (
-                        <span style={{ fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+                        <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
                           color: dispMarginPct < 0 ? "#EF4444" : dispMarginPct < 10 ? "#F59E0B" : "#22C55E" }}
                           title={`$${Math.round(parseFloat(s.customerRate) - parseFloat(s.carrierPay))} margin`}>
                           {dispMarginPct}%
                         </span>
-                      ) : <span style={{ color: "#3D4557", fontSize: 10 }}>{"\u2014"}</span>}
+                      ) : <span style={{ color: "#3D4557", fontSize: 11 }}>{"\u2014"}</span>}
                     </td>
                     {/* Notes (inline-editable) */}
                     <td style={{ ...tdBase, borderRight: "none" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("notes"); setInlineEditValue(s.notes || ""); }}>
@@ -464,7 +464,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                       ) : parseTerminalNotes(s.botAlert) ? (
                         <TerminalBadge notes={s.notes} />
                       ) : (
-                        <span style={{ fontSize: 10, color: s.notes ? "#F0F2F5" : "#3D4557", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.notes || ""}>{s.notes || "\u2014"}</span>
+                        <span style={{ fontSize: 11, color: s.notes ? "#F0F2F5" : "#3D4557", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.notes || ""}>{s.notes || "\u2014"}</span>
                       )}
                     </td>
                   </tr>
@@ -493,13 +493,13 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
               style={{ padding: "7px 16px", borderRadius: 8, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
                 background: repViewMode === "dray" ? "#1E2738" : "transparent", color: repViewMode === "dray" ? "#00D4AA" : "#5A6478",
                 boxShadow: repViewMode === "dray" ? "0 1px 4px rgba(0,0,0,0.3)" : "none", transition: "all 0.15s" }}>
-              Dray View <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 3 }}>{totalCount}</span>
+              Dray View <span style={{ fontSize: 11, opacity: 0.6, marginLeft: 3 }}>{totalCount}</span>
             </button>
             <button onClick={() => setRepViewMode("ftl")}
               style={{ padding: "7px 16px", borderRadius: 8, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
                 background: repViewMode === "ftl" ? "#1E2738" : "transparent", color: repViewMode === "ftl" ? "#3B82F6" : "#5A6478",
                 boxShadow: repViewMode === "ftl" ? "0 1px 4px rgba(0,0,0,0.3)" : "none", transition: "all 0.15s" }}>
-              FTL View <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 3 }}>{totalCount}</span>
+              FTL View <span style={{ fontSize: 11, opacity: 0.6, marginLeft: 3 }}>{totalCount}</span>
             </button>
           </div>
         </div>
@@ -550,7 +550,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 background: filterState === s.filter && s.filter ? `${s.c}15` : "rgba(255,255,255,0.03)",
                 cursor: s.filter || s.action ? "pointer" : "default", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
               <span style={{ fontSize: 16, fontWeight: 800, color: s.value > 0 ? s.c : "#334155", fontFamily: "'JetBrains Mono', monospace" }}>{s.value}</span>
-              <span style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, textTransform: "uppercase" }}>{s.label}</span>
+              <span style={{ fontSize: 11, color: "#8B95A8", fontWeight: 600, textTransform: "uppercase" }}>{s.label}</span>
             </button>
           ))}
           {/* Needs Reply — special popover pill */}
@@ -560,7 +560,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 background: needsReplyOpen ? "rgba(239,68,68,0.12)" : inboxNeedsReply > 0 ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.03)",
                 cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
               <span style={{ fontSize: 16, fontWeight: 800, color: inboxNeedsReply > 0 ? "#EF4444" : "#334155", fontFamily: "'JetBrains Mono', monospace" }}>{inboxNeedsReply}</span>
-              <span style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, textTransform: "uppercase" }}>Needs Reply</span>
+              <span style={{ fontSize: 11, color: "#8B95A8", fontWeight: 600, textTransform: "uppercase" }}>Needs Reply</span>
               <span style={{ fontSize: 8, color: "#5A6478" }}>{needsReplyOpen ? "▲" : "▼"}</span>
             </button>
             {needsReplyOpen && (
@@ -582,17 +582,17 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(239,68,68,0.06)"}
                       onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}>
                       {t.efj ? (
-                        <span style={{ padding: "1px 5px", borderRadius: 3, background: "rgba(0,212,170,0.10)", color: "#00D4AA", fontWeight: 700, fontSize: 9, fontFamily: "JetBrains Mono, monospace", flexShrink: 0 }}>{t.efj}</span>
+                        <span style={{ padding: "1px 5px", borderRadius: 3, background: "rgba(0,212,170,0.10)", color: "#00D4AA", fontWeight: 700, fontSize: 11, fontFamily: "JetBrains Mono, monospace", flexShrink: 0 }}>{t.efj}</span>
                       ) : (
-                        <span style={{ padding: "1px 5px", borderRadius: 3, background: "rgba(249,115,22,0.10)", color: "#F97316", fontWeight: 700, fontSize: 9, flexShrink: 0 }}>UNMATCHED</span>
+                        <span style={{ padding: "1px 5px", borderRadius: 3, background: "rgba(249,115,22,0.10)", color: "#F97316", fontWeight: 700, fontSize: 11, flexShrink: 0 }}>UNMATCHED</span>
                       )}
-                      <span style={{ fontSize: 10, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }} title={t.latest_subject}>{t.latest_subject || "(no subject)"}</span>
-                      <span style={{ fontSize: 9, color: "#5A6478", flexShrink: 0 }}>{(t.latest_sender || "").replace(/<[^>]+>/g, "").split("@")[0]}</span>
+                      <span style={{ fontSize: 11, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }} title={t.latest_subject}>{t.latest_subject || "(no subject)"}</span>
+                      <span style={{ fontSize: 11, color: "#5A6478", flexShrink: 0 }}>{(t.latest_sender || "").replace(/<[^>]+>/g, "").split("@")[0]}</span>
                     </div>
                   );
                 })}
                 <div onClick={() => { onNavigateInbox("needs_reply"); setNeedsReplyOpen(false); }}
-                  style={{ padding: "6px 10px", borderRadius: 6, cursor: "pointer", marginTop: 4, fontSize: 10, color: "#8B95A8", fontWeight: 600, display: "flex", alignItems: "center", gap: 4, borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 8 }}
+                  style={{ padding: "6px 10px", borderRadius: 6, cursor: "pointer", marginTop: 4, fontSize: 11, color: "#8B95A8", fontWeight: 600, display: "flex", alignItems: "center", gap: 4, borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 8 }}
                   onMouseEnter={e => e.currentTarget.style.color = "#F0F2F5"}
                   onMouseLeave={e => e.currentTarget.style.color = "#8B95A8"}>
                   → View all in Inbox
@@ -625,14 +625,14 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
           if (filterState === "all" && Object.keys(repColumnFilters).length === 0) return null;
           return (
             <button onClick={() => { setFilter("all"); setRepColumnFilters({}); setRepOpenFilterCol(null); }}
-              style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.15)", background: "rgba(239,68,68,0.08)", color: "#f87171", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.15)", background: "rgba(239,68,68,0.08)", color: "#f87171", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               ✕ Clear
             </button>
           );
         })()}
         <button onClick={() => setSortOldestFirst(v => !v)}
           title={sortOldestFirst ? "Sorted: oldest ETA first" : "Sort: oldest first"}
-          style={{ padding: "5px 10px", borderRadius: 6, border: `1px solid ${sortOldestFirst ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.06)"}`, background: sortOldestFirst ? "rgba(245,158,11,0.08)" : "rgba(255,255,255,0.03)", color: sortOldestFirst ? "#F59E0B" : "#5A6478", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", display: "flex", alignItems: "center", gap: 4 }}>
+          style={{ padding: "5px 10px", borderRadius: 6, border: `1px solid ${sortOldestFirst ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.06)"}`, background: sortOldestFirst ? "rgba(245,158,11,0.08)" : "rgba(255,255,255,0.03)", color: sortOldestFirst ? "#F59E0B" : "#5A6478", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", display: "flex", alignItems: "center", gap: 4 }}>
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M7 12h10M11 18h2"/></svg>
           {sortOldestFirst ? "Oldest First" : "Sort"}
         </button>
@@ -684,14 +684,14 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                     <span style={{ fontSize: 18, fontWeight: 900, color: "#A78BFA", fontFamily: "'JetBrains Mono', monospace" }}>{projShips.length}</span>
                   </div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <div style={{ fontSize: 10 }}><span style={{ fontWeight: 700, color: "#3B82F6" }}>{active}</span> <span style={{ color: "#5A6478" }}>active</span></div>
-                    <div style={{ fontSize: 10 }}><span style={{ fontWeight: 700, color: "#22C55E" }}>{delivered}</span> <span style={{ color: "#5A6478" }}>delivered</span></div>
-                    <div style={{ fontSize: 10 }}><span style={{ fontWeight: 700, color: "#F59E0B" }}>{pending}</span> <span style={{ color: "#5A6478" }}>pending</span></div>
+                    <div style={{ fontSize: 11 }}><span style={{ fontWeight: 700, color: "#3B82F6" }}>{active}</span> <span style={{ color: "#5A6478" }}>active</span></div>
+                    <div style={{ fontSize: 11 }}><span style={{ fontWeight: 700, color: "#22C55E" }}>{delivered}</span> <span style={{ color: "#5A6478" }}>delivered</span></div>
+                    <div style={{ fontSize: 11 }}><span style={{ fontWeight: 700, color: "#F59E0B" }}>{pending}</span> <span style={{ color: "#5A6478" }}>pending</span></div>
                   </div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
-                    {pickupsToday > 0 && <div style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: "rgba(59,130,246,0.10)", color: "#3B82F6", fontWeight: 700 }}>{pickupsToday} pickup{pickupsToday > 1 ? "s" : ""} today</div>}
-                    <div style={{ fontSize: 9, color: "#5A6478" }}>{carriers} carrier{carriers !== 1 ? "s" : ""}</div>
-                    {lastDel && <div style={{ fontSize: 9, color: "#5A6478" }}>Last delivery: {lastDel.deliveryDate?.slice(0, 10)}</div>}
+                    {pickupsToday > 0 && <div style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, background: "rgba(59,130,246,0.10)", color: "#3B82F6", fontWeight: 700 }}>{pickupsToday} pickup{pickupsToday > 1 ? "s" : ""} today</div>}
+                    <div style={{ fontSize: 11, color: "#5A6478" }}>{carriers} carrier{carriers !== 1 ? "s" : ""}</div>
+                    {lastDel && <div style={{ fontSize: 11, color: "#5A6478" }}>Last delivery: {lastDel.deliveryDate?.slice(0, 10)}</div>}
                   </div>
                 </div>
               );
@@ -710,7 +710,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
                   background: toleadHub === h ? "rgba(6,182,212,0.15)" : "transparent",
                   color: toleadHub === h ? "#22d3ee" : "#8B95A8" }}>
-                {h} <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 2 }}>{hubCount}</span>
+                {h} <span style={{ fontSize: 11, opacity: 0.6, marginLeft: 2 }}>{hubCount}</span>
               </button>
             );
           })}
@@ -728,7 +728,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 style={{ padding: "10px 14px", borderRadius: 10, background: expandedAccount === ag.name ? "rgba(0,212,170,0.06)" : "rgba(255,255,255,0.02)",
                   border: `1px solid ${expandedAccount === ag.name ? "rgba(0,212,170,0.2)" : "rgba(255,255,255,0.04)"}` }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#F0F2F5", marginBottom: 6 }}>{ag.name}</div>
-                <div style={{ display: "flex", gap: 8, fontSize: 10, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 8, fontSize: 11, flexWrap: "wrap" }}>
                   {ag.incoming > 0 && <span style={{ color: "#F59E0B" }}>{ag.incoming} <span style={{ color: "#8B95A8" }}>in</span></span>}
                   {ag.active > 0 && <span style={{ color: "#3B82F6" }}>{ag.active} <span style={{ color: "#8B95A8" }}>active</span></span>}
                   {ag.behind > 0 && <span style={{ color: "#EF4444" }}>{ag.behind} <span style={{ color: "#8B95A8" }}>behind</span></span>}
@@ -757,7 +757,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
             </span>
             {opsTableFilter !== "all" && (
               <button onClick={() => setOpsTableFilter("all")}
-                style={{ padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", color: "#8B95A8" }}>
+                style={{ padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", color: "#8B95A8" }}>
                 Show All
               </button>
             )}
@@ -791,24 +791,24 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                           )}
                         </div>
                       </td>
-                      <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
+                      <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}>{s.container}</td>
                       {/* Move Type */}
                       <td style={{ padding: "8px 14px" }}>
-                        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
                           color: isFTL ? "#60A5FA" : "#F59E0B", background: isFTL ? "#60A5FA12" : "#F59E0B12",
                           border: `1px solid ${isFTL ? "#60A5FA22" : "#F59E0B22"}`, textTransform: "uppercase" }}>
                           {s.moveType || "Dray"}
                         </span>
                       </td>
-                      <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5" }}>{s.carrier}</td>
-                      <td style={{ padding: "8px 14px", fontSize: 10 }}>
+                      <td style={{ padding: "8px 14px", fontSize: 11, color: "#F0F2F5" }}>{s.carrier}</td>
+                      <td style={{ padding: "8px 14px", fontSize: 11 }}>
                         <span style={{ color: "#F0F2F5" }}>{s.origin}</span>
                         <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
                         <span style={{ color: "#F0F2F5" }}>{s.destination}</span>
                       </td>
                       {/* ETA/ERD */}
                       <td style={{ padding: "8px 14px" }}>
-                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>
+                        <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>
                           {formatDDMM(s.eta || s.lfd) || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}
                         </span>
                       </td>
@@ -830,7 +830,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                               style={{ ...inlineInputStyle, width: 70 }} />
                           </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                          <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
                             <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>{formatDDMM(s.pickupDate) || "\u2014"}</span>
                             {pu.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickupTime"); setInlineEditValue(pu.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{pu.time}</span> : null}
                           </span>
@@ -854,15 +854,15 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                               style={{ ...inlineInputStyle, width: 70 }} />
                           </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                          <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
                             <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>{formatDDMM(s.deliveryDate) || "\u2014"}</span>
                             {del.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("deliveryTime"); setInlineEditValue(del.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{del.time}</span> : null}
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: "8px 14px", fontSize: 10, color: "#8B95A8", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.driver || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</td>
+                      <td style={{ padding: "8px 14px", fontSize: 11, color: "#8B95A8", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.driver || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</td>
                       <td style={{ padding: "8px 14px" }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 20, fontSize: 9, fontWeight: 700,
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 700,
                           color: sc.main, background: `${sc.main}12`, border: `1px solid ${sc.main}22`, textTransform: "uppercase" }}>
                           <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
                           {STATUSES.find(st => st.key === s.status)?.label || s.status}
@@ -891,7 +891,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
           </span>
           {masterTableFilter !== "all" && (
             <button onClick={() => setMasterTableFilter("all")}
-              style={{ padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", color: "#8B95A8" }}>
+              style={{ padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", color: "#8B95A8" }}>
               Show All
             </button>
           )}
@@ -929,25 +929,25 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                           )}
                         </div>
                       </td>
-                      <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
+                      <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}>{s.container}</td>
                       {/* Move Type */}
                       <td style={{ padding: "8px 14px" }}>
-                        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
                           color: isFTL ? "#60A5FA" : "#F59E0B", background: isFTL ? "#60A5FA12" : "#F59E0B12",
                           border: `1px solid ${isFTL ? "#60A5FA22" : "#F59E0B22"}`, textTransform: "uppercase" }}>
                           {s.moveType || "Dray"}
                         </span>
                       </td>
                       {/* Carrier */}
-                      <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.carrier || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</td>
-                      <td style={{ padding: "8px 14px", fontSize: 10 }}>
+                      <td style={{ padding: "8px 14px", fontSize: 11, color: "#F0F2F5", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.carrier || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</td>
+                      <td style={{ padding: "8px 14px", fontSize: 11 }}>
                         <span style={{ color: "#F0F2F5" }}>{s.origin}</span>
                         <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
                         <span style={{ color: "#F0F2F5" }}>{s.destination}</span>
                       </td>
                       {/* ETA/ERD */}
                       <td style={{ padding: "8px 14px" }}>
-                        <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>
+                        <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>
                           {formatDDMM(s.eta || s.lfd) || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}
                         </span>
                       </td>
@@ -969,7 +969,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                               style={{ ...inlineInputStyle, width: 70 }} />
                           </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                          <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
                             <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>{formatDDMM(s.pickupDate) || "\u2014"}</span>
                             {pu.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickupTime"); setInlineEditValue(pu.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{pu.time}</span> : null}
                           </span>
@@ -993,14 +993,14 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                               style={{ ...inlineInputStyle, width: 70 }} />
                           </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
+                          <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
                             <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>{formatDDMM(s.deliveryDate) || "\u2014"}</span>
                             {del.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("deliveryTime"); setInlineEditValue(del.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{del.time}</span> : null}
                           </span>
                         )}
                       </td>
                       <td style={{ padding: "8px 14px" }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 20, fontSize: 9, fontWeight: 700,
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 700,
                           color: sc.main, background: `${sc.main}12`, border: `1px solid ${sc.main}22`, textTransform: "uppercase" }}>
                           <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
                           {STATUSES.find(st => st.key === s.status)?.label || s.status}

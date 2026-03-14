@@ -32,15 +32,15 @@ function HistoryTabContent({ rateHistory, historyLoading, onLoad }) {
         <div key={group} className="glass" style={{ borderRadius: 10, marginBottom: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.04)" }}>
           <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: "#00D4AA" }}>{group}</span>
-            <span style={{ fontSize: 10, color: "#5A6478" }}>{rates.length} rate{rates.length !== 1 ? "s" : ""}</span>
+            <span style={{ fontSize: 11, color: "#5A6478" }}>{rates.length} rate{rates.length !== 1 ? "s" : ""}</span>
           </div>
           <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", padding: "8px 16px" }}>
             {rates.map((r, ri) => (
               <div key={ri} style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 0", borderBottom: ri < rates.length - 1 ? "1px solid rgba(255,255,255,0.03)" : "none" }}>
                 <span style={{ fontSize: 11, color: "#C8D0DC", flex: 1 }}>{r.origin} → {r.destination}</span>
-                <span style={{ fontSize: 10, color: "#8B95A8" }}>{r.carrier_name}</span>
+                <span style={{ fontSize: 11, color: "#8B95A8" }}>{r.carrier_name}</span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: "#34d399", fontFamily: "'JetBrains Mono', monospace" }}>{fmtDec(r.rate_amount)}</span>
-                <span style={{ fontSize: 9, color: "#5A6478" }}>{r.date ? new Date(r.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""}</span>
+                <span style={{ fontSize: 11, color: "#5A6478" }}>{r.date ? new Date(r.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""}</span>
               </div>
             ))}
           </div>
@@ -79,16 +79,16 @@ function MarketRateCard({ laneGroup, carrierCapMap }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>MARKET RATE</span>
           {confidence > 0 && (
-            <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 10, fontWeight: 700, background: confColor + "18", color: confColor, border: `1px solid ${confColor}30` }}>
+            <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: confColor + "18", color: confColor, border: `1px solid ${confColor}30` }}>
               ✓ {confidence}% Confidence
             </span>
           )}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(52,211,153,0.3)", background: "rgba(52,211,153,0.08)", color: "#34d399", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+          <button style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(52,211,153,0.3)", background: "rgba(52,211,153,0.08)", color: "#34d399", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
             👍 Accurate
           </button>
-          <button style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.08)", color: "#f87171", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+          <button style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.08)", color: "#f87171", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
             👎 Inaccurate
           </button>
         </div>
@@ -102,9 +102,9 @@ function MarketRateCard({ laneGroup, carrierCapMap }) {
             {fmt(avgRate)}
           </div>
           <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
-            {sources.email && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: "rgba(59,130,246,0.12)", color: "#60a5fa", border: "1px solid rgba(59,130,246,0.2)" }}>EMAIL</span>}
-            {sources.import && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: "rgba(167,139,250,0.12)", color: "#a78bfa", border: "1px solid rgba(167,139,250,0.2)" }}>IMPORT</span>}
-            {sources.quote && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: "rgba(0,212,170,0.12)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.2)" }}>QUOTE</span>}
+            {sources.email && <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: "rgba(59,130,246,0.12)", color: "#60a5fa", border: "1px solid rgba(59,130,246,0.2)" }}>EMAIL</span>}
+            {sources.import && <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: "rgba(167,139,250,0.12)", color: "#a78bfa", border: "1px solid rgba(167,139,250,0.2)" }}>IMPORT</span>}
+            {sources.quote && <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: "rgba(0,212,170,0.12)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.2)" }}>QUOTE</span>}
           </div>
           <div style={{ fontSize: 11, color: "#5A6478", marginTop: 6 }}>Range: {range}</div>
         </div>
@@ -112,19 +112,19 @@ function MarketRateCard({ laneGroup, carrierCapMap }) {
         {/* Metrics grid */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 32px", paddingBottom: 4 }}>
           <div>
-            <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Rate Per Mile</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Rate Per Mile</div>
             <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>${ratePerMile}</div>
           </div>
           <div>
-            <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Activity</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Activity</div>
             <div style={{ fontSize: 15, fontWeight: 700, color: actColor }}>{activity}</div>
           </div>
           <div>
-            <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Data Points</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Data Points</div>
             <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{count}</div>
           </div>
           <div>
-            <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Carriers</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Carriers</div>
             <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{carriers.length}</div>
           </div>
         </div>
@@ -169,7 +169,7 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
       <div style={{ padding: "14px 20px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>CARRIER RATES</span>
         <button onClick={() => setShowAllCols(!showAllCols)}
-          style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: showAllCols ? "rgba(0,212,170,0.08)" : "transparent", color: showAllCols ? "#00D4AA" : "#5A6478", fontSize: 9, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+          style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: showAllCols ? "rgba(0,212,170,0.08)" : "transparent", color: showAllCols ? "#00D4AA" : "#5A6478", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
           {showAllCols ? "Show Less" : `+${secondaryCols.length} More Columns`}
         </button>
       </div>
@@ -178,7 +178,7 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
           <thead>
             <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
               {visibleCols.map(h => (
-                <th key={h} style={{ padding: "8px 10px", textAlign: h === "Carrier" ? "left" : "center", color: "#5A6478", fontWeight: 700, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.03em", whiteSpace: "nowrap" }}>{h}</th>
+                <th key={h} style={{ padding: "8px 10px", textAlign: h === "Carrier" ? "left" : "center", color: "#5A6478", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em", whiteSpace: "nowrap" }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -209,9 +209,9 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
                     <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: mcNumber || dispatchEmail ? 2 : 0 }}>
                       {tierColor && <span title={`Tier ${caps.tier_rank}`} style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: tierColor, flexShrink: 0 }} />}
                       <span style={{ fontSize: 12, fontWeight: 700, color: "#F0F2F5" }}>{cr.carrier_name}</span>
-                      {capBadges.map((b, bi) => <span key={bi} title={b.title} style={{ fontSize: 9, opacity: 0.8 }}>{b.label}</span>)}
+                      {capBadges.map((b, bi) => <span key={bi} title={b.title} style={{ fontSize: 11, opacity: 0.8 }}>{b.label}</span>)}
                       {daysSince !== null && (
-                        <span style={{ fontSize: 9, color: isAged ? "#FBBF24" : "#5A6478", fontStyle: "italic" }}>
+                        <span style={{ fontSize: 11, color: isAged ? "#FBBF24" : "#5A6478", fontStyle: "italic" }}>
                           {isAged ? "\u26A0 " : ""}{daysSince === 0 ? "today" : daysSince < 7 ? `${daysSince}d` : daysSince < 30 ? `${Math.floor(daysSince / 7)}w` : `${Math.floor(daysSince / 30)}mo`}
                         </span>
                       )}
@@ -219,9 +219,9 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
                     {/* Line 2: MC Number + copy */}
                     {mcNumber && (
                       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <span style={{ fontSize: 10, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>MC-{mcNumber}</span>
+                        <span style={{ fontSize: 11, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>MC-{mcNumber}</span>
                         <span onClick={e => { e.stopPropagation(); copyMC(mcNumber); }}
-                          title="Copy MC#" style={{ fontSize: 9, cursor: "pointer", color: copiedMC === mcNumber ? "#34d399" : "#3D4654", transition: "color 0.15s" }}>
+                          title="Copy MC#" style={{ fontSize: 11, cursor: "pointer", color: copiedMC === mcNumber ? "#34d399" : "#3D4654", transition: "color 0.15s" }}>
                           {copiedMC === mcNumber ? "\u2713" : "\u2398"}
                         </span>
                       </div>
@@ -229,7 +229,7 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
                     {/* Line 3: Dispatch email */}
                     {dispatchEmail && (
                       <a href={`mailto:${dispatchEmail}`} onClick={e => e.stopPropagation()}
-                        style={{ fontSize: 10, color: "#60a5fa", textDecoration: "none", display: "block", marginTop: 1, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        style={{ fontSize: 11, color: "#60a5fa", textDecoration: "none", display: "block", marginTop: 1, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                         onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"}
                         onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}>
                         {dispatchEmail}
@@ -262,7 +262,7 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
                     {isHovered && dispatchEmail && (
                       <button onClick={e => { e.stopPropagation(); emailRC(cr); }}
                         title={`Email rate confirmation to ${dispatchEmail}`}
-                        style={{ padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(59,130,246,0.3)", background: "rgba(59,130,246,0.08)", color: "#60a5fa", fontSize: 9, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.15s" }}
+                        style={{ padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(59,130,246,0.3)", background: "rgba(59,130,246,0.08)", color: "#60a5fa", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.15s" }}
                         onMouseEnter={e => { e.currentTarget.style.background = "rgba(59,130,246,0.15)"; }}
                         onMouseLeave={e => { e.currentTarget.style.background = "rgba(59,130,246,0.08)"; }}>
                         \u2709 RC
@@ -309,17 +309,17 @@ function LaneCard({ lane, onClick, onQuickQuote }) {
                 </span>
               )}
             </div>
-            <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600 }}>avg rate</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600 }}>avg rate</div>
           </div>
         )}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", gap: 6 }}>
-          <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 9, fontWeight: 700, background: volTag.bg, color: volTag.color, border: `1px solid ${volTag.border}` }}>
+          <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: volTag.bg, color: volTag.color, border: `1px solid ${volTag.border}` }}>
             {volTag.label}
           </span>
           {lane.carrier_count > 0 && (
-            <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 9, fontWeight: 700, background: "rgba(59,130,246,0.12)", color: "#60a5fa", border: "1px solid rgba(59,130,246,0.2)" }}>
+            <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: "rgba(59,130,246,0.12)", color: "#60a5fa", border: "1px solid rgba(59,130,246,0.2)" }}>
               {lane.carrier_count} carrier{lane.carrier_count !== 1 ? "s" : ""}
             </span>
           )}
@@ -328,7 +328,7 @@ function LaneCard({ lane, onClick, onQuickQuote }) {
         {hovered && (
           <div style={{ display: "flex", gap: 4 }}>
             <button onClick={e => { e.stopPropagation(); onQuickQuote && onQuickQuote(); }}
-              style={{ padding: "3px 10px", borderRadius: 6, border: "none", background: grad, color: "#0A0F1C", fontSize: 9, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+              style={{ padding: "3px 10px", borderRadius: 6, border: "none", background: grad, color: "#0A0F1C", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
               Quick Quote →
             </button>
           </div>
@@ -642,7 +642,7 @@ export default function RateIQView() {
               { key: "history", label: "History", icon: "📊" },
             ].map(t => (
               <button key={t.key} onClick={() => setView(t.key)}
-                style={{ padding: "6px 14px", fontSize: 10, fontWeight: 700, borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", background: "transparent", color: "#8B95A8", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 4 }}
+                style={{ padding: "6px 14px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", background: "transparent", color: "#8B95A8", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 4 }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(0,212,170,0.3)"; e.currentTarget.style.color = "#F0F2F5"; }}
                 onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "#8B95A8"; }}>
                 <span style={{ fontSize: 12 }}>{t.icon}</span> {t.label}
@@ -656,7 +656,7 @@ export default function RateIQView() {
           <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", marginBottom: 12 }}>SEARCH LANES</div>
           <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
             <div style={{ flex: 1, position: "relative" }} ref={originRef}>
-              <label style={{ fontSize: 9, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 }}>Origin / Port</label>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 }}>Origin / Port</label>
               <input value={searchOrigin} onChange={e => setSearchOrigin(e.target.value)} placeholder="e.g. Houston, NYNJ, Savannah..."
                 style={{ width: "100%", padding: "10px 16px", borderRadius: 10, border: `1px solid ${originFocused ? "rgba(0,212,170,0.3)" : "rgba(255,255,255,0.08)"}`, background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
                 onFocus={() => setOriginFocused(true)} onBlur={() => setTimeout(() => setOriginFocused(false), 150)}
@@ -669,7 +669,7 @@ export default function RateIQView() {
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(0,212,170,0.06)"}
                       onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                       <span style={{ fontSize: 13, fontWeight: 600, color: "#F0F2F5" }}>{s.port}</span>
-                      <span style={{ fontSize: 10, color: "#5A6478" }}>{s.lanes} lane{s.lanes !== 1 ? "s" : ""} · {fmt(s.avg)} avg</span>
+                      <span style={{ fontSize: 11, color: "#5A6478" }}>{s.lanes} lane{s.lanes !== 1 ? "s" : ""} · {fmt(s.avg)} avg</span>
                     </div>
                   ))}
                 </div>
@@ -677,7 +677,7 @@ export default function RateIQView() {
             </div>
             <div style={{ fontSize: 18, color: "#5A6478", padding: "0 4px 10px" }}>→</div>
             <div style={{ flex: 1, position: "relative" }} ref={destRef}>
-              <label style={{ fontSize: 9, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 }}>Destination</label>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 }}>Destination</label>
               <input value={searchDest} onChange={e => setSearchDest(e.target.value)} placeholder="e.g. Dallas, Chicago..."
                 style={{ width: "100%", padding: "10px 16px", borderRadius: 10, border: `1px solid ${destFocused ? "rgba(0,212,170,0.3)" : "rgba(255,255,255,0.08)"}`, background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
                 onFocus={() => setDestFocused(true)} onBlur={() => setTimeout(() => setDestFocused(false), 150)}
@@ -692,7 +692,7 @@ export default function RateIQView() {
                       <div>
                         <span style={{ fontSize: 13, fontWeight: 600, color: "#F0F2F5" }}>{searchOrigin || "•"} → {s.destination}</span>
                       </div>
-                      <span style={{ fontSize: 10, color: "#5A6478" }}>{fmt(s.avg)} avg</span>
+                      <span style={{ fontSize: 11, color: "#5A6478" }}>{fmt(s.avg)} avg</span>
                     </div>
                   ))}
                 </div>
@@ -707,10 +707,10 @@ export default function RateIQView() {
           {/* Recent Searches */}
           {recentSearches.length > 0 && !searchOrigin && !searchDest && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12, alignItems: "center" }}>
-              <span style={{ fontSize: 9, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", marginRight: 4 }}>Recent:</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", marginRight: 4 }}>Recent:</span>
               {recentSearches.map((r, i) => (
                 <button key={i} onClick={() => { setSearchOrigin(r.origin); setSearchDest(r.destination); setTimeout(() => searchLanes(r.origin, r.destination), 50); }}
-                  style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(59,130,246,0.15)", background: "rgba(59,130,246,0.06)", color: "#60a5fa", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}
+                  style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(59,130,246,0.15)", background: "rgba(59,130,246,0.06)", color: "#60a5fa", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}
                   onMouseEnter={e => { e.currentTarget.style.background = "rgba(59,130,246,0.12)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.3)"; }}
                   onMouseLeave={e => { e.currentTarget.style.background = "rgba(59,130,246,0.06)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.15)"; }}>
                   {r.origin} → {r.destination}
@@ -722,17 +722,17 @@ export default function RateIQView() {
           {/* Port Group Quick Filters */}
           {portGroups.length > 0 && (
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 14, alignItems: "center" }}>
-              <span style={{ fontSize: 9, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", marginRight: 4 }}>Quick:</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", marginRight: 4 }}>Quick:</span>
               {portGroups.filter(g => !g.is_rail).map(g => (
                 <button key={g.name} onClick={() => { setSearchOrigin(g.name); setSearchDest(""); setTimeout(() => searchLanes(g.name, ""), 50); }}
-                  style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(0,212,170,0.15)", background: searchOrigin === g.name ? "rgba(0,212,170,0.10)" : "rgba(255,255,255,0.02)", color: searchOrigin === g.name ? "#00D4AA" : "#8B95A8", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
+                  style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(0,212,170,0.15)", background: searchOrigin === g.name ? "rgba(0,212,170,0.10)" : "rgba(255,255,255,0.02)", color: searchOrigin === g.name ? "#00D4AA" : "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
                   {g.name}
                 </button>
               ))}
               {portGroups.filter(g => g.is_rail).length > 0 && <span style={{ color: "#2D3340", margin: "0 4px" }}>|</span>}
               {portGroups.filter(g => g.is_rail).map(g => (
                 <button key={g.name} onClick={() => { setSearchOrigin(g.name); setSearchDest(""); setTimeout(() => searchLanes(g.name, ""), 50); }}
-                  style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(167,139,250,0.15)", background: searchOrigin === g.name ? "rgba(167,139,250,0.10)" : "rgba(255,255,255,0.02)", color: searchOrigin === g.name ? "#A78BFA" : "#8B95A8", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
+                  style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(167,139,250,0.15)", background: searchOrigin === g.name ? "rgba(167,139,250,0.10)" : "rgba(255,255,255,0.02)", color: searchOrigin === g.name ? "#A78BFA" : "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
                   {g.name}
                 </button>
               ))}
@@ -764,7 +764,7 @@ export default function RateIQView() {
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
               LANE ANALYSIS
-              <span style={{ fontSize: 10, color: "#5A6478", fontWeight: 500 }}>— {rateLaneSummaries.length} lanes with rate data</span>
+              <span style={{ fontSize: 11, color: "#5A6478", fontWeight: 500 }}>— {rateLaneSummaries.length} lanes with rate data</span>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
               {rateLaneSummaries.slice(0, 12).map((ls, li) => (
@@ -847,25 +847,25 @@ export default function RateIQView() {
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", marginBottom: 16 }}>COST ANALYSIS</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
                   <div>
-                    <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, marginBottom: 4 }}>Avg Carrier Cost</div>
+                    <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 4 }}>Avg Carrier Cost</div>
                     <div style={{ fontSize: 22, fontWeight: 800, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>
                       {fmt(currentGroup.count > 0 ? Math.round(currentGroup.total / currentGroup.count) : 0)}
                     </div>
-                    <div style={{ fontSize: 10, color: "#5A6478" }}>based on {currentGroup.count} data point{currentGroup.count !== 1 ? "s" : ""}</div>
+                    <div style={{ fontSize: 11, color: "#5A6478" }}>based on {currentGroup.count} data point{currentGroup.count !== 1 ? "s" : ""}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, marginBottom: 4 }}>Floor Rate</div>
+                    <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 4 }}>Floor Rate</div>
                     <div style={{ fontSize: 22, fontWeight: 800, color: "#60a5fa", fontFamily: "'JetBrains Mono', monospace" }}>
                       {currentGroup.minRate !== Infinity ? fmt(currentGroup.minRate) : "—"}
                     </div>
-                    <div style={{ fontSize: 10, color: "#5A6478" }}>lowest on file</div>
+                    <div style={{ fontSize: 11, color: "#5A6478" }}>lowest on file</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, marginBottom: 4 }}>Ceiling Rate</div>
+                    <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 4 }}>Ceiling Rate</div>
                     <div style={{ fontSize: 22, fontWeight: 800, color: "#fb923c", fontFamily: "'JetBrains Mono', monospace" }}>
                       {currentGroup.maxRate > 0 ? fmt(currentGroup.maxRate) : "—"}
                     </div>
-                    <div style={{ fontSize: 10, color: "#5A6478" }}>highest on file</div>
+                    <div style={{ fontSize: 11, color: "#5A6478" }}>highest on file</div>
                   </div>
                 </div>
               </div>
@@ -887,7 +887,7 @@ export default function RateIQView() {
                   <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(0,212,170,0.12)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🤖</div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5" }}>AI Rate Assistant</div>
-                    <div style={{ fontSize: 10, color: "#5A6478" }}>Lane intelligence for {selectedLane?.origin || "—"}</div>
+                    <div style={{ fontSize: 11, color: "#5A6478" }}>Lane intelligence for {selectedLane?.origin || "—"}</div>
                   </div>
                 </div>
                 <div style={{ padding: "16px 20px", flex: 1, overflowY: "auto" }}>
@@ -927,7 +927,7 @@ export default function RateIQView() {
                       <span style={{ fontSize: 12, marginTop: 1 }}>{item.icon}</span>
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 600, color: "#C8D0DC" }}>{item.label}</div>
-                        <div style={{ fontSize: 10, color: "#5A6478" }}>{item.desc}</div>
+                        <div style={{ fontSize: 11, color: "#5A6478" }}>{item.desc}</div>
                       </div>
                     </div>
                   ))}
@@ -1038,27 +1038,27 @@ export default function RateIQView() {
                   onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.carrier}</div>
-                    <div style={{ fontSize: 9, color: "#5A6478", marginTop: 1 }}>{c.primary_move_type || "—"}{c.last_delivery ? ` · Last: ${c.last_delivery}` : ""}</div>
+                    <div style={{ fontSize: 11, color: "#5A6478", marginTop: 1 }}>{c.primary_move_type || "—"}{c.last_delivery ? ` · Last: ${c.last_delivery}` : ""}</div>
                   </div>
                   <div style={{ display: "flex", gap: 16, alignItems: "center", flexShrink: 0 }}>
                     <div style={{ textAlign: "center", minWidth: 44 }}>
                       <div style={{ fontSize: 16, fontWeight: 800, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{c.total_loads}</div>
                       <div style={{ fontSize: 8, color: "#5A6478", fontWeight: 600, letterSpacing: "0.5px" }}>LOADS</div>
                     </div>
-                    <span style={{ padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, background: otBg, color: otColor, border: `1px solid ${otColor}30` }}>{c.on_time_pct}% OT</span>
+                    <span style={{ padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 700, background: otBg, color: otColor, border: `1px solid ${otColor}30` }}>{c.on_time_pct}% OT</span>
                     {c.avg_transit_days != null && (
                       <div style={{ textAlign: "center", minWidth: 44 }}>
                         <div style={{ fontSize: 14, fontWeight: 800, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{c.avg_transit_days}</div>
                         <div style={{ fontSize: 8, color: "#5A6478", fontWeight: 600 }}>AVG DAYS</div>
                       </div>
                     )}
-                    <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.25)", color: "#60a5fa", fontSize: 9, fontWeight: 700 }}>{c.lanes_served} lane{c.lanes_served !== 1 ? "s" : ""}</span>
+                    <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.25)", color: "#60a5fa", fontSize: 11, fontWeight: 700 }}>{c.lanes_served} lane{c.lanes_served !== 1 ? "s" : ""}</span>
                     <span style={{ color: "#5A6478", fontSize: 14, transition: "transform 0.2s", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
                   </div>
                 </div>
                 {isExpanded && c.top_lanes?.length > 0 && (
                   <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", padding: "10px 16px 14px" }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8 }}>Top Lanes</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8 }}>Top Lanes</div>
                     {c.top_lanes.map((tl, li) => (
                       <div key={li} onClick={() => openLaneDetail(tl.lane?.split("→")[0]?.trim(), tl.lane?.split("→")[1]?.trim(), 0)}
                         style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", borderRadius: 6, background: "rgba(255,255,255,0.02)", marginBottom: 3, cursor: "pointer", transition: "background 0.15s" }}
@@ -1114,12 +1114,12 @@ export default function RateIQView() {
           {CAP_OPTIONS.map(cap => {
             const active = dirCaps.includes(cap.key);
             return <button key={cap.key} onClick={() => setDirCaps(prev => active ? prev.filter(c => c !== cap.key) : [...prev, cap.key])}
-              style={{ padding: "5px 12px", borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: "pointer", border: `1px solid ${active ? cap.color + "60" : "rgba(255,255,255,0.06)"}`, background: active ? cap.color + "18" : "transparent", color: active ? cap.color : "#8B95A8", fontFamily: "inherit", transition: "all 0.15s" }}>
+              style={{ padding: "5px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer", border: `1px solid ${active ? cap.color + "60" : "rgba(255,255,255,0.06)"}`, background: active ? cap.color + "18" : "transparent", color: active ? cap.color : "#8B95A8", fontFamily: "inherit", transition: "all 0.15s" }}>
               {cap.label}
             </button>;
           })}
           <button onClick={() => setDirHideDnu(!dirHideDnu)}
-            style={{ padding: "5px 12px", borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: "pointer", border: `1px solid ${dirHideDnu ? "rgba(255,255,255,0.06)" : "rgba(239,68,68,0.4)"}`, background: dirHideDnu ? "transparent" : "rgba(239,68,68,0.1)", color: dirHideDnu ? "#8B95A8" : "#f87171", fontFamily: "inherit" }}>
+            style={{ padding: "5px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer", border: `1px solid ${dirHideDnu ? "rgba(255,255,255,0.06)" : "rgba(239,68,68,0.4)"}`, background: dirHideDnu ? "transparent" : "rgba(239,68,68,0.1)", color: dirHideDnu ? "#8B95A8" : "#f87171", fontFamily: "inherit" }}>
             {dirHideDnu ? "Show DNU" : "Hide DNU"}
           </button>
         </div>
@@ -1140,7 +1140,7 @@ export default function RateIQView() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{ fontSize: 13, fontWeight: 700, color: c.dnu ? "#f87171" : "#F0F2F5", textDecoration: c.dnu ? "line-through" : "none" }}>{c.carrier_name}</span>
-                      {c.mc_number && <span style={{ fontSize: 9, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>MC-{c.mc_number}</span>}
+                      {c.mc_number && <span style={{ fontSize: 11, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>MC-{c.mc_number}</span>}
                     </div>
                     <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
                       {isEdit ? (
@@ -1164,7 +1164,7 @@ export default function RateIQView() {
                   {isEdit ? (
                     <select value={c.tier_rank ?? ""} onClick={e => e.stopPropagation()}
                       onChange={e => { const v = e.target.value === "" ? null : parseInt(e.target.value); handleCarrierUpdate(c.id, "tier_rank", v); if (v === 0) handleCarrierUpdate(c.id, "dnu", true); else if (c.dnu) handleCarrierUpdate(c.id, "dnu", false); }}
-                      style={{ padding: "3px 8px", borderRadius: 6, fontSize: 9, fontWeight: 700, background: "#151926", color: tier.color, border: `1px solid ${tier.color}30`, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                      style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, background: "#151926", color: tier.color, border: `1px solid ${tier.color}30`, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
                       <option value="" style={{ background: "#151926", color: "#6B7280" }}>Unranked</option>
                       <option value="1" style={{ background: "#151926", color: "#34d399" }}>Tier 1</option>
                       <option value="2" style={{ background: "#151926", color: "#FBBF24" }}>Tier 2</option>
@@ -1172,7 +1172,7 @@ export default function RateIQView() {
                       <option value="0" style={{ background: "#151926", color: "#f87171" }}>DNU</option>
                     </select>
                   ) : (
-                    <span style={{ padding: "3px 10px", borderRadius: 6, fontSize: 9, fontWeight: 700, background: tier.bg, color: tier.color, border: `1px solid ${tier.color}30`, flexShrink: 0 }}>{tier.label}</span>
+                    <span style={{ padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 700, background: tier.bg, color: tier.color, border: `1px solid ${tier.color}30`, flexShrink: 0 }}>{tier.label}</span>
                   )}
                   <div style={{ display: "flex", gap: 3, flexShrink: 0, flexWrap: "wrap", maxWidth: 200 }}>
                     {(c.markets || []).slice(0, 4).map(m => (

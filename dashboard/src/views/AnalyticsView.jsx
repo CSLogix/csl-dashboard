@@ -44,7 +44,7 @@ function DataSourceToggle() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 10, fontWeight: 600, color: dataSource === "postgres" ? "#00D4AA" : "#f59e0b", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: dataSource === "postgres" ? "#00D4AA" : "#f59e0b", textTransform: "uppercase", letterSpacing: "0.06em" }}>
             {loading ? "Switching..." : dataSource === "postgres" ? "Postgres" : "Google Sheets"}
           </span>
           <button onClick={toggle} style={{
@@ -105,7 +105,7 @@ export default function AnalyticsView({ loaded, botStatus, botHealth, cronStatus
       <div style={{ fontSize: 18, fontWeight: 800, color, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.1 }}>
         {typeof value === "number" ? value.toLocaleString() : value}
       </div>
-      <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+      <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
     </div>
   );
 
@@ -118,7 +118,7 @@ export default function AnalyticsView({ loaded, botStatus, botHealth, cronStatus
         </h2>
         <div style={{ fontSize: 11, color: "#8B95A8", marginTop: 2 }}>
           Bot health metrics, crash detection, and system connections
-          {botHealth?.generated_at && <span style={{ marginLeft: 8, color: "#3D4557", fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>cached {Math.round((Date.now() - new Date(botHealth.generated_at).getTime()) / 60000)}m ago</span>}
+          {botHealth?.generated_at && <span style={{ marginLeft: 8, color: "#3D4557", fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>cached {Math.round((Date.now() - new Date(botHealth.generated_at).getTime()) / 60000)}m ago</span>}
         </div>
       </div>
 
@@ -127,7 +127,7 @@ export default function AnalyticsView({ loaded, botStatus, botHealth, cronStatus
           <div key={i} style={{ flex: 1, minWidth: 0, background: "#141A28", border: "1px solid rgba(255,255,255,0.10)", borderRadius: 14, padding: "14px 16px", position: "relative", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }}>
             <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: s.gradient }} />
             <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.04em", lineHeight: 1.1, color: s.color, fontFamily: "'JetBrains Mono', monospace", marginBottom: 2 }}>{typeof s.value === "number" ? s.value.toLocaleString() : s.value}</div>
-            <div style={{ fontSize: 10, fontWeight: 600, color: "#8B95A8", textTransform: "uppercase", letterSpacing: "0.06em" }}>{s.label} {s.sub && <span style={{ color: "#3D4557" }}>{s.sub}</span>}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#8B95A8", textTransform: "uppercase", letterSpacing: "0.06em" }}>{s.label} {s.sub && <span style={{ color: "#3D4557" }}>{s.sub}</span>}</div>
           </div>
         ))}
       </div>
@@ -147,7 +147,7 @@ export default function AnalyticsView({ loaded, botStatus, botHealth, cronStatus
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: svc.active_state === "active" ? "#10b981" : "#ef4444", boxShadow: `0 0 6px ${svc.active_state === "active" ? "#10b98166" : "#ef444466"}` }} />
                   <span style={{ fontSize: 12, fontWeight: 700, color: "#F0F2F5" }}>{svc.name}</span>
                 </div>
-                <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.08em", padding: "2px 8px", borderRadius: 6, background: h.bg, color: h.color, border: `1px solid ${h.border}` }}>
+                <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", padding: "2px 8px", borderRadius: 6, background: h.bg, color: h.color, border: `1px solid ${h.border}` }}>
                   {h.icon} {h.label}
                 </span>
               </div>
@@ -157,7 +157,7 @@ export default function AnalyticsView({ loaded, botStatus, botHealth, cronStatus
                 {!isServer && <MetricCell label="Cycles" value={j.cycles_completed || 0} color={(j.cycles_completed || 0) > 0 ? "#3b82f6" : "#3D4557"} />}
                 {!isServer && <MetricCell label="Loads" value={j.loads_tracked || 0} color={(j.loads_tracked || 0) > 0 ? "#8b5cf6" : "#3D4557"} />}
               </div>
-              <div style={{ fontSize: 10, color: "#5A6478", borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 6, display: "flex", justifyContent: "space-between" }}>
+              <div style={{ fontSize: 11, color: "#5A6478", borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 6, display: "flex", justifyContent: "space-between" }}>
                 <span>{svc.last_successful_cycle ? `Last cycle: ${(() => { const m = Math.round((Date.now() - new Date(svc.last_successful_cycle).getTime()) / 60000); return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ${m % 60}m ago`; })()}` : isServer ? `Up: ${svc.last_run}` : "Last cycle: none (24h)"}</span>
                 {svc.next_run && !isServer && (
                   <span style={{ color: svc.next_run === "overdue" ? "#f59e0b" : "#3b82f6", fontWeight: 600 }}>next: {svc.next_run}</span>
@@ -185,7 +185,7 @@ export default function AnalyticsView({ loaded, botStatus, botHealth, cronStatus
                       <span style={{ fontSize: 14 }}>{key === "dray_import" ? "\u{1F4E5}" : "\u{1F4E4}"}</span>
                       <span style={{ fontSize: 12, fontWeight: 700, color: "#F0F2F5" }}>{job.name}</span>
                     </div>
-                    <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.08em", padding: "2px 8px", borderRadius: 6, background: cs.bg, color: cs.color, border: `1px solid ${cs.border}` }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", padding: "2px 8px", borderRadius: 6, background: cs.bg, color: cs.color, border: `1px solid ${cs.border}` }}>
                       {cs.icon} {cs.label}
                     </span>
                   </div>
@@ -194,7 +194,7 @@ export default function AnalyticsView({ loaded, botStatus, botHealth, cronStatus
                     <MetricCell label="Items" value={job.items_tracked || 0} color={(job.items_tracked || 0) > 0 ? "#8b5cf6" : "#3D4557"} />
                     <MetricCell label="Errors" value={(job.errors || []).length} color={(job.errors || []).length > 0 ? "#ef4444" : "#3D4557"} />
                   </div>
-                  <div style={{ fontSize: 10, color: "#5A6478", borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 6 }}>
+                  <div style={{ fontSize: 11, color: "#5A6478", borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 6 }}>
                     {job.last_run ? `Last run: ${(() => { const m = Math.round((Date.now() - new Date(job.last_run.replace(" ", "T")).getTime()) / 60000); return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ${m % 60}m ago`; })()}` : "No runs recorded"}
                   </div>
                 </div>
@@ -210,9 +210,9 @@ export default function AnalyticsView({ loaded, botStatus, botHealth, cronStatus
           {allErrors.length === 0 ? (
             <div style={{ padding: 24, textAlign: "center", color: "#3D4557", fontSize: 11 }}>No errors in the last 24 hours</div>
           ) : allErrors.map((e, i) => (
-            <div key={i} style={{ display: "flex", gap: 8, padding: "5px 0", borderBottom: "1px solid rgba(255,255,255,0.02)", fontSize: 10, alignItems: "flex-start" }}>
+            <div key={i} style={{ display: "flex", gap: 8, padding: "5px 0", borderBottom: "1px solid rgba(255,255,255,0.02)", fontSize: 11, alignItems: "flex-start" }}>
               <span style={{ fontFamily: "'JetBrains Mono', monospace", color: "#3D4557", flexShrink: 0, minWidth: 55 }}>{e.time}</span>
-              <span style={{ padding: "0px 5px", borderRadius: 4, fontSize: 9, fontWeight: 700, flexShrink: 0,
+              <span style={{ padding: "0px 5px", borderRadius: 4, fontSize: 11, fontWeight: 700, flexShrink: 0,
                 background: e.level === "crash" ? "rgba(239,68,68,0.12)" : "rgba(245,158,11,0.12)",
                 color: e.level === "crash" ? "#ef4444" : "#f59e0b",
                 border: `1px solid ${e.level === "crash" ? "rgba(239,68,68,0.25)" : "rgba(245,158,11,0.25)"}`,
@@ -241,9 +241,9 @@ export default function AnalyticsView({ loaded, botStatus, botHealth, cronStatus
                   <div style={{ fontSize: 8, color: "#8B95A8" }}>Spreadsheet</div>
                 </div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 9 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11 }}>
                 <span style={{ color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{s.id}</span>
-                <span style={{ color: "#34d399", fontWeight: 700, fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "#10b98112" }}>Operational</span>
+                <span style={{ color: "#34d399", fontWeight: 700, fontSize: 11, padding: "1px 6px", borderRadius: 4, background: "#10b98112" }}>Operational</span>
               </div>
             </div>
           ))}

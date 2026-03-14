@@ -229,7 +229,7 @@ export default function MyActions({
             width: 28, height: 28, borderRadius: "50%",
             background: `linear-gradient(135deg, ${repColor}44, ${repColor}88)`,
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 10, fontWeight: 700, color: "#fff", flexShrink: 0,
+            fontSize: 11, fontWeight: 700, color: "#fff", flexShrink: 0,
             border: `2px solid ${repColor}66`,
           }}>
             {repInitials}
@@ -333,18 +333,18 @@ export default function MyActions({
                 <div style={{ flex: 1, display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                   {breakdown.slice(0, 3).map(([acct, cnt]) => (
                     <span key={acct} style={{
-                      fontSize: 10, color: "#5A6478", fontWeight: 500,
+                      fontSize: 11, color: "#5A6478", fontWeight: 500,
                     }}>
                       {acct}{cnt > 1 ? ` ${cnt}` : ""}
                     </span>
                   ))}
                   {breakdown.length > 3 && (
-                    <span style={{ fontSize: 10, color: "#3D4557" }}>+{breakdown.length - 3}</span>
+                    <span style={{ fontSize: 11, color: "#3D4557" }}>+{breakdown.length - 3}</span>
                   )}
                 </div>
 
                 {/* Expand arrow */}
-                <span style={{ fontSize: 9, color: "#5A6478", width: 12, textAlign: "center", flexShrink: 0 }}>
+                <span style={{ fontSize: 11, color: "#5A6478", width: 12, textAlign: "center", flexShrink: 0 }}>
                   {isExpanded ? "\u25B2" : "\u25BC"}
                 </span>
               </div>
@@ -382,14 +382,14 @@ export default function MyActions({
                             {lane && <span style={{ color: "#5A6478" }}> · {lane}</span>}
                           </div>
                           {overdue && (
-                            <div style={{ fontSize: 10, color: "#ffab00", fontWeight: 600, marginTop: 1 }}>{overdue}</div>
+                            <div style={{ fontSize: 11, color: "#ffab00", fontWeight: 600, marginTop: 1 }}>{overdue}</div>
                           )}
                         </div>
                         {group.showCheckCall && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleLoadClick(s); }}
                             style={{
-                              padding: "4px 12px", borderRadius: 8, fontSize: 10, fontWeight: 700,
+                              padding: "4px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700,
                               border: `1px solid ${group.color}44`, background: `${group.color}12`,
                               color: group.color, cursor: "pointer", fontFamily: "inherit",
                               transition: "all 0.15s", whiteSpace: "nowrap",
@@ -406,7 +406,7 @@ export default function MyActions({
                   {group.items.length > 20 && (
                     <div
                       onClick={group.filterAction}
-                      style={{ fontSize: 10, color: group.color, padding: "4px 10px", cursor: "pointer", fontWeight: 600 }}
+                      style={{ fontSize: 11, color: group.color, padding: "4px 10px", cursor: "pointer", fontWeight: 600 }}
                     >
                       View all {group.items.length} →
                     </div>

@@ -80,7 +80,7 @@ export default function MacropointModal({ shipment, onClose }) {
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: 20, padding: "0 24px 20px" }}>
               <div>
-                <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 14, textTransform: "uppercase" }}>Progress Tracker</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 14, textTransform: "uppercase" }}>Progress Tracker</div>
                 {d.progress.map((step, i) => {
                   const isLast = i === d.progress.length - 1;
                   return (
@@ -106,7 +106,7 @@ export default function MacropointModal({ shipment, onClose }) {
                     <span style={{ fontSize: 16 }}>{"\u26A0"}</span>
                     <div>
                       <div style={{ fontSize: 11, color: "#f87171", fontWeight: 700 }}>{"Can't Make It"}</div>
-                      <div style={{ fontSize: 10, color: "#fca5a5", marginTop: 2 }}>{d.cantMakeIt}</div>
+                      <div style={{ fontSize: 11, color: "#fca5a5", marginTop: 2 }}>{d.cantMakeIt}</div>
                     </div>
                   </div>
                 )}
@@ -115,7 +115,7 @@ export default function MacropointModal({ shipment, onClose }) {
                     <span style={{ fontSize: 16 }}>{"\u23F1"}</span>
                     <div>
                       <span style={{ fontSize: 11, color: "#fb923c", fontWeight: 700 }}>Behind Schedule</span>
-                      {d.mpDisplayDetail && <div style={{ fontSize: 10, color: "#fdba74", marginTop: 2 }}>{d.mpDisplayDetail}</div>}
+                      {d.mpDisplayDetail && <div style={{ fontSize: 11, color: "#fdba74", marginTop: 2 }}>{d.mpDisplayDetail}</div>}
                     </div>
                   </div>
                 )}
@@ -124,12 +124,12 @@ export default function MacropointModal({ shipment, onClose }) {
                     <span style={{ fontSize: 16 }}>{d.mpDisplayStatus === "On Time" ? "\u2713" : "\u2139"}</span>
                     <div>
                       <span style={{ fontSize: 11, color: d.mpDisplayStatus === "On Time" ? "#22C55E" : "#60A5FA", fontWeight: 700 }}>{d.mpDisplayStatus || "Tracking"}</span>
-                      {d.mpDisplayDetail && <div style={{ fontSize: 10, color: d.mpDisplayStatus === "On Time" ? "#86EFAC" : "#93C5FD", marginTop: 2 }}>{d.mpDisplayDetail}{d.distanceToStop ? ` | ${parseFloat(d.distanceToStop).toFixed(0)} mi to stop` : ""}</div>}
+                      {d.mpDisplayDetail && <div style={{ fontSize: 11, color: d.mpDisplayStatus === "On Time" ? "#86EFAC" : "#93C5FD", marginTop: 2 }}>{d.mpDisplayDetail}{d.distanceToStop ? ` | ${parseFloat(d.distanceToStop).toFixed(0)} mi to stop` : ""}</div>}
                     </div>
                   </div>
                 )}
 
-                <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 14, textTransform: "uppercase" }}>Load Details</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 14, textTransform: "uppercase" }}>Load Details</div>
                 {[
                   { label: "Load ID", value: d.loadId || shipment.container },
                   { label: "Carrier", value: d.carrier },
@@ -142,7 +142,7 @@ export default function MacropointModal({ shipment, onClose }) {
                   </div>
                 ))}
 
-                <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginTop: 16, marginBottom: 10, textTransform: "uppercase" }}>Driver</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginTop: 16, marginBottom: 10, textTransform: "uppercase" }}>Driver</div>
                 {d.driverName && (
                   <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                     <span style={{ fontSize: 11, color: "#8B95A8" }}>Name</span>
@@ -159,7 +159,7 @@ export default function MacropointModal({ shipment, onClose }) {
                       {"\uD83D\uDCDE"} {d.driverPhone}
                     </a>
                   ) : (
-                    <span style={{ fontSize: 10, color: "#3D4557", fontStyle: "italic" }}>Not set</span>
+                    <span style={{ fontSize: 11, color: "#3D4557", fontStyle: "italic" }}>Not set</span>
                   )}
                 </div>
 
@@ -178,7 +178,7 @@ export default function MacropointModal({ shipment, onClose }) {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                   <span style={{ fontSize: 11, color: "#8B95A8" }}>Dispatch</span>
                   <a href={`tel:${d.phone.replace(/\D/g, '')}`} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 6,
-                    background: "rgba(0,212,170,0.12)", border: "1px solid rgba(0,212,170,0.3)", color: "#00D4AA", fontSize: 10, fontWeight: 600, textDecoration: "none" }}>
+                    background: "rgba(0,212,170,0.12)", border: "1px solid rgba(0,212,170,0.3)", color: "#00D4AA", fontSize: 11, fontWeight: 600, textDecoration: "none" }}>
                     {"\uD83D\uDCDE"} {d.phone}
                   </a>
                 </div>
@@ -193,15 +193,15 @@ export default function MacropointModal({ shipment, onClose }) {
 
                 {(d.pickup || d.delivery || d.eta) && (
                   <div style={{ marginTop: 8, display: "flex", gap: 12 }}>
-                    {d.pickup && <div style={{ fontSize: 10, color: "#8B95A8" }}>PU: <span style={{ color: "#8B95A8" }}>{d.pickup}</span></div>}
-                    {d.delivery && <div style={{ fontSize: 10, color: "#8B95A8" }}>DEL: <span style={{ color: "#8B95A8" }}>{d.delivery}</span></div>}
-                    {d.eta && <div style={{ fontSize: 10, color: "#8B95A8" }}>ETA: <span style={{ color: "#8B95A8" }}>{d.eta}</span></div>}
+                    {d.pickup && <div style={{ fontSize: 11, color: "#8B95A8" }}>PU: <span style={{ color: "#8B95A8" }}>{d.pickup}</span></div>}
+                    {d.delivery && <div style={{ fontSize: 11, color: "#8B95A8" }}>DEL: <span style={{ color: "#8B95A8" }}>{d.delivery}</span></div>}
+                    {d.eta && <div style={{ fontSize: 11, color: "#8B95A8" }}>ETA: <span style={{ color: "#8B95A8" }}>{d.eta}</span></div>}
                   </div>
                 )}
 
                 {d.timeline && d.timeline.length > 0 && (
                   <div style={{ marginTop: 14 }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Tracking History</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Tracking History</div>
                     {d.timeline.map((ev, i) => {
                       const dotColor = ev.type === "delivered" ? "#00D4AA" : ev.type === "arrived" ? "#10b981" : ev.type === "departed" ? "#3b82f6" : ev.type === "info" ? "#f59e0b" : "#8B95A8";
                       const fmtTime = ev.time ? (() => { try { const dt = new Date(ev.time); return dt.toLocaleString("en-US", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true }); } catch { return ev.time; } })() : "";
@@ -209,10 +209,10 @@ export default function MacropointModal({ shipment, onClose }) {
                         <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                           <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, marginTop: 3, background: dotColor }} />
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <span style={{ fontSize: 10, color: "#F0F2F5", fontWeight: 600 }}>{ev.event}</span>
-                            {ev.location && <span style={{ fontSize: 10, color: "#8B95A8", marginLeft: 6 }}>{ev.location}</span>}
+                            <span style={{ fontSize: 11, color: "#F0F2F5", fontWeight: 600 }}>{ev.event}</span>
+                            {ev.location && <span style={{ fontSize: 11, color: "#8B95A8", marginLeft: 6 }}>{ev.location}</span>}
                           </div>
-                          <span style={{ fontSize: 10, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace", flexShrink: 0, whiteSpace: "nowrap" }}>{fmtTime}</span>
+                          <span style={{ fontSize: 11, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace", flexShrink: 0, whiteSpace: "nowrap" }}>{fmtTime}</span>
                         </div>
                       );
                     })}
@@ -220,7 +220,7 @@ export default function MacropointModal({ shipment, onClose }) {
                 )}
 
                 {(d.mpLastUpdated || d.lastScraped) && (
-                  <div style={{ marginTop: 8, fontSize: 9, color: "#3D4557", textAlign: "right" }} title={d.mpLastUpdated || d.lastScraped}>
+                  <div style={{ marginTop: 8, fontSize: 11, color: "#3D4557", textAlign: "right" }} title={d.mpLastUpdated || d.lastScraped}>
                     Last MP update: {relativeTime(d.mpLastUpdated || d.lastScraped) || d.lastScraped}
                   </div>
                 )}
@@ -249,15 +249,15 @@ export default function MacropointModal({ shipment, onClose }) {
             </div>
 
             <div style={{ padding: "0 24px 24px" }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 10, textTransform: "uppercase" }}>Shipment Route</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 10, textTransform: "uppercase" }}>Shipment Route</div>
               <div style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)", padding: 16, display: "flex", alignItems: "center", gap: 16, background: "rgba(0,0,0,0.2)" }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Origin</div>
+                  <div style={{ fontSize: 11, color: "#8B95A8", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Origin</div>
                   <div style={{ fontSize: 13, color: "#10b981", fontWeight: 700, marginTop: 2 }}>{d.origin || shipment.origin || "\u2014"}</div>
                 </div>
                 <div style={{ color: "#3D4557", fontSize: 20 }}>{"\u2192"}</div>
                 <div style={{ flex: 1, textAlign: "right" }}>
-                  <div style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Destination</div>
+                  <div style={{ fontSize: 11, color: "#8B95A8", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Destination</div>
                   <div style={{ fontSize: 13, color: "#ef4444", fontWeight: 700, marginTop: 2 }}>{d.destination || shipment.destination || "\u2014"}</div>
                 </div>
               </div>

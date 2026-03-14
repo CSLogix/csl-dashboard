@@ -350,16 +350,16 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
           <div style={{ padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 800, color: "#F0F2F5" }}>{selectedShipment.loadNumber}</div>
-              <div style={{ fontSize: 10, color: "#8B95A8", marginTop: 2 }}>{selectedShipment.container} | {selectedShipment.moveType}</div>
+              <div style={{ fontSize: 11, color: "#8B95A8", marginTop: 2 }}>{selectedShipment.container} | {selectedShipment.moveType}</div>
               {selectedShipment.playbookLaneCode && (
                 <div style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4, padding: "2px 8px", borderRadius: 4, background: "rgba(0,212,170,0.12)", border: "1px solid rgba(0,212,170,0.25)", cursor: "pointer" }} title={`Playbook: ${selectedShipment.playbookLaneCode}`} onClick={() => { /* Could nav to playbook */ }}>
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#00D4AA" strokeWidth="2.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-                  <span style={{ fontSize: 9, fontWeight: 700, color: "#00D4AA", letterSpacing: "0.03em" }}>{selectedShipment.playbookLaneCode}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#00D4AA", letterSpacing: "0.03em" }}>{selectedShipment.playbookLaneCode}</span>
                 </div>
               )}
               <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4 }}>
                 <span style={{ width: 5, height: 5, borderRadius: "50%", background: selectedShipment.synced ? "#34d399" : "#fbbf24", animation: selectedShipment.synced ? "none" : "pulse 1s ease infinite" }} />
-                <span style={{ fontSize: 9, color: selectedShipment.synced ? "#34d399" : "#fbbf24", fontWeight: 600 }}>{selectedShipment.synced ? "All changes saved" : "Saving..."}</span>
+                <span style={{ fontSize: 11, color: selectedShipment.synced ? "#34d399" : "#fbbf24", fontWeight: 600 }}>{selectedShipment.synced ? "All changes saved" : "Saving..."}</span>
               </div>
               {/* Trip Progress Bar */}
               {(selectedShipment.moveType === "FTL") && (() => {
@@ -426,7 +426,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
               <button key={i} onClick={btn.enabled ? btn.onClick : undefined}
                 style={{ background: btn.enabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.02)", border: `1px solid ${btn.enabled ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.04)"}`,
                   borderRadius: 6, padding: "5px 10px", cursor: btn.enabled ? "pointer" : "default",
-                  color: btn.enabled ? btn.color : "rgba(255,255,255,0.2)", fontSize: 10, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600,
+                  color: btn.enabled ? btn.color : "rgba(255,255,255,0.2)", fontSize: 11, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600,
                   transition: "all 0.15s ease", opacity: btn.enabled ? 1 : 0.5 }}
                 title={!btn.enabled ? "Not available" : btn.label}
               >{btn.icon} {btn.label}</button>
@@ -477,7 +477,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 onKeyDown={e => { if (e.key === "Enter") { saveDriverField("macropointUrl", mpUrlVal); setEditingMpUrl(false); } if (e.key === "Escape") setEditingMpUrl(false); }}
                 autoFocus />
               <button onClick={() => { saveDriverField("macropointUrl", mpUrlVal); setEditingMpUrl(false); }}
-                style={{ background: "#8B5CF6", border: "none", borderRadius: 6, padding: "6px 12px", color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Save</button>
+                style={{ background: "#8B5CF6", border: "none", borderRadius: 6, padding: "6px 12px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Save</button>
             </div>
           )}
 
@@ -487,12 +487,12 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
               {aiSummaryLoading ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.15)" }}>
                   <div style={{ width: 12, height: 12, border: "2px solid rgba(0,212,170,0.2)", borderTop: "2px solid #00D4AA", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
-                  <span style={{ fontSize: 10, color: "#00D4AA", fontWeight: 600 }}>Generating AI summary...</span>
+                  <span style={{ fontSize: 11, color: "#00D4AA", fontWeight: 600 }}>Generating AI summary...</span>
                 </div>
               ) : (
                 <div style={{ padding: "10px 12px", borderRadius: 8, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.15)", position: "relative" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 9, fontWeight: 700, color: "#00D4AA", textTransform: "uppercase", letterSpacing: "0.05em" }}>AI Summary</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#00D4AA", textTransform: "uppercase", letterSpacing: "0.05em" }}>AI Summary</span>
                     <button onClick={() => setAiSummary(null)} style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 12, padding: "0 2px", lineHeight: 1 }} title="Dismiss">&#x2715;</button>
                   </div>
                   <div style={{ fontSize: 11, color: "#C8CED8", lineHeight: 1.6, whiteSpace: "pre-line" }}>{aiSummary}</div>
@@ -504,21 +504,21 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
           {/* Behind schedule / Can't make it warnings — FTL only */}
           {selectedShipment.moveType === "FTL" && trackingData?.cantMakeIt && (
             <div style={{ padding: "0 20px 8px" }}>
-              <div style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#f87171", fontWeight: 600 }}>
+              <div style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#f87171", fontWeight: 600 }}>
                 {"\u26A0"} {trackingData.cantMakeIt}
               </div>
             </div>
           )}
           {selectedShipment.moveType === "FTL" && trackingData?.behindSchedule && !trackingData?.cantMakeIt && (
             <div style={{ padding: "0 20px 8px" }}>
-              <div style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#fb923c", fontWeight: 600 }}>
+              <div style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#fb923c", fontWeight: 600 }}>
                 {"\u23F1"} Behind Schedule{trackingData?.mpDisplayDetail ? ` \u2014 ${trackingData.mpDisplayDetail}` : ""}
               </div>
             </div>
           )}
           {selectedShipment.moveType === "FTL" && trackingData?.mpDisplayStatus === "On Time" && !trackingData?.cantMakeIt && !trackingData?.behindSchedule && trackingData?.mpDisplayDetail && (
             <div style={{ padding: "0 20px 8px" }}>
-              <div style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#22C55E", fontWeight: 600 }}>
+              <div style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)", display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#22C55E", fontWeight: 600 }}>
                 {"\u2713"} On Time {"\u2014"} {trackingData.mpDisplayDetail}
               </div>
             </div>
@@ -540,12 +540,12 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
             };
             const origin = selectedShipment.origin || trackingData?.origin || "";
             const dest = selectedShipment.destination || trackingData?.destination || "";
-            const mono = { fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 600 };
+            const mono = { fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600 };
             const headerCell = { fontSize: 7, fontWeight: 700, color: "#5A6478", letterSpacing: "1px", textTransform: "uppercase", padding: "0 0 3px", textAlign: "right" };
             const valCell = { ...mono, padding: "2px 0", textAlign: "right" };
             return (
             <div style={{ padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 6, textTransform: "uppercase" }}>Schedule & Tracking</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 6, textTransform: "uppercase" }}>Schedule & Tracking</div>
               <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr", gap: "0 10px", alignItems: "center" }}>
                 {/* Header row */}
                 <div />
@@ -555,7 +555,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 {/* Pickup row */}
                 <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 0", whiteSpace: "nowrap" }}>
                   <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#f59e0b", flexShrink: 0 }} />
-                  <span style={{ fontSize: 9, fontWeight: 700, color: "#F0F2F5" }}>PU</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#F0F2F5" }}>PU</span>
                   {origin && <span style={{ fontSize: 8, color: "#5A6478", overflow: "hidden", textOverflow: "ellipsis" }}>{origin.length > 18 ? origin.slice(0, 18) + "\u2026" : origin}</span>}
                 </div>
                 <div style={{ ...valCell, color: "#C8CED8" }}>{fmtTs(selectedShipment.pickupDate) || "\u2014"}</div>
@@ -564,7 +564,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 {/* Delivery row */}
                 <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 0", whiteSpace: "nowrap" }}>
                   <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />
-                  <span style={{ fontSize: 9, fontWeight: 700, color: "#F0F2F5" }}>DEL</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#F0F2F5" }}>DEL</span>
                   {dest && <span style={{ fontSize: 8, color: "#5A6478", overflow: "hidden", textOverflow: "ellipsis" }}>{dest.length > 18 ? dest.slice(0, 18) + "\u2026" : dest}</span>}
                 </div>
                 <div style={{ ...valCell, color: "#C8CED8" }}>{fmtTs(selectedShipment.deliveryDate) || "\u2014"}</div>
@@ -575,9 +575,9 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
               {parsedStops.delivered && (
                 <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, paddingTop: 4, borderTop: "1px solid rgba(255,255,255,0.04)" }}>
                   <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#00D4AA", flexShrink: 0 }} />
-                  <span style={{ fontSize: 9, fontWeight: 700, color: "#00D4AA" }}>Delivered</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#00D4AA" }}>Delivered</span>
                   {parsedStops.deliveredLocation && <span style={{ fontSize: 8, color: "#5A6478" }}>{parsedStops.deliveredLocation}</span>}
-                  <span style={{ marginLeft: "auto", ...mono, fontSize: 9, color: "#8B95A8" }}>{fmtTs(parsedStops.delivered)}</span>
+                  <span style={{ marginLeft: "auto", ...mono, fontSize: 11, color: "#8B95A8" }}>{fmtTs(parsedStops.delivered)}</span>
                 </div>
               )}
             </div>
@@ -594,14 +594,14 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 <div onClick={() => setStatusExpanded(!statusExpanded)}
                   style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", userSelect: "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", textTransform: "uppercase" }}>Status</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", textTransform: "uppercase" }}>Status</span>
                     {!statusExpanded && activeStatus && (
-                      <span style={{ padding: "3px 10px", fontSize: 9, fontWeight: 700, borderRadius: 20,
+                      <span style={{ padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 20,
                         border: `1px solid ${activeColor}66`, background: `${activeColor}18`, color: activeColor,
                         fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{activeStatus.label}</span>
                     )}
                   </div>
-                  <span style={{ fontSize: 10, color: "#5A6478", transition: "transform 0.15s" }}>{statusExpanded ? "\u25BE" : "\u25B8"}</span>
+                  <span style={{ fontSize: 11, color: "#5A6478", transition: "transform 0.15s" }}>{statusExpanded ? "\u25BE" : "\u25B8"}</span>
                 </div>
                 {statusExpanded && (
                   <>
@@ -611,7 +611,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                         const sc2 = getStatusColors(selectedShipment)[s.key] || { main: "#94a3b8" };
                         return (
                           <button key={s.key} onClick={() => handleStatusUpdate(selectedShipment.id, s.key)}
-                            style={{ padding: "4px 10px", fontSize: 9, fontWeight: 700, borderRadius: 20,
+                            style={{ padding: "4px 10px", fontSize: 11, fontWeight: 700, borderRadius: 20,
                               border: `1px solid ${isActive ? sc2.main + "66" : "rgba(255,255,255,0.06)"}`,
                               background: isActive ? `${sc2.main}18` : "transparent",
                               color: isActive ? sc2.main : "#64748b", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{s.label}</button>
@@ -685,7 +685,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
               ] : []),
             ].map((item) => (
               <div key={item.field || item.dField} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                <span style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>{item.label}</span>
+                <span style={{ fontSize: 11, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>{item.label}</span>
                 {item.isDriver ? (
                   <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                     {driverEditing === item.dField ? (
@@ -749,7 +749,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                   border: `1px solid ${hasHold ? "rgba(239,68,68,0.25)" : "rgba(56,189,248,0.25)"}`,
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <span style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: hasHold ? "#f87171" : "#38bdf8" }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: hasHold ? "#f87171" : "#38bdf8" }}>
                       Terminal Ground Truth
                     </span>
                     <TerminalBadge notes={selectedShipment.notes} />
@@ -758,7 +758,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                     {selectedShipment.notes}
                   </div>
                   {t.vessel && (
-                    <div style={{ marginTop: 8, fontSize: 10, color: "#9CA3AF" }}>
+                    <div style={{ marginTop: 8, fontSize: 11, color: "#9CA3AF" }}>
                       <strong style={{ color: "#6B7280" }}>Vessel:</strong> {t.vessel}
                     </div>
                   )}
@@ -769,7 +769,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
 
           {/* Financials */}
           <div style={{ padding: "8px 20px 12px" }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Financials</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>Financials</div>
             {/* Rate Quote Suggestion Banner (Margin Bridge) */}
             {(() => {
               const currentPay = shipments.find(s => s.id === selectedShipment.id)?.carrierPay;
@@ -787,7 +787,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                     <div style={{ fontSize: 11, color: "#E5E7EB", fontWeight: 600 }}>
                       {bestQuote.carrier_name || "Carrier"} {"\u2014"} <span style={{ color: "#F97316", fontFamily: "'JetBrains Mono', monospace" }}>${Number(bestQuote.rate_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
                     </div>
-                    <div style={{ fontSize: 9, color: "#8B95A8", marginTop: 2 }}>
+                    <div style={{ fontSize: 11, color: "#8B95A8", marginTop: 2 }}>
                       Rate detected from email{bestQuote.status === "accepted" ? " (accepted)" : ""}{otherCount > 0 ? ` \u00B7 +${otherCount} more` : ""}
                     </div>
                   </div>
@@ -795,7 +795,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                     onClick={() => handleApplyRate(bestQuote, { onApplied: () => setRateApplied(true) })}
                     style={{
                       background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 6,
-                      color: "#22C55E", fontSize: 10, fontWeight: 700, padding: "5px 10px", cursor: "pointer",
+                      color: "#22C55E", fontSize: 11, fontWeight: 700, padding: "5px 10px", cursor: "pointer",
                       whiteSpace: "nowrap"
                     }}
                     onMouseEnter={e => { e.target.style.background = "rgba(34,197,94,0.25)"; }}
@@ -827,11 +827,11 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                     <div style={{ fontSize: 11, color: "#E5E7EB", fontWeight: 600 }}>
                       Customer Rate {"\u2014"} <span style={{ color: "#22C55E", fontFamily: "'JetBrains Mono', monospace" }}>${Number(cxQuote.rate_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
                     </div>
-                    <div style={{ fontSize: 9, color: "#8B95A8", marginTop: 2 }}>Extracted from customer email</div>
+                    <div style={{ fontSize: 11, color: "#8B95A8", marginTop: 2 }}>Extracted from customer email</div>
                   </div>
                   <button onClick={() => handleApplyRate({ ...cxQuote, _field: "customer_rate" }, { onApplied: () => setRateApplied(true) })}
                     style={{ background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 6,
-                      color: "#22C55E", fontSize: 10, fontWeight: 700, padding: "5px 10px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                      color: "#22C55E", fontSize: 11, fontWeight: 700, padding: "5px 10px", cursor: "pointer", whiteSpace: "nowrap" }}>
                     {"\u2713"} Apply CX Rate
                   </button>
                   <button onClick={() => setRateDismissed(true)}
@@ -853,7 +853,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 })();
                 return (
                   <div key={key} style={{ flex: 1 }}>
-                    <div style={{ fontSize: 9, color: "#5A6478", marginBottom: 4, fontWeight: 600 }}>{label}</div>
+                    <div style={{ fontSize: 11, color: "#5A6478", marginBottom: 4, fontWeight: 600 }}>{label}</div>
                     <div style={{ position: "relative" }}>
                       <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#5A6478", fontSize: 11, pointerEvents: "none" }}>$</span>
                       <input
@@ -880,7 +880,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 const color = margin < 0 ? "#EF4444" : margin < 10 ? "#F97316" : "#22C55E";
                 return (
                   <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", minWidth: 52 }}>
-                    <div style={{ fontSize: 9, color: "#5A6478", marginBottom: 4, fontWeight: 600 }}>MARGIN</div>
+                    <div style={{ fontSize: 11, color: "#5A6478", marginBottom: 4, fontWeight: 600 }}>MARGIN</div>
                     <div style={{ fontSize: 13, fontWeight: 800, color, fontFamily: "'JetBrains Mono', monospace" }}>
                       {margin.toFixed(1)}%
                     </div>
@@ -892,7 +892,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
 
           {/* Notes */}
           <div style={{ padding: "8px 20px 14px" }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 6, textTransform: "uppercase" }}>Notes</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 6, textTransform: "uppercase" }}>Notes</div>
             <textarea
               value={shipments.find(s => s.id === selectedShipment.id)?.notes || ""}
               onChange={e => { const v = e.target.value; setShipments(prev => prev.map(s => s.id === selectedShipment.id ? { ...s, notes: v } : s)); }}
@@ -903,7 +903,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
 
           {/* Timestamped Notes Log */}
           <div style={{ padding: "4px 20px 14px" }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", marginBottom: 8, textTransform: "uppercase" }}>
               Notes Log {loadNotes.length > 0 && <span style={{ color: "#5A6478" }}>({loadNotes.length})</span>}
             </div>
             <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
@@ -916,7 +916,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
               <button
                 onClick={submitNote}
                 disabled={!noteInput.trim() || noteSubmitting}
-                style={{ background: noteInput.trim() ? "#00D4AA" : "rgba(255,255,255,0.06)", color: noteInput.trim() ? "#0A0E17" : "#5A6478", border: "none", borderRadius: 8, padding: "6px 14px", fontSize: 10, fontWeight: 700, cursor: noteInput.trim() ? "pointer" : "default", opacity: noteSubmitting ? 0.5 : 1, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                style={{ background: noteInput.trim() ? "#00D4AA" : "rgba(255,255,255,0.06)", color: noteInput.trim() ? "#0A0E17" : "#5A6478", border: "none", borderRadius: 8, padding: "6px 14px", fontSize: 11, fontWeight: 700, cursor: noteInput.trim() ? "pointer" : "default", opacity: noteSubmitting ? 0.5 : 1, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
                 {noteSubmitting ? "..." : "Add"}
               </button>
             </div>
@@ -924,8 +924,8 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
               <div style={{ maxHeight: 180, overflow: "auto", borderLeft: "2px solid rgba(0,212,170,0.15)", paddingLeft: 12 }}>
                 {loadNotes.map(n => (
                   <div key={n.id} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                    <div style={{ fontSize: 10, color: "#F0F2F5", lineHeight: 1.4 }}>{n.note_text}</div>
-                    <div style={{ fontSize: 9, color: "#5A6478", marginTop: 3 }}>
+                    <div style={{ fontSize: 11, color: "#F0F2F5", lineHeight: 1.4 }}>{n.note_text}</div>
+                    <div style={{ fontSize: 11, color: "#5A6478", marginTop: 3 }}>
                       {n.created_by} &middot; {new Date(n.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
                     </div>
                   </div>
@@ -939,10 +939,10 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
             <div ref={emailsSectionRef} style={{ padding: "8px 20px 12px" }}>
               <div onClick={() => setEmailsCollapsed(prev => !prev)}
                 style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", userSelect: "none" }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", textTransform: "uppercase" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", textTransform: "uppercase" }}>
                   Emails <span style={{ color: "#8B95A8" }}>({loadEmails.length})</span>
                 </div>
-                <span style={{ fontSize: 10, color: "#5A6478", transition: "transform 0.2s", transform: emailsCollapsed ? "rotate(0deg)" : "rotate(180deg)" }}>&#9660;</span>
+                <span style={{ fontSize: 11, color: "#5A6478", transition: "transform 0.2s", transform: emailsCollapsed ? "rotate(0deg)" : "rotate(180deg)" }}>&#9660;</span>
               </div>
               {!emailsCollapsed && (
                 <div style={{ maxHeight: 200, overflow: "auto", marginTop: 8 }}>
@@ -952,7 +952,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                       {em.priority && <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, marginTop: 5, background: em.priority >= 5 ? "#EF4444" : em.priority >= 4 ? "#F97316" : em.priority >= 3 ? "#3B82F6" : "#6B7280" }} />}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <div style={{ fontSize: 10, color: "#F0F2F5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 11, color: "#F0F2F5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
                             {em.subject || "(no subject)"}
                           </div>
                           {em.email_type && em.email_type !== "general" && (
@@ -987,7 +987,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
           {/* Document Hub */}
           <div style={{ padding: "8px 20px 20px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", textTransform: "uppercase" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "2px", textTransform: "uppercase" }}>
                 Documents {loadDocs.length > 0 && <span style={{ color: "#8B95A8" }}>({loadDocs.length})</span>}
               </div>
             </div>
@@ -1047,7 +1047,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                         onClick={() => setPreviewDoc(doc)}>
                         <span style={{ fontSize: 12, flexShrink: 0 }}>{icon}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 10, color: "#F0F2F5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.original_name}</div>
+                          <div style={{ fontSize: 11, color: "#F0F2F5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.original_name}</div>
                           <div style={{ fontSize: 8, color: "#8B95A8", display: "flex", alignItems: "center", gap: 4 }}>
                             {reclassDocId === doc.id ? (
                               <select autoFocus value={doc.doc_type}
@@ -1069,7 +1069,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                               <span onClick={e => { e.stopPropagation(); setReclassDocId(doc.id); }}
                                 style={{ cursor: "pointer", background: "rgba(0,212,170,0.08)", border: "1px solid rgba(0,212,170,0.25)", borderRadius: 3, padding: "2px 6px", color: "#00D4AA", fontSize: 11, display: "inline-flex", alignItems: "center", gap: 3 }}
                                 title="Click to change type">
-                                {doc.doc_type.replace("_", " ")} <span style={{ fontSize: 9, opacity: 0.7 }}>{"\u25BC"}</span>
+                                {doc.doc_type.replace("_", " ")} <span style={{ fontSize: 11, opacity: 0.7 }}>{"\u25BC"}</span>
                               </span>
                             )}
                             <span>{"\u00B7"} {size} {"\u00B7"} {date}</span>
@@ -1077,9 +1077,9 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                         </div>
                       </div>
                       <button onClick={(e) => { e.stopPropagation(); window.open(`${API_BASE}/api/load/${selectedShipment.efj}/documents/${doc.id}/download`, '_blank'); }}
-                        style={{ background: "none", border: "none", color: "#00D4AA", cursor: "pointer", fontSize: 10, padding: "2px 4px", flexShrink: 0 }}>{"\u2193"}</button>
+                        style={{ background: "none", border: "none", color: "#00D4AA", cursor: "pointer", fontSize: 11, padding: "2px 4px", flexShrink: 0 }}>{"\u2193"}</button>
                       <button onClick={(e) => { e.stopPropagation(); handleDocDelete(doc.id); }}
-                        style={{ background: "none", border: "none", color: "#3D4557", cursor: "pointer", fontSize: 10, padding: "2px 4px", flexShrink: 0 }}
+                        style={{ background: "none", border: "none", color: "#3D4557", cursor: "pointer", fontSize: 11, padding: "2px 4px", flexShrink: 0 }}
                         onMouseEnter={e => e.target.style.color = "#f87171"} onMouseLeave={e => e.target.style.color = "#334155"}>&#x2715;</button>
                     </div>
                   );
@@ -1092,7 +1092,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
               onChange={e => { if (e.target.files[0]) handleDocUpload(e.target.files[0]); e.target.value = ""; }} />
             <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
               <select value={docType} onChange={e => setDocType(e.target.value)}
-                style={{ flex: 1, padding: "6px 8px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 6, color: "#8B95A8", fontSize: 10, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", cursor: "pointer" }}>
+                style={{ flex: 1, padding: "6px 8px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 6, color: "#8B95A8", fontSize: 11, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", cursor: "pointer" }}>
                 <option value="customer_rate" style={{ background: "#0D1119" }}>Customer Rate</option>
                 <option value="carrier_rate" style={{ background: "#0D1119" }}>Carrier Rate</option>
                 <option value="pod" style={{ background: "#0D1119" }}>POD</option>
@@ -1104,18 +1104,18 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 <option value="other" style={{ background: "#0D1119" }}>Other</option>
               </select>
               <button onClick={() => docInputRef.current?.click()} disabled={docUploading}
-                style={{ padding: "6px 14px", borderRadius: 6, background: "linear-gradient(135deg, #00D4AA, #0088E8)", border: "none", color: "#fff", fontSize: 10, fontWeight: 700, cursor: docUploading ? "default" : "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", opacity: docUploading ? 0.6 : 1 }}>
+                style={{ padding: "6px 14px", borderRadius: 6, background: "linear-gradient(135deg, #00D4AA, #0088E8)", border: "none", color: "#fff", fontSize: 11, fontWeight: 700, cursor: docUploading ? "default" : "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", opacity: docUploading ? 0.6 : 1 }}>
                 {docUploading ? "..." : "+ Upload"}
               </button>
             </div>
             <div onClick={() => !docUploading && docInputRef.current?.click()}
               onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
               onDrop={e => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer?.files?.[0]) handleDocUpload(e.dataTransfer.files[0]); }}
-              style={{ padding: "12px 14px", borderRadius: 8, background: "rgba(255,255,255,0.02)", border: "1px dashed rgba(255,255,255,0.1)", color: "#8B95A8", fontSize: 10, textAlign: "center", cursor: docUploading ? "default" : "pointer" }}>
+              style={{ padding: "12px 14px", borderRadius: 8, background: "rgba(255,255,255,0.02)", border: "1px dashed rgba(255,255,255,0.1)", color: "#8B95A8", fontSize: 11, textAlign: "center", cursor: docUploading ? "default" : "pointer" }}>
               Drop files here {"\u2014"} PDF, images, Excel, Word, email
             </div>
             {docUploadMsg && (
-              <div style={{ marginTop: 6, fontSize: 10, fontWeight: 600, color: docUploadMsg === "Uploaded" ? "#34d399" : "#f87171", textAlign: "center" }}>
+              <div style={{ marginTop: 6, fontSize: 11, fontWeight: 600, color: docUploadMsg === "Uploaded" ? "#34d399" : "#f87171", textAlign: "center" }}>
                 {docUploadMsg}
               </div>
             )}
@@ -1148,7 +1148,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {previewDoc.original_name}
                   </div>
-                  <div style={{ fontSize: 10, color: "#8B95A8" }}>
+                  <div style={{ fontSize: 11, color: "#8B95A8" }}>
                     {previewDoc.doc_type.replace("_", " ")} {"\u00B7"} {previewDoc.size_bytes < 1048576 ? `${Math.round(previewDoc.size_bytes / 1024)}KB` : `${(previewDoc.size_bytes / 1048576).toFixed(1)}MB`}
                   </div>
                 </div>

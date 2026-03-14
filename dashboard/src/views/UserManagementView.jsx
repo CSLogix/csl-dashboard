@@ -50,7 +50,7 @@ export default function UserManagementView({ API_BASE, apiFetchFn }) {
   };
 
   const inputStyle = { width: "100%", padding: "8px 12px", background: "#0a0d12", border: "1px solid #1e2a3d", borderRadius: 8, color: "#e8ecf4", fontSize: 12, outline: "none", fontFamily: "inherit" };
-  const labelStyle = { display: "block", fontSize: 10, color: "#7b8ba3", marginBottom: 3, fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" };
+  const labelStyle = { display: "block", fontSize: 11, color: "#7b8ba3", marginBottom: 3, fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" };
 
   return (
     <div style={{ padding: "20px 0" }}>
@@ -98,7 +98,7 @@ export default function UserManagementView({ API_BASE, apiFetchFn }) {
             <thead>
               <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                 {["Username", "Email", "Role", "Rep Name", "Last Login", "Status", "Actions"].map(h => (
-                  <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "#7b8ba3", letterSpacing: "0.5px", textTransform: "uppercase" }}>{h}</th>
+                  <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "#7b8ba3", letterSpacing: "0.5px", textTransform: "uppercase" }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -108,16 +108,16 @@ export default function UserManagementView({ API_BASE, apiFetchFn }) {
                   <td style={{ padding: "10px 14px", color: "#e8ecf4", fontWeight: 600 }}>{u.username}</td>
                   <td style={{ padding: "10px 14px", color: "#8B95A8" }}>{u.email || "—"}</td>
                   <td style={{ padding: "10px 14px" }}>
-                    <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, letterSpacing: "0.5px",
+                    <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, letterSpacing: "0.5px",
                       background: u.role === "admin" ? "rgba(245,158,11,0.12)" : "rgba(59,130,246,0.12)",
                       color: u.role === "admin" ? "#f59e0b" : "#3b82f6" }}>
                       {u.role.toUpperCase()}
                     </span>
                   </td>
                   <td style={{ padding: "10px 14px", color: "#8B95A8" }}>{u.rep_name || "—"}</td>
-                  <td style={{ padding: "10px 14px", color: "#7b8ba3", fontSize: 10 }}>{u.last_login ? new Date(u.last_login).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Never"}</td>
+                  <td style={{ padding: "10px 14px", color: "#7b8ba3", fontSize: 11 }}>{u.last_login ? new Date(u.last_login).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Never"}</td>
                   <td style={{ padding: "10px 14px" }}>
-                    <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 600,
+                    <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600,
                       background: u.is_active ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.1)",
                       color: u.is_active ? "#22c55e" : "#ef4444" }}>
                       {u.is_active ? "Active" : "Disabled"}
@@ -127,14 +127,14 @@ export default function UserManagementView({ API_BASE, apiFetchFn }) {
                     <div style={{ display: "flex", gap: 6 }}>
                       {resetUserId === u.id ? (
                         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                          <input type="password" value={resetPw} onChange={e => setResetPw(e.target.value)} placeholder="New password (8+)" style={{ ...inputStyle, width: 140, padding: "4px 8px", fontSize: 10 }} />
-                          <button onClick={() => handleResetPassword(u.id)} style={{ padding: "4px 8px", background: "#3b82f6", border: "none", borderRadius: 4, color: "#fff", fontSize: 9, cursor: "pointer", fontFamily: "inherit" }}>Set</button>
-                          <button onClick={() => { setResetUserId(null); setResetPw(""); }} style={{ padding: "4px 8px", background: "none", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#8B95A8", fontSize: 9, cursor: "pointer", fontFamily: "inherit" }}>X</button>
+                          <input type="password" value={resetPw} onChange={e => setResetPw(e.target.value)} placeholder="New password (8+)" style={{ ...inputStyle, width: 140, padding: "4px 8px", fontSize: 11 }} />
+                          <button onClick={() => handleResetPassword(u.id)} style={{ padding: "4px 8px", background: "#3b82f6", border: "none", borderRadius: 4, color: "#fff", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Set</button>
+                          <button onClick={() => { setResetUserId(null); setResetPw(""); }} style={{ padding: "4px 8px", background: "none", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#8B95A8", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>X</button>
                         </div>
                       ) : (
                         <>
-                          <button onClick={() => setResetUserId(u.id)} style={{ padding: "4px 8px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, color: "#8B95A8", fontSize: 9, cursor: "pointer", fontFamily: "inherit" }}>Reset PW</button>
-                          <button onClick={() => handleToggleActive(u)} style={{ padding: "4px 8px", background: u.is_active ? "rgba(239,68,68,0.08)" : "rgba(34,197,94,0.08)", border: `1px solid ${u.is_active ? "rgba(239,68,68,0.2)" : "rgba(34,197,94,0.2)"}`, borderRadius: 4, color: u.is_active ? "#ef4444" : "#22c55e", fontSize: 9, cursor: "pointer", fontFamily: "inherit" }}>
+                          <button onClick={() => setResetUserId(u.id)} style={{ padding: "4px 8px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, color: "#8B95A8", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Reset PW</button>
+                          <button onClick={() => handleToggleActive(u)} style={{ padding: "4px 8px", background: u.is_active ? "rgba(239,68,68,0.08)" : "rgba(34,197,94,0.08)", border: `1px solid ${u.is_active ? "rgba(239,68,68,0.2)" : "rgba(34,197,94,0.2)"}`, borderRadius: 4, color: u.is_active ? "#ef4444" : "#22c55e", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
                             {u.is_active ? "Disable" : "Enable"}
                           </button>
                         </>

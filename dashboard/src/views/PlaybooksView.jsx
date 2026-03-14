@@ -32,11 +32,11 @@ function ContactCard({ contact }) {
       <div style={{ width: 6, height: 6, borderRadius: "50%", background: ROLE_COLORS[contact.role] || "#5A6478", flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "#F0F2F5" }}>{contact.name}</div>
-        <div style={{ fontSize: 10, color: "#5A6478" }}>{contact.role} — {contact.facility}</div>
+        <div style={{ fontSize: 11, color: "#5A6478" }}>{contact.role} — {contact.facility}</div>
       </div>
       <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-        {contact.email && <span style={{ fontSize: 10, color: "#00A8CC", fontFamily: "'JetBrains Mono', monospace" }}>{contact.email}</span>}
-        {contact.phone && <span style={{ fontSize: 10, color: "#8B95A8" }}>{contact.phone}</span>}
+        {contact.email && <span style={{ fontSize: 11, color: "#00A8CC", fontFamily: "'JetBrains Mono', monospace" }}>{contact.email}</span>}
+        {contact.phone && <span style={{ fontSize: 11, color: "#8B95A8" }}>{contact.phone}</span>}
       </div>
     </div>
   );
@@ -52,10 +52,10 @@ function FacilityCard({ facility }) {
         <span style={{ fontSize: 18 }}>{icon}</span>
         <div>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5" }}>{facility.name}</div>
-          <div style={{ fontSize: 10, color: "#5A6478" }}>{facility.type}{facility.address ? ` — ${facility.address}` : ""}</div>
+          <div style={{ fontSize: 11, color: "#5A6478" }}>{facility.type}{facility.address ? ` — ${facility.address}` : ""}</div>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, fontSize: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, fontSize: 11 }}>
         {facility.hours && <div><span style={{ color: "#5A6478" }}>Hours:</span> <span style={{ color: "#8B95A8" }}>{facility.hours}</span></div>}
         {facility.scheduling_type && <div><span style={{ color: "#5A6478" }}>Schedule:</span> <span style={{ color: "#8B95A8" }}>{facility.scheduling_type}</span></div>}
         {facility.scheduling_method && <div><span style={{ color: "#5A6478" }}>Method:</span> <span style={{ color: "#8B95A8" }}>{facility.scheduling_method}</span></div>}
@@ -65,7 +65,7 @@ function FacilityCard({ facility }) {
         {det.demurrage_rate_per_day != null && <div><span style={{ color: "#5A6478" }}>Demurrage:</span> <span style={{ color: "#EF4444" }}>${det.demurrage_rate_per_day}/day</span></div>}
       </div>
       {facility.quirks && facility.quirks !== "TBD" && (
-        <div style={{ marginTop: 8, padding: "6px 10px", background: "rgba(249,115,22,0.08)", borderRadius: 6, border: "1px solid rgba(249,115,22,0.15)", fontSize: 10, color: "#F59E0B" }}>
+        <div style={{ marginTop: 8, padding: "6px 10px", background: "rgba(249,115,22,0.08)", borderRadius: 6, border: "1px solid rgba(249,115,22,0.15)", fontSize: 11, color: "#F59E0B" }}>
           {facility.quirks}
         </div>
       )}
@@ -80,11 +80,11 @@ function CarrierCard({ carrier }) {
     <div className="glass" style={{ padding: 14, borderRadius: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5", flex: 1 }}>{carrier.name}</div>
-        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: `${roleColor}20`, color: roleColor, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: `${roleColor}20`, color: roleColor, textTransform: "uppercase", letterSpacing: "0.5px" }}>
           {carrier.role}
         </span>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 10 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 11 }}>
         {carrier.dot_number && <span style={{ color: "#5A6478" }}>DOT: <span style={{ color: "#8B95A8" }}>{carrier.dot_number}</span></span>}
         {carrier.mc_number && <span style={{ color: "#5A6478" }}>MC: <span style={{ color: "#8B95A8" }}>{carrier.mc_number}</span></span>}
         {carrier.rate_paid != null && <span style={{ color: "#5A6478" }}>Rate: <span style={{ color: "#00D4AA", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>${carrier.rate_paid.toLocaleString()}</span></span>}
@@ -92,9 +92,9 @@ function CarrierCard({ carrier }) {
         {carrier.loads_covered && <span style={{ color: "#5A6478" }}>Covers: <span style={{ color: "#8B95A8" }}>Load {carrier.loads_covered.join(", ")}</span></span>}
       </div>
       {carrier.notes && (
-        <div style={{ marginTop: 6, fontSize: 10, color: "#F59E0B", fontStyle: "italic" }}>{carrier.notes}</div>
+        <div style={{ marginTop: 6, fontSize: 11, color: "#F59E0B", fontStyle: "italic" }}>{carrier.notes}</div>
       )}
-      {carrier.rate_source && <div style={{ marginTop: 4, fontSize: 9, color: "#5A6478" }}>Source: {carrier.rate_source}</div>}
+      {carrier.rate_source && <div style={{ marginTop: 4, fontSize: 11, color: "#5A6478" }}>Source: {carrier.rate_source}</div>}
     </div>
   );
 }
@@ -111,11 +111,11 @@ function WorkflowTimeline({ steps }) {
             {step.step_number}
           </div>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#F0F2F5", marginBottom: 2 }}>{step.action}</div>
-          {step.details && <div style={{ fontSize: 10, color: "#8B95A8", marginBottom: 4 }}>{step.details}</div>}
+          {step.details && <div style={{ fontSize: 11, color: "#8B95A8", marginBottom: 4 }}>{step.details}</div>}
           {step.notify && step.notify.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
               {step.notify.map((email, j) => (
-                <span key={j} style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "rgba(0,168,204,0.1)", color: "#00A8CC", fontFamily: "'JetBrains Mono', monospace" }}>{email}</span>
+                <span key={j} style={{ fontSize: 11, padding: "1px 6px", borderRadius: 4, background: "rgba(0,168,204,0.1)", color: "#00A8CC", fontFamily: "'JetBrains Mono', monospace" }}>{email}</span>
               ))}
             </div>
           )}
@@ -142,7 +142,7 @@ function EscalationPanel({ rules }) {
           <div key={tier.key} style={{ padding: "10px 14px", borderRadius: 8, background: `${tier.color}08`, border: `1px solid ${tier.color}20` }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: tier.color, marginBottom: 6 }}>{tier.icon} {tier.label}</div>
             {items.map((item, i) => (
-              <div key={i} style={{ fontSize: 10, color: "#8B95A8", paddingLeft: 12, position: "relative", marginBottom: 2 }}>
+              <div key={i} style={{ fontSize: 11, color: "#8B95A8", paddingLeft: 12, position: "relative", marginBottom: 2 }}>
                 <span style={{ position: "absolute", left: 0, color: tier.color }}>•</span>{item}
               </div>
             ))}
@@ -175,8 +175,8 @@ function PlaybookDetail({ playbook, onBack }) {
           <div style={{ fontSize: 12, color: "#5A6478" }}>{pb.account_name || playbook.account_name} — {lane.origin_city}, {lane.origin_state} →{lane.destination_city}, {lane.destination_state}</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 10, color: "#5A6478" }}>v{pb.version || playbook.version}</span>
-          <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: (pb.status || playbook.status) === "active" ? "rgba(0,212,170,0.12)" : "rgba(249,115,22,0.12)", color: (pb.status || playbook.status) === "active" ? "#00D4AA" : "#F59E0B", textTransform: "uppercase" }}>
+          <span style={{ fontSize: 11, color: "#5A6478" }}>v{pb.version || playbook.version}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: (pb.status || playbook.status) === "active" ? "rgba(0,212,170,0.12)" : "rgba(249,115,22,0.12)", color: (pb.status || playbook.status) === "active" ? "#00D4AA" : "#F59E0B", textTransform: "uppercase" }}>
             {pb.status || playbook.status}
           </span>
         </div>
@@ -186,37 +186,37 @@ function PlaybookDetail({ playbook, onBack }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 20 }}>
         {lane.commodity && (
           <div className="glass" style={{ padding: "10px 14px", borderRadius: 10 }}>
-            <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Commodity</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Commodity</div>
             <div style={{ fontSize: 12, color: "#F0F2F5", fontWeight: 600, marginTop: 2 }}>{lane.commodity}</div>
           </div>
         )}
         {lane.typical_weight_lbs && (
           <div className="glass" style={{ padding: "10px 14px", borderRadius: 10 }}>
-            <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Typical Weight</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Typical Weight</div>
             <div style={{ fontSize: 12, color: "#F0F2F5", fontWeight: 600, marginTop: 2, fontFamily: "'JetBrains Mono', monospace" }}>{lane.typical_weight_lbs.toLocaleString()} lbs</div>
           </div>
         )}
         {rates.combined_lane_revenue != null && (
           <div className="glass" style={{ padding: "10px 14px", borderRadius: 10 }}>
-            <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Lane Revenue</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Lane Revenue</div>
             <div style={{ fontSize: 12, color: "#00D4AA", fontWeight: 700, marginTop: 2, fontFamily: "'JetBrains Mono', monospace" }}>${rates.combined_lane_revenue.toLocaleString()}</div>
           </div>
         )}
         {rates.estimated_margin_pct != null && (
           <div className="glass" style={{ padding: "10px 14px", borderRadius: 10 }}>
-            <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Est. Margin</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Est. Margin</div>
             <div style={{ fontSize: 12, color: rates.estimated_margin_pct >= 20 ? "#00D4AA" : rates.estimated_margin_pct >= 10 ? "#F59E0B" : "#EF4444", fontWeight: 700, marginTop: 2, fontFamily: "'JetBrains Mono', monospace" }}>{rates.estimated_margin_pct.toFixed(1)}%</div>
           </div>
         )}
         {ls.total_loads && (
           <div className="glass" style={{ padding: "10px 14px", borderRadius: 10 }}>
-            <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Structure</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Structure</div>
             <div style={{ fontSize: 12, color: "#F0F2F5", fontWeight: 600, marginTop: 2 }}>{ls.multi_load ? `${ls.total_loads} loads / booking` : "Single load"}</div>
           </div>
         )}
         {bd.typical_container_size && (
           <div className="glass" style={{ padding: "10px 14px", borderRadius: 10 }}>
-            <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Container</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Container</div>
             <div style={{ fontSize: 12, color: "#F0F2F5", fontWeight: 600, marginTop: 2 }}>{bd.typical_container_size}</div>
           </div>
         )}
@@ -234,13 +234,13 @@ function PlaybookDetail({ playbook, onBack }) {
                 <div key={i} style={{ padding: "10px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.04)", marginBottom: i < ls.loads.length - 1 ? 8 : 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                     <span style={{ fontSize: 11, fontWeight: 800, color: "#00D4AA" }}>Load {load.load_number}</span>
-                    <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "rgba(0,136,232,0.1)", color: "#0088E8", fontWeight: 600 }}>{load.move_type}</span>
-                    {load.equipment && <span style={{ fontSize: 10, color: "#5A6478" }}>{load.equipment}</span>}
+                    <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: 4, background: "rgba(0,136,232,0.1)", color: "#0088E8", fontWeight: 600 }}>{load.move_type}</span>
+                    {load.equipment && <span style={{ fontSize: 11, color: "#5A6478" }}>{load.equipment}</span>}
                   </div>
-                  <div style={{ fontSize: 10, color: "#8B95A8" }}>
+                  <div style={{ fontSize: 11, color: "#8B95A8" }}>
                     {load.origin_facility} →{load.destination_facility}
                   </div>
-                  {load.notes && <div style={{ fontSize: 10, color: "#5A6478", fontStyle: "italic", marginTop: 2 }}>{load.notes}</div>}
+                  {load.notes && <div style={{ fontSize: 11, color: "#5A6478", fontStyle: "italic", marginTop: 2 }}>{load.notes}</div>}
                 </div>
               ))}
             </div>
@@ -264,7 +264,7 @@ function PlaybookDetail({ playbook, onBack }) {
                 <thead>
                   <tr style={{ background: "rgba(255,255,255,0.02)" }}>
                     {["Load", "Description", "All-In Rate", "Source"].map(h => (
-                      <th key={h} style={{ padding: "6px 10px", textAlign: "left", fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", fontSize: 9 }}>{h}</th>
+                      <th key={h} style={{ padding: "6px 10px", textAlign: "left", fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", fontSize: 11 }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -274,7 +274,7 @@ function PlaybookDetail({ playbook, onBack }) {
                       <td style={{ padding: "6px 10px", color: "#00D4AA", fontWeight: 700 }}>#{r.load_number}</td>
                       <td style={{ padding: "6px 10px", color: "#8B95A8" }}>{r.description}</td>
                       <td style={{ padding: "6px 10px", color: "#F0F2F5", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>${r.all_in_rate?.toLocaleString()}</td>
-                      <td style={{ padding: "6px 10px", color: "#5A6478", fontSize: 10 }}>{r.rate_source}</td>
+                      <td style={{ padding: "6px 10px", color: "#5A6478", fontSize: 11 }}>{r.rate_source}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -284,12 +284,12 @@ function PlaybookDetail({ playbook, onBack }) {
                 <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 10 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", marginBottom: 6 }}>Accessorials</div>
                   {rates.accessorials.map((a, i) => (
-                    <div key={i} style={{ padding: "3px 0", fontSize: 10 }}>
+                    <div key={i} style={{ padding: "3px 0", fontSize: 11 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <span style={{ color: "#8B95A8" }}>{a.charge_type} <span style={{ color: "#5A6478" }}>({a.unit || "flat"})</span></span>
                         <span style={{ color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>${a.amount?.toLocaleString()}</span>
                       </div>
-                      {a.rule && <div style={{ fontSize: 9, color: "#F59E0B", marginTop: 1 }}>{a.rule}</div>}
+                      {a.rule && <div style={{ fontSize: 11, color: "#F59E0B", marginTop: 1 }}>{a.rule}</div>}
                     </div>
                   ))}
                 </div>
@@ -341,7 +341,7 @@ function PlaybookDetail({ playbook, onBack }) {
             <div className="glass" style={{ padding: 16, borderRadius: 12 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#F0F2F5", marginBottom: 10 }}>Changelog</div>
               {pb.changelog.slice().reverse().map((entry, i) => (
-                <div key={i} style={{ fontSize: 10, color: "#8B95A8", padding: "4px 0", borderTop: i > 0 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
+                <div key={i} style={{ fontSize: 11, color: "#8B95A8", padding: "4px 0", borderTop: i > 0 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
                   <span style={{ color: "#5A6478" }}>{new Date(entry.date).toLocaleDateString()}</span>
                   {entry.changed_by && <span style={{ color: "#5A6478" }}> by {entry.changed_by}</span>}
                   {" — "}{entry.summary}
@@ -433,7 +433,7 @@ export default function PlaybooksView() {
         <div style={{ display: "flex", gap: 4 }}>
           {["active", "draft", "inactive", ""].map(s => (
             <button key={s} onClick={() => setStatusFilter(s)}
-              style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: statusFilter === s ? "rgba(0,212,170,0.12)" : "transparent", color: statusFilter === s ? "#00D4AA" : "#5A6478", fontSize: 10, fontWeight: 600, cursor: "pointer", textTransform: "capitalize" }}>
+              style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: statusFilter === s ? "rgba(0,212,170,0.12)" : "transparent", color: statusFilter === s ? "#00D4AA" : "#5A6478", fontSize: 11, fontWeight: 600, cursor: "pointer", textTransform: "capitalize" }}>
               {s || "All"}
             </button>
           ))}
@@ -472,21 +472,21 @@ export default function PlaybooksView() {
                 style={{ padding: 16, borderRadius: 12, cursor: "pointer" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                   <div style={{ fontSize: 14, fontWeight: 800, color: "#F0F2F5", flex: 1, letterSpacing: "-0.3px" }}>{pb.lane_code}</div>
-                  <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: pb.status === "active" ? "rgba(0,212,170,0.12)" : pb.status === "draft" ? "rgba(249,115,22,0.12)" : "rgba(90,100,120,0.12)", color: pb.status === "active" ? "#00D4AA" : pb.status === "draft" ? "#F59E0B" : "#5A6478", textTransform: "uppercase" }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: pb.status === "active" ? "rgba(0,212,170,0.12)" : pb.status === "draft" ? "rgba(249,115,22,0.12)" : "rgba(90,100,120,0.12)", color: pb.status === "active" ? "#00D4AA" : pb.status === "draft" ? "#F59E0B" : "#5A6478", textTransform: "uppercase" }}>
                     {pb.status}
                   </span>
                 </div>
                 <div style={{ fontSize: 11, color: "#8B95A8", marginBottom: 6 }}>
                   {pb.account_name} — {lane.origin_city || "?"}, {lane.origin_state || "?"} →{lane.destination_city || "?"}, {lane.destination_state || "?"}
                 </div>
-                <div style={{ display: "flex", gap: 12, fontSize: 10 }}>
+                <div style={{ display: "flex", gap: 12, fontSize: 11 }}>
                   {loads && <span style={{ color: "#5A6478" }}>{loads} load{loads > 1 ? "s" : ""}</span>}
                   {rev != null && <span style={{ color: "#00D4AA", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>${Number(rev).toLocaleString()}</span>}
                   {margin != null && <span style={{ color: Number(margin) >= 20 ? "#00D4AA" : Number(margin) >= 10 ? "#F59E0B" : "#EF4444", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{Number(margin).toFixed(1)}%</span>}
                   <span style={{ color: "#5A6478" }}>v{pb.version}</span>
                 </div>
                 {pb.updated_at && (
-                  <div style={{ fontSize: 9, color: "#3D4557", marginTop: 6 }}>Updated {new Date(pb.updated_at).toLocaleDateString()}</div>
+                  <div style={{ fontSize: 11, color: "#3D4557", marginTop: 6 }}>Updated {new Date(pb.updated_at).toLocaleDateString()}</div>
                 )}
               </div>
             );

@@ -141,10 +141,10 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
             <>
               <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.3 }}>{"\uD83D\uDCC4"}</div>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#8B95A8" }}>Drop .xls/.xlsx or click to upload</div>
-              <div style={{ fontSize: 10, color: "#3D4557", marginTop: 4 }}>Order Not Billed Report</div>
+              <div style={{ fontSize: 11, color: "#3D4557", marginTop: 4 }}>Order Not Billed Report</div>
             </>
           )}
-          {uploadMsg && <div style={{ marginTop: 8, fontSize: 10, fontWeight: 600, color: uploadMsg.includes("failed") || uploadMsg.includes("error") ? "#f87171" : "#34d399" }}>{uploadMsg}</div>}
+          {uploadMsg && <div style={{ marginTop: 8, fontSize: 11, fontWeight: 600, color: uploadMsg.includes("failed") || uploadMsg.includes("error") ? "#f87171" : "#34d399" }}>{uploadMsg}</div>}
         </div>
 
         <div className="dash-panel" style={{ padding: "20px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
@@ -152,19 +152,19 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
           <div style={{ display: "flex", gap: 20 }}>
             <div>
               <div style={{ fontSize: 28, fontWeight: 800, color: "#f97316", fontFamily: "'JetBrains Mono', monospace" }}>{unbilledStats?.count || unbilledOrders.length}</div>
-              <div style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>Orders</div>
+              <div style={{ fontSize: 11, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>Orders</div>
             </div>
             <div>
               <div style={{ fontSize: 28, fontWeight: 800, color: ageColor(unbilledStats?.oldest_age || 0), fontFamily: "'JetBrains Mono', monospace" }}>{unbilledStats?.oldest_age || 0}<span style={{ fontSize: 12, color: "#8B95A8" }}>d</span></div>
-              <div style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>Oldest</div>
+              <div style={{ fontSize: 11, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>Oldest</div>
             </div>
             <div>
               <div style={{ fontSize: 28, fontWeight: 800, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{sortedCustomers.length}</div>
-              <div style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>Customers</div>
+              <div style={{ fontSize: 11, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>Customers</div>
             </div>
             <div>
               <div style={{ fontSize: 28, fontWeight: 800, color: "#34d399", fontFamily: "'JetBrains Mono', monospace" }}>{unbilledOrders.filter(o => o.shipment_delivered).length}</div>
-              <div style={{ fontSize: 9, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>Delivered</div>
+              <div style={{ fontSize: 11, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>Delivered</div>
             </div>
           </div>
         </div>
@@ -173,10 +173,10 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
       <div style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "center" }}>
         <div style={{ display: "flex", gap: 2, background: "#0D1119", borderRadius: 10, padding: 3, width: "fit-content" }}>
           <button onClick={() => setGroupBy(false)}
-            style={{ padding: "5px 14px", borderRadius: 5, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+            style={{ padding: "5px 14px", borderRadius: 5, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
               background: !groupBy ? "#1E2738" : "transparent", color: !groupBy ? "#F0F2F5" : "#8B95A8" }}>All Orders</button>
           <button onClick={() => setGroupBy(true)}
-            style={{ padding: "5px 14px", borderRadius: 5, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+            style={{ padding: "5px 14px", borderRadius: 5, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
               background: groupBy ? "#1E2738" : "transparent", color: groupBy ? "#F0F2F5" : "#8B95A8" }}>By Customer</button>
         </div>
         {unbilledOrders.filter(o => o.shipment_delivered).length > 0 && (
@@ -188,7 +188,7 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
             } catch {}
           }}
             style={{ padding: "5px 14px", borderRadius: 8, border: "1px solid #34d39944", background: "#34d39918", color: "#34d399",
-              fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+              fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
             Close {unbilledOrders.filter(o => o.shipment_delivered).length} Delivered
           </button>
         )}
@@ -211,7 +211,7 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
           const isActive = billingFilter === f.key;
           return (
             <button key={f.key} onClick={() => setBillingFilter(f.key)}
-              style={{ padding: "4px 12px", fontSize: 10, fontWeight: 700, borderRadius: 6, border: `1px solid ${isActive ? f.color + "66" : "rgba(255,255,255,0.06)"}`,
+              style={{ padding: "4px 12px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: `1px solid ${isActive ? f.color + "66" : "rgba(255,255,255,0.06)"}`,
                 background: isActive ? f.color + "18" : "transparent", color: isActive ? f.color : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
               {f.label} <span style={{ opacity: 0.7 }}>{count}</span>
             </button>
@@ -232,7 +232,7 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
               <thead>
                 <tr>
                   {["Order #", "Container", "Customer", "Rep", "Entered", "Age", "Tracking", "Billing"].map(h => (
-                    <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: Z.table }}>{h}</th>
+                    <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: Z.table }}>{h}</th>
                   ))}
                   <th style={{ padding: "10px 14px", width: 40, background: "#0D1119", position: "sticky", top: 0, zIndex: Z.table, borderBottom: "1px solid rgba(255,255,255,0.04)" }} />
                 </tr>
@@ -241,27 +241,27 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
                 {searchedOrders.map((o, i) => (
                   <tr key={o.id || i} className="row-hover" style={{ borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
                     <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{o.order_num}</td>
-                    <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#5A6478" }}>{o.container}</td>
+                    <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#5A6478" }}>{o.container}</td>
                     <td style={{ padding: "8px 14px", color: "#8B95A8", fontSize: 11 }}>{o.bill_to || o.customer}</td>
-                    <td style={{ padding: "8px 14px", fontSize: 10, fontWeight: 600, color: REP_COLORS[o.rep] || "#5A6478" }}>{o.rep || "\u2014"}</td>
-                    <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#8B95A8" }}>{o.entered_date || o.entered}</td>
+                    <td style={{ padding: "8px 14px", fontSize: 11, fontWeight: 600, color: REP_COLORS[o.rep] || "#5A6478" }}>{o.rep || "\u2014"}</td>
+                    <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#8B95A8" }}>{o.entered_date || o.entered}</td>
                     <td style={{ padding: "8px 14px" }}>
                       <span style={{ fontSize: 11, fontWeight: 700, color: ageColor(o.age_days || 0), fontFamily: "'JetBrains Mono', monospace" }}>{o.age_days || 0}d</span>
                     </td>
                     <td style={{ padding: "8px 14px" }}>
                       {o.shipment_delivered ? (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 12, fontSize: 9, fontWeight: 700,
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700,
                           color: "#34d399", background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.2)" }}>
                           <span style={{ width: 4, height: 4, borderRadius: "50%", background: "#34d399" }} />
                           {o.shipment_status || "Delivered"}
                         </span>
                       ) : o.shipment_status ? (
-                        <span style={{ fontSize: 9, fontWeight: 600, color: "#5A6478", padding: "2px 8px", borderRadius: 12,
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#5A6478", padding: "2px 8px", borderRadius: 12,
                           background: "rgba(139,149,168,0.08)", border: "1px solid rgba(139,149,168,0.12)" }}>
                           {o.shipment_status}
                         </span>
                       ) : (
-                        <span style={{ fontSize: 9, color: "#3D4557" }}>{"\u2014"}</span>
+                        <span style={{ fontSize: 11, color: "#3D4557" }}>{"\u2014"}</span>
                       )}
                     </td>
                     <td style={{ padding: "8px 14px" }}>
@@ -271,7 +271,7 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
                         return (
                           <button onClick={() => !isClosed && handleBillingStatus(o.id, o.billing_status || "ready_to_bill")}
                             title={isClosed ? "Closed" : "Click to advance"}
-                            style={{ padding: "3px 10px", fontSize: 9, fontWeight: 700, borderRadius: 12,
+                            style={{ padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 12,
                               border: `1px solid ${st.color}44`, background: `${st.color}18`, color: st.color,
                               cursor: isClosed ? "default" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
                               opacity: isClosed ? 0.6 : 1 }}>
@@ -308,7 +308,7 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ fontSize: 11, color: "#8B95A8", transition: "transform 0.2s", transform: isCollapsed ? "rotate(-90deg)" : "rotate(0)" }}>{"\u25BC"}</span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5" }}>{customer}</span>
-                    <span style={{ fontSize: 10, color: "#8B95A8", background: "rgba(255,255,255,0.04)", padding: "2px 8px", borderRadius: 10 }}>{orders.length} orders</span>
+                    <span style={{ fontSize: 11, color: "#8B95A8", background: "rgba(255,255,255,0.04)", padding: "2px 8px", borderRadius: 10 }}>{orders.length} orders</span>
                   </div>
                   <span style={{ fontSize: 11, fontWeight: 700, color: ageColor(maxAge), fontFamily: "'JetBrains Mono', monospace" }}>oldest: {maxAge}d</span>
                 </div>
@@ -319,8 +319,8 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
                         {orders.map((o, i) => (
                           <tr key={o.id || i} className="row-hover" style={{ borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
                             <td style={{ padding: "6px 14px 6px 36px", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{o.order_num}</td>
-                            <td style={{ padding: "6px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#5A6478" }}>{o.container}</td>
-                            <td style={{ padding: "6px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#8B95A8" }}>{o.entered_date}</td>
+                            <td style={{ padding: "6px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#5A6478" }}>{o.container}</td>
+                            <td style={{ padding: "6px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#8B95A8" }}>{o.entered_date}</td>
                             <td style={{ padding: "6px 14px" }}>
                               <span style={{ fontSize: 11, fontWeight: 700, color: ageColor(o.age_days || 0), fontFamily: "'JetBrains Mono', monospace" }}>{o.age_days || 0}d</span>
                             </td>

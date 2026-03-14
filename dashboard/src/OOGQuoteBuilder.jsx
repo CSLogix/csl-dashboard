@@ -331,7 +331,7 @@ const inputStyle = {
 function Field({ label, children }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <span style={{ fontSize: 10, color: COLORS.text3, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>{label}</span>
+      <span style={{ fontSize: 11, color: COLORS.text3, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>{label}</span>
       {children}
     </div>
   );
@@ -341,7 +341,7 @@ function SectionHeader({ title }) {
   return (
     <div style={{
       background: GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
-      fontWeight: 700, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase",
+      fontWeight: 700, fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase",
       padding: "10px 0 4px", borderBottom: `1px solid ${COLORS.border}`, marginTop: 8,
     }}>{title}</div>
   );
@@ -516,7 +516,7 @@ export default function OOGQuoteBuilder() {
                 style={{
                   background: "none", border: `1px solid ${ov.on ? "rgba(245,158,11,0.4)" : "rgba(0,212,170,0.3)"}`,
                   borderRadius: 4, padding: "3px 8px", cursor: "pointer",
-                  fontSize: 9, fontWeight: 700, letterSpacing: "0.05em", fontFamily: "inherit",
+                  fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", fontFamily: "inherit",
                   color: ov.on ? "#FBBF24" : "#00D4AA",
                 }}
               >
@@ -613,7 +613,7 @@ export default function OOGQuoteBuilder() {
                 {oversizeFlags.map(f => (
                   <span key={f.type} style={{
                     display: "inline-flex", alignItems: "center", gap: 4,
-                    padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: 800,
+                    padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 800,
                     letterSpacing: "0.08em",
                     background: `${badgeColor[f.type]}18`, border: `1px solid ${badgeColor[f.type]}44`,
                     color: badgeColor[f.type],
@@ -625,7 +625,7 @@ export default function OOGQuoteBuilder() {
                 ))}
                 {isSuperload && (
                   <span style={{
-                    padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: 800,
+                    padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 800,
                     background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.4)",
                     color: "#EF4444", letterSpacing: "0.08em", animation: "pulse 1.5s infinite",
                   }}>SUPERLOAD</span>
@@ -750,7 +750,7 @@ export default function OOGQuoteBuilder() {
               <div style={{ marginTop: 8 }}>
                 <BellCurve low={bellLow} average={marketRate} high={bellHigh} current={marketRate} />
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: COLORS.text3, marginTop: 4, padding: "0 4px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: COLORS.text3, marginTop: 4, padding: "0 4px" }}>
                 <span style={{ color: "#22C55E" }}>Low estimate</span>
                 <span style={{ color: "#00D4AA" }}>Market rate</span>
                 <span style={{ color: "#F59E0B" }}>High estimate</span>
@@ -786,7 +786,7 @@ export default function OOGQuoteBuilder() {
                 background: GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
                 backgroundClip: "text", fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase",
               }}>Common Sense Logistics</div>
-              <div style={{ fontSize: 10, color: COLORS.text3, marginTop: 2 }}>Evans Delivery Company · Oversize Load Quote</div>
+              <div style={{ fontSize: 11, color: COLORS.text3, marginTop: 2 }}>Evans Delivery Company · Oversize Load Quote</div>
             </div>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <tbody>

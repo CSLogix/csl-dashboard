@@ -21,7 +21,7 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const inputStyle = { width: "100%", padding: "10px 14px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "#F0F2F5", fontSize: 12, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" };
   const autoFilledStyle = { ...inputStyle, borderColor: "rgba(0,212,170,0.3)", background: "rgba(0,212,170,0.04)" };
-  const labelStyle = { fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "1.5px", marginBottom: 6, display: "block", textTransform: "uppercase" };
+  const labelStyle = { fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "1.5px", marginBottom: 6, display: "block", textTransform: "uppercase" };
 
   const isDray = form.moveType.startsWith("Dray");
   const isExport = form.moveType === "Dray Export";
@@ -155,8 +155,8 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
           {addingAccount ? (
             <div style={{ display: "flex", gap: 6 }}>
               <input value={newAccountName} onChange={e => setNewAccountName(e.target.value)} placeholder="New account name" style={{ ...inputStyle, flex: 1 }} autoFocus />
-              <button onClick={() => { if (newAccountName.trim()) { set("account", newAccountName.trim()); set("rep", newAccountRep); setAddingAccount(false); } }} style={{ padding: "8px 12px", background: "rgba(0,212,170,0.15)", border: "1px solid rgba(0,212,170,0.3)", borderRadius: 8, color: "#00D4AA", fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>Add</button>
-              <button onClick={() => { setAddingAccount(false); set("account", accts[0] || ""); }} style={{ padding: "8px 10px", background: "transparent", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8, color: "#8B95A8", fontSize: 10, cursor: "pointer" }}>&#10005;</button>
+              <button onClick={() => { if (newAccountName.trim()) { set("account", newAccountName.trim()); set("rep", newAccountRep); setAddingAccount(false); } }} style={{ padding: "8px 12px", background: "rgba(0,212,170,0.15)", border: "1px solid rgba(0,212,170,0.3)", borderRadius: 8, color: "#00D4AA", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>Add</button>
+              <button onClick={() => { setAddingAccount(false); set("account", accts[0] || ""); }} style={{ padding: "8px 10px", background: "transparent", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8, color: "#8B95A8", fontSize: 11, cursor: "pointer" }}>&#10005;</button>
             </div>
           ) : (
             <select value={form.account} onChange={e => { if (e.target.value === "__new__") { setAddingAccount(true); setNewAccountName(""); } else { set("account", e.target.value); } }} style={inputStyle}>
@@ -243,7 +243,7 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
       {isFTL && (
         <>
           <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12, marginTop: 2 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "#14b8a6", letterSpacing: "1.5px", marginBottom: 10, textTransform: "uppercase" }}>FTL Details</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#14b8a6", letterSpacing: "1.5px", marginBottom: 10, textTransform: "uppercase" }}>FTL Details</div>
             <div><label style={labelStyle}>Macropoint URL</label><input value={form.macropointUrl} onChange={e => set("macropointUrl", e.target.value)} placeholder="https://visibility.macropoint.com/..." style={inputStyle} /></div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -261,8 +261,8 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
         onDrop={handleDrop}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase" }}>Documents</span>
-          <label style={{ padding: "5px 12px", background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 6, color: "#3B82F6", fontSize: 10, fontWeight: 600, cursor: "pointer" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase" }}>Documents</span>
+          <label style={{ padding: "5px 12px", background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 6, color: "#3B82F6", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
             + Add Files
             <input type="file" multiple onChange={handleFileAdd} style={{ display: "none" }} />
           </label>
@@ -271,7 +271,7 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
           <label style={{ display: "block", padding: "28px 12px", borderRadius: 10, border: dragOver ? "2px dashed #3B82F6" : "2px dashed rgba(255,255,255,0.08)", background: dragOver ? "rgba(59,130,246,0.08)" : "rgba(255,255,255,0.015)", textAlign: "center", transition: "all 0.15s", cursor: "pointer" }}>
             <div style={{ fontSize: 22, marginBottom: 6, opacity: dragOver ? 1 : 0.4 }}>{dragOver ? "\u{1F4E5}" : "\u{1F4CE}"}</div>
             <div style={{ fontSize: 11, color: dragOver ? "#3B82F6" : "#8B95A8", fontWeight: 600 }}>{dragOver ? "Drop files here" : "Drag & drop files here"}</div>
-            <div style={{ fontSize: 9, color: "#5A6478", marginTop: 4 }}>PDFs, images, emails (.msg, .eml), or any document</div>
+            <div style={{ fontSize: 11, color: "#5A6478", marginTop: 4 }}>PDFs, images, emails (.msg, .eml), or any document</div>
             <input type="file" multiple onChange={handleFileAdd} style={{ display: "none" }} />
           </label>
         )}
@@ -279,15 +279,15 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {pendingDocs.map((doc, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.04)" }}>
-                <span style={{ fontSize: 10, color: "#F0F2F5", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.file.name}</span>
-                <select value={doc.docType} onChange={e => { const updated = [...pendingDocs]; updated[i] = { ...doc, docType: e.target.value }; setPendingDocs(updated); }} style={{ padding: "3px 6px", background: "#0D1119", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 4, color: "#8B95A8", fontSize: 9 }}>
+                <span style={{ fontSize: 11, color: "#F0F2F5", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.file.name}</span>
+                <select value={doc.docType} onChange={e => { const updated = [...pendingDocs]; updated[i] = { ...doc, docType: e.target.value }; setPendingDocs(updated); }} style={{ padding: "3px 6px", background: "#0D1119", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 4, color: "#8B95A8", fontSize: 11 }}>
                   {DOC_TYPES_ADD.map(dt => <option key={dt} value={dt}>{DOC_TYPE_LABELS[dt] || dt}</option>)}
                 </select>
                 <button onClick={() => setPendingDocs(p => p.filter((_, j) => j !== i))} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", fontSize: 12, padding: "0 4px" }}>&#10005;</button>
               </div>
             ))}
             <div style={{ padding: "8px", borderRadius: 6, border: dragOver ? "2px dashed #3B82F6" : "2px dashed rgba(255,255,255,0.04)", textAlign: "center", transition: "all 0.15s" }}>
-              <div style={{ fontSize: 9, color: "#5A6478" }}>Drop more files here</div>
+              <div style={{ fontSize: 11, color: "#5A6478" }}>Drop more files here</div>
             </div>
           </div>
         )}

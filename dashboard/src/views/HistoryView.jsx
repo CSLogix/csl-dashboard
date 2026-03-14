@@ -97,7 +97,7 @@ export default function HistoryView({ loaded, handleLoadClick, handleStatusUpdat
             <thead>
               <tr>
                 {["EFJ #", "Container", "Account", "Carrier", "Origin \u2192 Dest", "Delivery", "Status", "Rep"].map(h => (
-                  <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: 5 }}>{h}</th>
+                  <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: 5 }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -107,7 +107,7 @@ export default function HistoryView({ loaded, handleLoadClick, handleStatusUpdat
               ) : completedLoads.length === 0 ? (
                 <tr><td colSpan={8} style={{ padding: 40, textAlign: "center", color: "#3D4557" }}>
                   <div style={{ fontSize: 11, fontWeight: 600 }}>{historySearch ? "No loads match your search" : "No completed loads found"}</div>
-                  <div style={{ fontSize: 10, marginTop: 4, color: "#3D4557" }}>Loads appear here after being archived from active sheets</div>
+                  <div style={{ fontSize: 11, marginTop: 4, color: "#3D4557" }}>Loads appear here after being archived from active sheets</div>
                 </td></tr>
               ) : completedLoads.map((l, i) => {
                 const sc = STATUS_COLORS[normalizeStatus(l.status)] || BILLING_STATUS_COLORS[normalizeStatus(l.status)] || { main: "#94a3b8" };
@@ -115,15 +115,15 @@ export default function HistoryView({ loaded, handleLoadClick, handleStatusUpdat
                   <tr key={i} className="row-hover" onClick={() => handleLoadClick && handleLoadClick(mapShipment(l, 9000 + i))}
                     style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
                     <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{l.efj}</td>
-                    <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{l.container}</td>
-                    <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5" }}>{l.account}</td>
-                    <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5" }}>{l.carrier}</td>
-                    <td style={{ padding: "8px 14px", fontSize: 10 }}>
+                    <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}>{l.container}</td>
+                    <td style={{ padding: "8px 14px", fontSize: 11, color: "#F0F2F5" }}>{l.account}</td>
+                    <td style={{ padding: "8px 14px", fontSize: 11, color: "#F0F2F5" }}>{l.carrier}</td>
+                    <td style={{ padding: "8px 14px", fontSize: 11 }}>
                       <span style={{ color: "#F0F2F5" }}>{l.origin}</span>
                       <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
                       <span style={{ color: "#F0F2F5" }}>{l.destination}</span>
                     </td>
-                    <td style={{ padding: "8px 14px", fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{l.delivery_date || l.delivery}</td>
+                    <td style={{ padding: "8px 14px", fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{l.delivery_date || l.delivery}</td>
                     <td style={{ padding: "8px 14px", position: "relative" }}
                       onClick={(e) => { e.stopPropagation(); setInlineStatusId(inlineStatusId === l.efj ? null : l.efj); }}>
                       {inlineStatusId === l.efj ? (
@@ -144,14 +144,14 @@ export default function HistoryView({ loaded, handleLoadClick, handleStatusUpdat
                           })}
                         </div>
                       ) : (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 20, fontSize: 9, fontWeight: 700,
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 700,
                           color: sc.main, background: `${sc.main}12`, border: `1px solid ${sc.main}22`, textTransform: "uppercase", cursor: "pointer" }}>
                           <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
                           {l.status}
                         </span>
                       )}
                     </td>
-                    <td style={{ padding: "8px 14px", fontSize: 10, color: "#8B95A8" }}>{l.rep}</td>
+                    <td style={{ padding: "8px 14px", fontSize: 11, color: "#8B95A8" }}>{l.rep}</td>
                   </tr>
                 );
               })}
@@ -161,12 +161,12 @@ export default function HistoryView({ loaded, handleLoadClick, handleStatusUpdat
         {(page > 1 || hasMore) && (
           <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
-              style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: page > 1 ? "#F0F2F5" : "#3D4557", fontSize: 10, fontWeight: 600, cursor: page > 1 ? "pointer" : "default", fontFamily: "inherit" }}>
+              style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: page > 1 ? "#F0F2F5" : "#3D4557", fontSize: 11, fontWeight: 600, cursor: page > 1 ? "pointer" : "default", fontFamily: "inherit" }}>
               ← Prev
             </button>
-            <span style={{ fontSize: 10, color: "#5A6478" }}>Page {page}</span>
+            <span style={{ fontSize: 11, color: "#5A6478" }}>Page {page}</span>
             <button onClick={() => setPage(p => p + 1)} disabled={!hasMore}
-              style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: hasMore ? "#F0F2F5" : "#3D4557", fontSize: 10, fontWeight: 600, cursor: hasMore ? "pointer" : "default", fontFamily: "inherit" }}>
+              style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: hasMore ? "#F0F2F5" : "#3D4557", fontSize: 11, fontWeight: 600, cursor: hasMore ? "pointer" : "default", fontFamily: "inherit" }}>
               Next →
             </button>
           </div>

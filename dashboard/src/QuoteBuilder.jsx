@@ -359,7 +359,7 @@ function HistoryTab({ onLoadQuote, moveTypes = DRAY_MOVE_TYPES }) {
                     {lane || q.quote_number}
                   </span>
                   {typeLabel && (
-                    <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
                       background: typeLabel === "Dray" ? "rgba(59,130,246,0.15)" : typeLabel === "FTL" ? "rgba(139,92,246,0.15)" : typeLabel === "Transload" ? "rgba(245,158,11,0.15)" : typeLabel === "Dray+Transload" ? "rgba(236,72,153,0.15)" : typeLabel === "OTR" ? "rgba(139,92,246,0.15)" : typeLabel === "LTL" ? "rgba(20,184,166,0.15)" : "rgba(255,255,255,0.06)",
                       color: typeLabel === "Dray" ? "#60A5FA" : typeLabel === "FTL" ? "#A78BFA" : typeLabel === "Transload" ? "#F59E0B" : typeLabel === "Dray+Transload" ? "#EC4899" : typeLabel === "OTR" ? "#A78BFA" : typeLabel === "LTL" ? "#14B8A6" : "#8B95A8",
                       textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -367,7 +367,7 @@ function HistoryTab({ onLoadQuote, moveTypes = DRAY_MOVE_TYPES }) {
                     </span>
                   )}
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, color: statusColor[st] || "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, color: statusColor[st] || "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   <span>{statusIcon[st] || ""}</span>
                   <span>{st}</span>
                 </div>
@@ -375,7 +375,7 @@ function HistoryTab({ onLoadQuote, moveTypes = DRAY_MOVE_TYPES }) {
 
               {/* Row 2: quote # + customer/carrier */}
               <div style={{ fontSize: 11, color: "#8B95A8", marginBottom: 4, display: "flex", gap: 6, alignItems: "center" }}>
-                <span style={{ color: "#5A6478", fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{q.quote_number}</span>
+                <span style={{ color: "#5A6478", fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{q.quote_number}</span>
                 {q.customer_name && <><span style={{ color: "#3A4050" }}>·</span><span style={{ color: "#C8CED8", fontWeight: 600, fontSize: 12 }}>{q.customer_name}</span></>}
                 {q.carrier_name && <><span style={{ color: "#3A4050" }}>·</span><span style={{ fontSize: 11 }}>{q.carrier_name}</span></>}
               </div>
@@ -387,20 +387,20 @@ function HistoryTab({ onLoadQuote, moveTypes = DRAY_MOVE_TYPES }) {
                   {showActions && !isUpdating && (
                     <div style={{ display: "flex", gap: 4 }}>
                       <button onClick={e => handleStatusUpdate(e, q.id, "accepted")}
-                        style={{ padding: "2px 8px", borderRadius: 4, border: "1px solid rgba(0,212,170,0.3)", background: "rgba(0,212,170,0.08)", color: "#00D4AA", fontSize: 10, fontWeight: 700, cursor: "pointer", transition: "all 0.15s", textTransform: "uppercase", letterSpacing: "0.03em" }}
+                        style={{ padding: "2px 8px", borderRadius: 4, border: "1px solid rgba(0,212,170,0.3)", background: "rgba(0,212,170,0.08)", color: "#00D4AA", fontSize: 11, fontWeight: 700, cursor: "pointer", transition: "all 0.15s", textTransform: "uppercase", letterSpacing: "0.03em" }}
                         onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,212,170,0.2)"; }}
                         onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,212,170,0.08)"; }}>
                         Won
                       </button>
                       <button onClick={e => handleStatusUpdate(e, q.id, "lost")}
-                        style={{ padding: "2px 8px", borderRadius: 4, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.08)", color: "#EF4444", fontSize: 10, fontWeight: 700, cursor: "pointer", transition: "all 0.15s", textTransform: "uppercase", letterSpacing: "0.03em" }}
+                        style={{ padding: "2px 8px", borderRadius: 4, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.08)", color: "#EF4444", fontSize: 11, fontWeight: 700, cursor: "pointer", transition: "all 0.15s", textTransform: "uppercase", letterSpacing: "0.03em" }}
                         onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.2)"; }}
                         onMouseLeave={e => { e.currentTarget.style.background = "rgba(239,68,68,0.08)"; }}>
                         Lost
                       </button>
                     </div>
                   )}
-                  {isUpdating && <span style={{ fontSize: 10, color: "#5A6478" }}>Updating...</span>}
+                  {isUpdating && <span style={{ fontSize: 11, color: "#5A6478" }}>Updating...</span>}
                 </div>
                 <span style={{ fontWeight: 700, fontSize: 13, color: q.estimated_total > 0 ? "#00D4AA" : "#5A6478" }}>
                   {q.estimated_total ? fmt(q.estimated_total) : "—"}
@@ -963,7 +963,7 @@ export default function QuoteBuilder() {
 
   // ── Shared input styles ──
   const inputStyle = { width: "100%", padding: "8px 10px", background: "#0D1119", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6, color: "#F0F2F5", fontSize: 12.5, outline: "none" };
-  const labelStyle = { fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 };
+  const labelStyle = { fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 };
   const sectionTitle = { fontSize: 11, fontWeight: 800, color: "#8B95A8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10, marginTop: 20 };
 
   return (
@@ -1058,7 +1058,7 @@ export default function QuoteBuilder() {
             {/* ── Carrier (internal) ── */}
             <div style={{ marginTop: 8 }}>
               <div style={labelStyle}>Carrier (internal only){selectedCarrier && !suggestionsExpanded && (
-                <span style={{ marginLeft: 6, fontSize: 10, color: "#5A6478" }}>
+                <span style={{ marginLeft: 6, fontSize: 11, color: "#5A6478" }}>
                   {selectedCarrier.last_quoted ? `Last quoted $${selectedCarrier.last_quoted.toLocaleString()} at ${route.pod}` : ""}
                 </span>
               )}</div>
@@ -1086,7 +1086,7 @@ export default function QuoteBuilder() {
                       ))}
                       {selectedCarrier.last_quoted && <span style={{ fontSize: 11, fontWeight: 700, color: "#00D4AA", fontFamily: "'JetBrains Mono', monospace" }}>${selectedCarrier.last_quoted.toLocaleString()}</span>}
                     </div>
-                    <span onClick={() => setSuggestionsExpanded(true)} style={{ fontSize: 10, color: "#00D4AA", cursor: "pointer", fontWeight: 600 }}>Change</span>
+                    <span onClick={() => setSuggestionsExpanded(true)} style={{ fontSize: 11, color: "#00D4AA", cursor: "pointer", fontWeight: 600 }}>Change</span>
                   </div>
                 );
               }
@@ -1122,7 +1122,7 @@ export default function QuoteBuilder() {
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flexShrink: 0 }}>
                             {c.last_quoted ? <span style={{ fontWeight: 700, color: "#00D4AA", fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>${c.last_quoted.toLocaleString()}</span> : <span style={{ color: "#3D4557" }}>—</span>}
-                            {c.rate_range && <span style={{ fontSize: 9, color: "rgba(255,255,255,0.4)" }}>{c.rate_range}</span>}
+                            {c.rate_range && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>{c.rate_range}</span>}
                           </div>
                         </div>
                       );
@@ -1133,7 +1133,7 @@ export default function QuoteBuilder() {
             })()}
 
             {/* ── Route ── */}
-            <div style={sectionTitle}>Route {fetchingMiles && <span style={{ fontSize: 10, color: "#00D4AA", fontWeight: 500, marginLeft: 8 }}>calculating miles...</span>}</div>
+            <div style={sectionTitle}>Route {fetchingMiles && <span style={{ fontSize: 11, color: "#00D4AA", fontWeight: 500, marginLeft: 8 }}>calculating miles...</span>}</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <div>
                 <div style={labelStyle}>Port / Origin</div>
@@ -1220,13 +1220,13 @@ export default function QuoteBuilder() {
                         <div><span style={{ color: "#5A6478" }}>Ceiling </span><span style={{ color: "#f59e0b", fontWeight: 700 }}>{fmt(rateIntel.stats.ceiling)}</span></div>
                         <div><span style={{ color: "#5A6478" }}>Carriers </span><span style={{ color: "#8B95A8", fontWeight: 600 }}>{rateIntel.stats.total_carriers}</span></div>
                         {(() => { const allDates = (rateIntel.lane_groups || []).flatMap(g => (g.quotes || []).map(q => q.date)).concat((rateIntel.matches || []).map(m => m.date)).filter(Boolean).map(d => new Date(d).getTime()); const newest = allDates.length ? Math.max(...allDates) : 0; return newest && (Date.now() - newest) > 30 * 86400000; })() && (
-                          <div style={{ fontSize: 9, color: "#f59e0b", display: "flex", alignItems: "center", gap: 3 }}><span>&#9888;</span> Market data may be aged</div>
+                          <div style={{ fontSize: 11, color: "#f59e0b", display: "flex", alignItems: "center", gap: 3 }}><span>&#9888;</span> Market data may be aged</div>
                         )}
                         {rateIntel.stats?.sources && (
                           <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
-                            {rateIntel.stats.sources.email > 0 && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: "rgba(0,212,170,0.12)", color: "#00D4AA", fontWeight: 700 }}>EMAIL {rateIntel.stats.sources.email}</span>}
-                            {rateIntel.stats.sources.import > 0 && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: "rgba(139,92,246,0.12)", color: "#8b5cf6", fontWeight: 700 }}>IMPORT {rateIntel.stats.sources.import}</span>}
-                            {rateIntel.stats.sources.quote > 0 && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: "rgba(245,158,11,0.12)", color: "#f59e0b", fontWeight: 700 }}>QUOTE {rateIntel.stats.sources.quote}</span>}
+                            {rateIntel.stats.sources.email > 0 && <span style={{ fontSize: 11, padding: "1px 5px", borderRadius: 4, background: "rgba(0,212,170,0.12)", color: "#00D4AA", fontWeight: 700 }}>EMAIL {rateIntel.stats.sources.email}</span>}
+                            {rateIntel.stats.sources.import > 0 && <span style={{ fontSize: 11, padding: "1px 5px", borderRadius: 4, background: "rgba(139,92,246,0.12)", color: "#8b5cf6", fontWeight: 700 }}>IMPORT {rateIntel.stats.sources.import}</span>}
+                            {rateIntel.stats.sources.quote > 0 && <span style={{ fontSize: 11, padding: "1px 5px", borderRadius: 4, background: "rgba(245,158,11,0.12)", color: "#f59e0b", fontWeight: 700 }}>QUOTE {rateIntel.stats.sources.quote}</span>}
                           </div>
                         )}
                       </div>
@@ -1241,15 +1241,15 @@ export default function QuoteBuilder() {
                               <button onClick={() => setRateIntelGroups(prev => { const s = new Set(prev); s.has(gi) ? s.delete(gi) : s.add(gi); return s; })}
                                 style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 8px", background: "rgba(255,255,255,0.03)", border: "none", cursor: "pointer", fontSize: 10.5 }}>
                                 <div style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
-                                  <span style={{ display: "inline-block", transform: isOpen ? "rotate(90deg)" : "rotate(0)", transition: "transform 0.12s", color: "#5A6478", fontSize: 9 }}>▶</span>
+                                  <span style={{ display: "inline-block", transform: isOpen ? "rotate(90deg)" : "rotate(0)", transition: "transform 0.12s", color: "#5A6478", fontSize: 11 }}>▶</span>
                                   <span style={{ color: "#C8CED8", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 150 }}>{grp.lane}</span>
-                                  <span style={{ color: "#5A6478", fontSize: 9, flexShrink: 0 }}>{grp.count}q</span>
+                                  <span style={{ color: "#5A6478", fontSize: 11, flexShrink: 0 }}>{grp.count}q</span>
                                 </div>
                                 <div style={{ display: "flex", gap: 3, alignItems: "center", flexShrink: 0 }}>
                                   {grp.sources?.email > 0 && <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 3, background: "rgba(0,212,170,0.1)", color: "#00D4AA" }}>E{grp.sources.email}</span>}
                                   {grp.sources?.import > 0 && <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 3, background: "rgba(139,92,246,0.1)", color: "#8b5cf6" }}>I{grp.sources.import}</span>}
                                   {grp.sources?.quote > 0 && <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 3, background: "rgba(245,158,11,0.1)", color: "#f59e0b" }}>Q{grp.sources.quote}</span>}
-                                  <span style={{ color: "#00D4AA", fontWeight: 700, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", marginLeft: 2 }}>{fmt(grp.floor)}–{fmt(grp.ceiling)}</span>
+                                  <span style={{ color: "#00D4AA", fontWeight: 700, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", marginLeft: 2 }}>{fmt(grp.floor)}–{fmt(grp.ceiling)}</span>
                                 </div>
                               </button>
                               {isOpen && (
@@ -1267,9 +1267,9 @@ export default function QuoteBuilder() {
                                       </div>
                                       <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
                                         {q.rate ? <span style={{ color: "#00D4AA", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{fmt(q.rate)}</span> : <span style={{ color: "#3D4557" }}>—</span>}
-                                        {q.date && <span style={{ color: "#3D4557", fontSize: 9 }}>{String(q.date).slice(0, 10)}</span>}
-                                        {q.date && (Date.now() - new Date(q.date).getTime()) > 30 * 86400000 && <span title="Market data may be aged" style={{ fontSize: 9, color: "#f59e0b" }}>&#9888;</span>}
-                                        {q.status === "accepted" && <span style={{ color: "#22c55e", fontSize: 9, fontWeight: 700 }}>WON</span>}
+                                        {q.date && <span style={{ color: "#3D4557", fontSize: 11 }}>{String(q.date).slice(0, 10)}</span>}
+                                        {q.date && (Date.now() - new Date(q.date).getTime()) > 30 * 86400000 && <span title="Market data may be aged" style={{ fontSize: 11, color: "#f59e0b" }}>&#9888;</span>}
+                                        {q.status === "accepted" && <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 700 }}>WON</span>}
                                       </div>
                                     </div>
                                   ))}
@@ -1289,13 +1289,13 @@ export default function QuoteBuilder() {
                             onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                             <div style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}>
                               <span style={{ color: "#F0F2F5", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 140 }}>{m.carrier}</span>
-                              {m.carrier_email && <span style={{ color: "#3D4557", fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 120 }}>{m.carrier_email}</span>}
+                              {m.carrier_email && <span style={{ color: "#3D4557", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 120 }}>{m.carrier_email}</span>}
                             </div>
                             <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
                               {m.rate ? <span style={{ color: "#00D4AA", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{fmt(m.rate)}</span> : <span style={{ color: "#3D4557" }}>—</span>}
-                              {m.date && <span style={{ color: "#3D4557", fontSize: 9 }}>{m.date.slice(0, 10)}</span>}
-                              {m.date && (Date.now() - new Date(m.date).getTime()) > 30 * 86400000 && <span title="Market data may be aged" style={{ fontSize: 9, color: "#f59e0b" }}>&#9888;</span>}
-                              {m.status === "accepted" && <span style={{ color: "#22c55e", fontSize: 9, fontWeight: 700 }}>WON</span>}
+                              {m.date && <span style={{ color: "#3D4557", fontSize: 11 }}>{m.date.slice(0, 10)}</span>}
+                              {m.date && (Date.now() - new Date(m.date).getTime()) > 30 * 86400000 && <span title="Market data may be aged" style={{ fontSize: 11, color: "#f59e0b" }}>&#9888;</span>}
+                              {m.status === "accepted" && <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 700 }}>WON</span>}
                             </div>
                           </div>
                         ))}
@@ -1306,7 +1306,7 @@ export default function QuoteBuilder() {
                           <div><span style={{ color: "#5A6478" }}>Floor </span><span style={{ color: "#22c55e", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{marketData.floor ? `$${marketData.floor}` : "—"}</span></div>
                           <div><span style={{ color: "#5A6478" }}>Avg </span><span style={{ color: "#F0F2F5", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{marketData.average ? `$${marketData.average}` : "—"}</span></div>
                           <div><span style={{ color: "#5A6478" }}>Ceiling </span><span style={{ color: "#f59e0b", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{marketData.ceiling ? `$${marketData.ceiling}` : "—"}</span></div>
-                          {marketData.data_points && <div style={{ marginLeft: "auto", fontSize: 9, color: "#3D4557" }}>{marketData.data_points} results</div>}
+                          {marketData.data_points && <div style={{ marginLeft: "auto", fontSize: 11, color: "#3D4557" }}>{marketData.data_points} results</div>}
                         </div>
                         {marketData.floor && marketData.ceiling && (() => {
                           const lo = parseFloat(marketData.floor), hi = parseFloat(marketData.ceiling), avg = parseFloat(marketData.average || 0);
@@ -1318,7 +1318,7 @@ export default function QuoteBuilder() {
                             </div>
                           );
                         })()}
-                        <div style={{ fontSize: 9, color: "#3D4557" }}>Market data from uploaded screenshot · not saved to history</div>
+                        <div style={{ fontSize: 11, color: "#3D4557" }}>Market data from uploaded screenshot · not saved to history</div>
                       </div>
                     ) : (
                       <div style={{ fontSize: 11, color: "#5A6478", padding: "4px 0" }}>No rate history for this lane</div>
@@ -1326,14 +1326,14 @@ export default function QuoteBuilder() {
                     {/* Directory carriers */}
                     {rateIntel.carriers?.length > 0 && (
                       <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 6, paddingTop: 6 }}>
-                        <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.1em", marginBottom: 4, textTransform: "uppercase" }}>Directory Carriers</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.1em", marginBottom: 4, textTransform: "uppercase" }}>Directory Carriers</div>
                         {rateIntel.carriers.slice(0, 5).map((c, i) => (
                           <div key={c.id || i} onClick={() => setCarrierName(c.name)}
                             style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 8px", borderRadius: 6, cursor: "pointer", fontSize: 10.5, transition: "background 0.1s" }}
                             onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}
                             onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                             <span style={{ color: "#C8CED8", fontWeight: 600 }}>{c.name}</span>
-                            <div style={{ display: "flex", gap: 8, alignItems: "center", color: "#5A6478", fontSize: 9 }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", color: "#5A6478", fontSize: 11 }}>
                               {c.mc && <span>MC#{c.mc}</span>}
                               {c.can_dray && <span style={{ color: "#3b82f6" }}>DRAY</span>}
                               {c.hazmat && <span style={{ color: "#f59e0b" }}>HAZ</span>}

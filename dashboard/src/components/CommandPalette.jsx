@@ -47,7 +47,7 @@ export default function CommandPalette({ open, query, setQuery, index, setIndex,
             aria-activedescendant={results[index] ? `cmdk-result-${results[index].id}` : undefined}
             placeholder="Search EFJ, container, customer..."
             style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "rgba(255,255,255,0.9)", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.3px" }} />
-          <span aria-hidden="true" style={{ color: "rgba(255,255,255,0.2)", fontSize: 9, background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 4, flexShrink: 0 }}>ESC</span>
+          <span aria-hidden="true" style={{ color: "rgba(255,255,255,0.2)", fontSize: 11, background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 4, flexShrink: 0 }}>ESC</span>
         </div>
         {/* Results */}
         <div id="cmdk-results" role="listbox" aria-label="Search results" style={{ maxHeight: 340, overflowY: "auto" }}>
@@ -70,18 +70,18 @@ export default function CommandPalette({ open, query, setQuery, index, setIndex,
                 <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.container}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, marginLeft: 12 }}>
-                <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, whiteSpace: "nowrap" }}>{s.account}{s.destination ? ` · ${s.destination}` : ""}</span>
-                <span style={{ background: `${statusColor(s)}20`, color: statusColor(s), padding: "2px 8px", borderRadius: 10, fontSize: 9, fontWeight: 600, whiteSpace: "nowrap" }}>{statusLabel(s)}</span>
+                <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 11, whiteSpace: "nowrap" }}>{s.account}{s.destination ? ` · ${s.destination}` : ""}</span>
+                <span style={{ background: `${statusColor(s)}20`, color: statusColor(s), padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{statusLabel(s)}</span>
               </div>
             </div>
           ))}
         </div>
         {/* Footer */}
         <div style={{ padding: "8px 18px", borderTop: "1px solid #1e2a30", display: "flex", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", gap: 14, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>
+          <div style={{ display: "flex", gap: 14, fontSize: 11, color: "rgba(255,255,255,0.18)" }}>
             <span>↑↓ Navigate</span><span>↵ Open</span><span>ESC Close</span>
           </div>
-          <span style={{ fontSize: 9, color: "rgba(255,255,255,0.12)" }}>{results.length > 0 ? `${results.length} result${results.length !== 1 ? "s" : ""}` : ""}</span>
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.12)" }}>{results.length > 0 ? `${results.length} result${results.length !== 1 ? "s" : ""}` : ""}</span>
         </div>
       </div>
     </div>

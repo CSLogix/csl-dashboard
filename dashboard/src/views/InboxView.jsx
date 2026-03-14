@@ -389,7 +389,7 @@ export default function InboxView({ handleLoadClick }) {
   };
 
   const thStyle = { padding: "6px 8px", textAlign: "left", fontSize: 8, fontWeight: 600, color: "#8B95A8", letterSpacing: "1px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: Z.table, cursor: "pointer", whiteSpace: "nowrap", userSelect: "none" };
-  const cellStyle = { padding: "5px 8px", fontSize: 10, color: "#F0F2F5", borderBottom: "1px solid rgba(255,255,255,0.03)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+  const cellStyle = { padding: "5px 8px", fontSize: 11, color: "#F0F2F5", borderBottom: "1px solid rgba(255,255,255,0.03)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 
   const renderFilterDrop = (colKey, w) => {
     if (openFilterCol !== colKey) return null;
@@ -397,14 +397,14 @@ export default function InboxView({ handleLoadClick }) {
     return (
       <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.dropdown, background: "#141A28", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: 4, minWidth: w || 120, maxHeight: 200, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}
         onClick={e => e.stopPropagation()}>
-        <div style={{ padding: "4px 8px", fontSize: 9, color: "#8B95A8", cursor: "pointer", borderRadius: 4 }}
+        <div style={{ padding: "4px 8px", fontSize: 11, color: "#8B95A8", cursor: "pointer", borderRadius: 4 }}
           onClick={() => { setColFilters(f => { const n = { ...f }; delete n[colKey]; return n; }); setOpenFilterCol(null); }}>
           Clear filter
         </div>
         {options.map(opt => {
           const label = colKey === "type" ? (LOCAL_INBOX_TYPE_LABELS[opt] || opt.replace(/_/g, " ")) : colKey === "status" ? opt.replace(/_/g, " ") : opt;
           return (
-            <div key={opt} style={{ padding: "4px 8px", fontSize: 9, color: colFilters[colKey] === opt ? "#00D4AA" : "#F0F2F5", cursor: "pointer", borderRadius: 4, background: colFilters[colKey] === opt ? "rgba(0,212,170,0.08)" : "transparent" }}
+            <div key={opt} style={{ padding: "4px 8px", fontSize: 11, color: colFilters[colKey] === opt ? "#00D4AA" : "#F0F2F5", cursor: "pointer", borderRadius: 4, background: colFilters[colKey] === opt ? "rgba(0,212,170,0.08)" : "transparent" }}
               onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
               onMouseLeave={e => { e.currentTarget.style.background = colFilters[colKey] === opt ? "rgba(0,212,170,0.08)" : "transparent"; }}
               onClick={() => { setColFilters(f => ({ ...f, [colKey]: opt })); setOpenFilterCol(null); }}>
@@ -446,7 +446,7 @@ export default function InboxView({ handleLoadClick }) {
       <div style={{ padding: "12px 16px 0", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: "#F0F2F5" }}>Inbox</div>
-          <div style={{ fontSize: 10, color: "#8B95A8" }}>
+          <div style={{ fontSize: 11, color: "#8B95A8" }}>
             {stats.total_threads || 0} threads
             {stats.needs_reply > 0 && <> &middot; <span style={{ color: "#EF4444", fontWeight: 600 }}>{stats.needs_reply} need reply</span></>}
             {stats.unmatched > 0 && <> &middot; <span style={{ color: "#F97316" }}>{stats.unmatched} unmatched</span></>}
@@ -461,7 +461,7 @@ export default function InboxView({ handleLoadClick }) {
             else if (tab.key === "unmatched") count = stats.unmatched;
             return (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                style={{ padding: "5px 12px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer",
+                style={{ padding: "5px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer",
                   background: isActive ? "rgba(0,212,170,0.12)" : "rgba(255,255,255,0.04)",
                   color: isActive ? "#00D4AA" : "#8B95A8",
                   border: isActive ? "1px solid rgba(0,212,170,0.25)" : "1px solid rgba(255,255,255,0.06)" }}>
@@ -479,32 +479,32 @@ export default function InboxView({ handleLoadClick }) {
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             <input value={inboxSearch} onChange={e => setInboxSearch(e.target.value)}
               placeholder="Search subject, sender, EFJ..."
-              style={{ width: 200, padding: "5px 10px", borderRadius: 6, fontSize: 10, background: "rgba(255,255,255,0.04)", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.08)", outline: "none" }} />
+              style={{ width: 200, padding: "5px 10px", borderRadius: 6, fontSize: 11, background: "rgba(255,255,255,0.04)", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.08)", outline: "none" }} />
             {repFilter && (
               <button onClick={() => setRepFilter("")}
-                style={{ padding: "4px 8px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(59,130,246,0.10)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.25)", display: "flex", alignItems: "center", gap: 4 }}>
+                style={{ padding: "4px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "rgba(59,130,246,0.10)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.25)", display: "flex", alignItems: "center", gap: 4 }}>
                 {repFilter}'s Inbox <span style={{ fontSize: 11, lineHeight: 1 }}>&times;</span>
               </button>
             )}
             {Object.keys(colFilters).length > 0 && (
               <button onClick={() => setColFilters({})}
-                style={{ padding: "4px 8px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(239,68,68,0.08)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.15)" }}>
+                style={{ padding: "4px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "rgba(239,68,68,0.08)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.15)" }}>
                 Clear Filters
               </button>
             )}
             <button onClick={() => setHideActioned(h => !h)}
-              style={{ padding: "5px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer",
+              style={{ padding: "5px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer",
                 background: hideActioned ? "rgba(0,212,170,0.08)" : "rgba(255,255,255,0.04)",
                 color: hideActioned ? "#00D4AA" : "#8B95A8",
                 border: hideActioned ? "1px solid rgba(0,212,170,0.20)" : "1px solid rgba(255,255,255,0.06)" }}>
               {hideActioned ? "Showing New" : "Show All"}
             </button>
             <button onClick={() => { const d = inboxDays === 3 ? 7 : 3; setInboxDays(d); }}
-              style={{ padding: "5px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", color: inboxDays === 7 ? "#A78BFA" : "#8B95A8", border: `1px solid ${inboxDays === 7 ? "rgba(167,139,250,0.25)" : "rgba(255,255,255,0.06)"}` }}>
+              style={{ padding: "5px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", color: inboxDays === 7 ? "#A78BFA" : "#8B95A8", border: `1px solid ${inboxDays === 7 ? "rgba(167,139,250,0.25)" : "rgba(255,255,255,0.06)"}` }}>
               {inboxDays}d
             </button>
             <button onClick={() => { setLoading(true); fetchInbox(); }}
-              style={{ padding: "5px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", color: "#8B95A8", border: "1px solid rgba(255,255,255,0.06)" }}>
+              style={{ padding: "5px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.04)", color: "#8B95A8", border: "1px solid rgba(255,255,255,0.06)" }}>
               Refresh
             </button>
           </div>
@@ -581,33 +581,33 @@ export default function InboxView({ handleLoadClick }) {
                     {/* Subject */}
                     <td style={{ ...cellStyle, maxWidth: 0 }} title={thread.ai_summary || thread.latest_subject}>
                       <span style={{ fontWeight: 500 }}>{thread.latest_subject || "(no subject)"}</span>
-                      {thread.has_attachments && <span style={{ marginLeft: 4, fontSize: 9, opacity: 0.5 }}>&#128206;</span>}
+                      {thread.has_attachments && <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.5 }}>&#128206;</span>}
                     </td>
                     {/* EFJ */}
                     <td style={cellStyle}>
                       {thread.efj ? (
                         <span onClick={e => { e.stopPropagation(); openLoad(thread.efj); }}
-                          style={{ padding: "1px 4px", borderRadius: 3, background: "rgba(0,212,170,0.10)", color: "#00D4AA", fontWeight: 600, fontSize: 9, fontFamily: "JetBrains Mono, monospace", cursor: "pointer" }}>
+                          style={{ padding: "1px 4px", borderRadius: 3, background: "rgba(0,212,170,0.10)", color: "#00D4AA", fontWeight: 600, fontSize: 11, fontFamily: "JetBrains Mono, monospace", cursor: "pointer" }}>
                           {thread.efj}
                         </span>
-                      ) : <span style={{ color: "#4D5669", fontSize: 9 }}>--</span>}
+                      ) : <span style={{ color: "#4D5669", fontSize: 11 }}>--</span>}
                     </td>
                     {/* Sender */}
-                    <td style={{ ...cellStyle, fontSize: 9, color: "#8B95A8", maxWidth: 0 }}>
+                    <td style={{ ...cellStyle, fontSize: 11, color: "#8B95A8", maxWidth: 0 }}>
                       {(thread.latest_sender || "").replace(/<[^>]+>/g, "").trim()}
                     </td>
                     {/* Msgs */}
-                    <td style={{ ...cellStyle, textAlign: "center", color: "#8B95A8", fontSize: 9 }}>
+                    <td style={{ ...cellStyle, textAlign: "center", color: "#8B95A8", fontSize: 11 }}>
                       {thread.message_count || 1}
                     </td>
                     {/* Updated */}
-                    <td style={{ ...cellStyle, textAlign: "right", color: "#5A6478", fontSize: 9 }}>
+                    <td style={{ ...cellStyle, textAlign: "right", color: "#5A6478", fontSize: 11 }}>
                       {_relTime(thread.latest_sent_at)}
                     </td>
                     {/* Actions */}
                     <td style={{ ...cellStyle, textAlign: "center", padding: "3px 4px" }} onClick={e => e.stopPropagation()}>
                       {actionFlash === thread.thread_id ? (
-                        <span style={{ fontSize: 9, color: "#22C55E", fontWeight: 700 }}>Done!</span>
+                        <span style={{ fontSize: 11, color: "#22C55E", fontWeight: 700 }}>Done!</span>
                       ) : actioningThread === thread.thread_id ? (
                         <span style={{ fontSize: 8, color: "#8B95A8" }}>...</span>
                       ) : (() => {
@@ -673,7 +673,7 @@ export default function InboxView({ handleLoadClick }) {
                 const href = `mailto:${toEmail}?subject=${subj}&cc=efj-operations%40evansdelivery.com`;
                 return (
                   <a href={href}
-                    style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(59,130,246,0.15)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.3)", textDecoration: "none", flexShrink: 0 }}
+                    style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: "rgba(59,130,246,0.15)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.3)", textDecoration: "none", flexShrink: 0 }}
                     title={`Reply to ${toEmail}`}>
                     {"\u21A9"} Reply
                   </a>
@@ -682,7 +682,7 @@ export default function InboxView({ handleLoadClick }) {
               {/* Process Booking button */}
               <button onClick={() => handleProcessBooking(selThread)}
                 disabled={bookingLoading}
-                style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(249,115,22,0.15)", color: "#F97316", border: "1px solid rgba(249,115,22,0.3)", cursor: bookingLoading ? "wait" : "pointer", flexShrink: 0, opacity: bookingLoading ? 0.5 : 1 }}>
+                style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: "rgba(249,115,22,0.15)", color: "#F97316", border: "1px solid rgba(249,115,22,0.3)", cursor: bookingLoading ? "wait" : "pointer", flexShrink: 0, opacity: bookingLoading ? 0.5 : 1 }}>
                 {bookingLoading ? "Extracting..." : "\u2728 Build Load"}
               </button>
               {/* Draft Reply button */}
@@ -693,14 +693,14 @@ export default function InboxView({ handleLoadClick }) {
                 setAskAIInitialQuery(`Draft a professional reply to this email thread:\n\nSubject: ${selThread.latest_subject || "(no subject)"}\nFrom: ${(selThread.latest_sender || "").replace(/<[^>]+>/g, "").trim()}\nEFJ: ${selThread.efj || "unmatched"}\nType: ${selThread.email_type || "general"}\n\nMessages:\n${msgs}\n\nWrite a concise, professional reply. Keep it brief and action-oriented.`);
                 setAskAIOpen(true);
               }}
-                style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(168,85,247,0.15)", color: "#A855F7", border: "1px solid rgba(168,85,247,0.3)", cursor: "pointer", flexShrink: 0 }}>
+                style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: "rgba(168,85,247,0.15)", color: "#A855F7", border: "1px solid rgba(168,85,247,0.3)", cursor: "pointer", flexShrink: 0 }}>
                 Draft Reply
               </button>
               {/* Save Attachments button */}
               {selThread.has_attachments && selThread.efj && (
                 <button onClick={() => handleAutoAction(selThread, "save_attachment")}
                   disabled={actioningThread === selThread.thread_id}
-                  style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(0,212,170,0.15)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.3)", cursor: "pointer", flexShrink: 0, opacity: actioningThread === selThread.thread_id ? 0.5 : 1 }}>
+                  style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: "rgba(0,212,170,0.15)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.3)", cursor: "pointer", flexShrink: 0, opacity: actioningThread === selThread.thread_id ? 0.5 : 1 }}>
                   {actioningThread === selThread.thread_id ? "Saving..." : "Save Docs"}
                 </button>
               )}
@@ -713,11 +713,11 @@ export default function InboxView({ handleLoadClick }) {
               <span style={{ width: 7, height: 7, borderRadius: "50%", background: selThread.max_priority >= 5 ? "#EF4444" : selThread.max_priority >= 4 ? "#F97316" : selThread.max_priority >= 3 ? "#3B82F6" : "#4D5669" }} />
               {selThread.efj && (
                 <button onClick={() => openLoad(selThread.efj)}
-                  style={{ padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(0,212,170,0.10)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.20)", fontFamily: "JetBrains Mono, monospace" }}>
+                  style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "rgba(0,212,170,0.10)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.20)", fontFamily: "JetBrains Mono, monospace" }}>
                   {selThread.efj} &rarr; Open Load
                 </button>
               )}
-              {selThread.lane && <span style={{ fontSize: 9, color: "#8B95A8" }}>{selThread.lane}</span>}
+              {selThread.lane && <span style={{ fontSize: 11, color: "#8B95A8" }}>{selThread.lane}</span>}
             </div>
           </div>
 
@@ -730,7 +730,7 @@ export default function InboxView({ handleLoadClick }) {
                   <svg width="12" height="12" fill="none" stroke="#00D4AA" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5z" /></svg>
                   <span style={{ fontSize: 8, fontWeight: 700, color: "#00D4AA", textTransform: "uppercase", letterSpacing: "0.5px" }}>AI Summary</span>
                 </div>
-                <div style={{ fontSize: 10, color: "#C8CDD8", lineHeight: 1.6 }}>{selThread.ai_summary}</div>
+                <div style={{ fontSize: 11, color: "#C8CDD8", lineHeight: 1.6 }}>{selThread.ai_summary}</div>
               </div>
             )}
             {(selThread.messages || []).map((msg, idx) => (
@@ -740,7 +740,7 @@ export default function InboxView({ handleLoadClick }) {
                 </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 10, fontWeight: 500, color: msg.direction === "sent" ? "#00D4AA" : "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                    <span style={{ fontSize: 11, fontWeight: 500, color: msg.direction === "sent" ? "#00D4AA" : "#F0F2F5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
                       {msg.direction === "sent" ? "CSL Team" : (msg.sender || "").replace(/<[^>]+>/g, "").trim()}
                     </span>
                     <span style={{ fontSize: 8, color: "#5A6478", whiteSpace: "nowrap" }}>
@@ -748,7 +748,7 @@ export default function InboxView({ handleLoadClick }) {
                     </span>
                   </div>
                   {msg.body_preview && (
-                    <div style={{ fontSize: 9, color: "#5A6478", marginTop: 3, lineHeight: 1.5, maxHeight: 60, overflow: "hidden" }}>
+                    <div style={{ fontSize: 11, color: "#5A6478", marginTop: 3, lineHeight: 1.5, maxHeight: 60, overflow: "hidden" }}>
                       {msg.body_preview.slice(0, 300)}
                     </div>
                   )}
@@ -779,7 +779,7 @@ export default function InboxView({ handleLoadClick }) {
                   <span style={{ fontSize: 8, color: "#5A6478", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginRight: 2 }}>Quote</span>
                   {currentStatus ? (
                     <>
-                      <span style={{ fontSize: 9, padding: "3px 10px", borderRadius: 5, fontWeight: 700,
+                      <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 5, fontWeight: 700,
                         background: QS_CONFIG[currentStatus]?.bg, color: QS_CONFIG[currentStatus]?.color,
                         border: `1px solid ${QS_CONFIG[currentStatus]?.border}` }}>
                         {QS_CONFIG[currentStatus]?.label}
@@ -797,7 +797,7 @@ export default function InboxView({ handleLoadClick }) {
                   ) : (
                     Object.entries(QS_CONFIG).map(([key, cfg]) => (
                       <button key={key} onClick={() => handleQuoteAction(selMsgId, key)}
-                        style={{ padding: "4px 9px", borderRadius: 5, fontSize: 9, fontWeight: 600, cursor: "pointer",
+                        style={{ padding: "4px 9px", borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: "pointer",
                           background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
                         {cfg.label}
                       </button>
@@ -812,15 +812,15 @@ export default function InboxView({ handleLoadClick }) {
                             if (e.key === "Enter") handleQuoteAction(selMsgId, currentStatus || "quoted", quoteLinkEfj);
                             if (e.key === "Escape") { setQuoteLinkId(null); setQuoteLinkEfj(""); }
                           }}
-                          style={{ width: 80, padding: "3px 7px", borderRadius: 5, fontSize: 10, background: "rgba(255,255,255,0.06)", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.14)", outline: "none", fontFamily: "JetBrains Mono, monospace" }} />
+                          style={{ width: 80, padding: "3px 7px", borderRadius: 5, fontSize: 11, background: "rgba(255,255,255,0.06)", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.14)", outline: "none", fontFamily: "JetBrains Mono, monospace" }} />
                         <button onClick={() => handleQuoteAction(selMsgId, currentStatus || "quoted", quoteLinkEfj)}
-                          style={{ padding: "3px 8px", borderRadius: 5, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "#00D4AA", color: "#0A0E17", border: "none" }}>Link</button>
+                          style={{ padding: "3px 8px", borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "#00D4AA", color: "#0A0E17", border: "none" }}>Link</button>
                         <button onClick={() => { setQuoteLinkId(null); setQuoteLinkEfj(""); }}
-                          style={{ padding: "3px 6px", borderRadius: 5, fontSize: 9, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#8B95A8", border: "none" }}>&#10005;</button>
+                          style={{ padding: "3px 6px", borderRadius: 5, fontSize: 11, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#8B95A8", border: "none" }}>&#10005;</button>
                       </>
                     ) : (
                       <button onClick={() => setQuoteLinkId(selMsgId)} title={selThread.efj ? `Linked: ${selThread.efj}` : "Link to EFJ"}
-                        style={{ padding: "3px 8px", borderRadius: 5, fontSize: 9, cursor: "pointer",
+                        style={{ padding: "3px 8px", borderRadius: 5, fontSize: 11, cursor: "pointer",
                           background: selThread.efj ? "rgba(0,212,170,0.08)" : "rgba(255,255,255,0.05)",
                           color: selThread.efj ? "#00D4AA" : "#5A6478",
                           border: `1px solid ${selThread.efj ? "rgba(0,212,170,0.20)" : "rgba(255,255,255,0.08)"}`,
@@ -845,7 +845,7 @@ export default function InboxView({ handleLoadClick }) {
                   setSelectedThread(prev => ({ ...prev, manual_rep: rep, rep }));
                 } catch (err) { console.error("assign-rep error", err); }
               }}
-                style={{ padding: "4px 8px", borderRadius: 5, fontSize: 10, background: "#141A28", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.12)", cursor: "pointer" }}>
+                style={{ padding: "4px 8px", borderRadius: 5, fontSize: 11, background: "#141A28", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.12)", cursor: "pointer" }}>
                 <option value="">Unassigned</option>
                 {["Eli", "Radka", "John F", "Janice"].map(r => <option key={r} value={r}>{r}</option>)}
               </select>
@@ -859,7 +859,7 @@ export default function InboxView({ handleLoadClick }) {
                     setSelectedThread(prev => ({ ...prev, actioned: newVal }));
                   } catch (err) { console.error("mark-actioned error", err); }
                 }}
-                  style={{ padding: "4px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer",
+                  style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer",
                     background: selThread.actioned ? "rgba(34,197,94,0.10)" : "rgba(255,255,255,0.05)",
                     color: selThread.actioned ? "#22C55E" : "#8B95A8",
                     border: `1px solid ${selThread.actioned ? "rgba(34,197,94,0.20)" : "rgba(255,255,255,0.08)"}` }}>
@@ -873,11 +873,11 @@ export default function InboxView({ handleLoadClick }) {
               {selThread.source === "unmatched" && assigningId !== selMsgId && (
                 <>
                   <button onClick={() => setAssigningId(selMsgId)}
-                    style={{ padding: "5px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(59,130,246,0.10)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.20)" }}>
+                    style={{ padding: "5px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "rgba(59,130,246,0.10)", color: "#3B82F6", border: "1px solid rgba(59,130,246,0.20)" }}>
                     Assign to Load
                   </button>
                   <button onClick={() => handleDismiss(selMsgId)}
-                    style={{ padding: "5px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(239,68,68,0.08)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.15)" }}>
+                    style={{ padding: "5px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "rgba(239,68,68,0.08)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.15)" }}>
                     Dismiss
                   </button>
                 </>
@@ -886,16 +886,16 @@ export default function InboxView({ handleLoadClick }) {
                 <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                   <input value={assignEfj} onChange={e => setAssignEfj(e.target.value)} placeholder="EFJ#" autoFocus
                     onKeyDown={e => { if (e.key === "Enter") handleAssign(selMsgId); if (e.key === "Escape") { setAssigningId(null); setAssignEfj(""); } }}
-                    style={{ width: 90, padding: "4px 8px", borderRadius: 6, fontSize: 10, background: "rgba(255,255,255,0.06)", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.12)", outline: "none", fontFamily: "JetBrains Mono, monospace" }} />
+                    style={{ width: 90, padding: "4px 8px", borderRadius: 6, fontSize: 11, background: "rgba(255,255,255,0.06)", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.12)", outline: "none", fontFamily: "JetBrains Mono, monospace" }} />
                   <button onClick={() => handleAssign(selMsgId)}
-                    style={{ padding: "4px 10px", borderRadius: 6, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "#00D4AA", color: "#0A0E17", border: "none" }}>Assign</button>
+                    style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "#00D4AA", color: "#0A0E17", border: "none" }}>Assign</button>
                   <button onClick={() => { setAssigningId(null); setAssignEfj(""); }}
-                    style={{ padding: "4px 8px", borderRadius: 6, fontSize: 9, cursor: "pointer", background: "rgba(255,255,255,0.06)", color: "#8B95A8", border: "1px solid rgba(255,255,255,0.08)" }}>Cancel</button>
+                    style={{ padding: "4px 8px", borderRadius: 6, fontSize: 11, cursor: "pointer", background: "rgba(255,255,255,0.06)", color: "#8B95A8", border: "1px solid rgba(255,255,255,0.08)" }}>Cancel</button>
                 </div>
               )}
               <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
                 {selFeedback ? (
-                  <span style={{ fontSize: 9, color: selFeedback === "correct" ? "#22C55E" : "#F97316", fontWeight: 600 }}>
+                  <span style={{ fontSize: 11, color: selFeedback === "correct" ? "#22C55E" : "#F97316", fontWeight: 600 }}>
                     {selFeedback === "correct" ? "Confirmed" : "Corrected"}
                   </span>
                 ) : selMsgId && correctionId !== selMsgId ? (
@@ -909,12 +909,12 @@ export default function InboxView({ handleLoadClick }) {
                 {correctionId === selMsgId && (
                   <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
                     <select onChange={e => handleFeedback(selMsgId, "incorrect", e.target.value)} defaultValue=""
-                      style={{ padding: "3px 8px", borderRadius: 4, fontSize: 9, background: "#141A28", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.12)" }}>
+                      style={{ padding: "3px 8px", borderRadius: 4, fontSize: 11, background: "#141A28", color: "#F0F2F5", border: "1px solid rgba(255,255,255,0.12)" }}>
                       <option value="" disabled>Correct type...</option>
                       {CORRECTION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
                     </select>
                     <button onClick={() => setCorrectionId(null)}
-                      style={{ padding: "2px 6px", borderRadius: 4, fontSize: 9, cursor: "pointer", background: "rgba(255,255,255,0.06)", color: "#8B95A8", border: "none" }}>&#10005;</button>
+                      style={{ padding: "2px 6px", borderRadius: 4, fontSize: 11, cursor: "pointer", background: "rgba(255,255,255,0.06)", color: "#8B95A8", border: "none" }}>&#10005;</button>
                   </div>
                 )}
               </div>
@@ -969,20 +969,20 @@ export default function InboxView({ handleLoadClick }) {
               {/* Status banner */}
               <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 {bookingResult.playbook_found ? (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 12, fontSize: 9, fontWeight: 700, background: "rgba(34,197,94,0.12)", color: "#22C55E", border: "1px solid rgba(34,197,94,0.25)" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700, background: "rgba(34,197,94,0.12)", color: "#22C55E", border: "1px solid rgba(34,197,94,0.25)" }}>
                     {"\u2713"} Active Playbook Applied
                   </span>
                 ) : (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 12, fontSize: 9, fontWeight: 700, background: "rgba(245,158,11,0.12)", color: "#F59E0B", border: "1px solid rgba(245,158,11,0.25)" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700, background: "rgba(245,158,11,0.12)", color: "#F59E0B", border: "1px solid rgba(245,158,11,0.25)" }}>
                     {"\u2606"} New Lane Detected
                   </span>
                 )}
-                <span style={{ padding: "3px 8px", borderRadius: 12, fontSize: 9, fontWeight: 700, background: `${confColor}15`, color: confColor, border: `1px solid ${confColor}30` }}>
+                <span style={{ padding: "3px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700, background: `${confColor}15`, color: confColor, border: `1px solid ${confColor}30` }}>
                   {conf.toUpperCase()} confidence
                 </span>
                 {match && (
                   <button onClick={() => { setActiveView("playbooks"); setShowBookingSlideOver(false); }}
-                    style={{ padding: "3px 8px", borderRadius: 12, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(0,212,170,0.08)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.15)", textDecoration: "none" }}>
+                    style={{ padding: "3px 8px", borderRadius: 12, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "rgba(0,212,170,0.08)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.15)", textDecoration: "none" }}>
                     View Playbook: {match.lane_code}
                   </button>
                 )}
@@ -992,7 +992,7 @@ export default function InboxView({ handleLoadClick }) {
             {/* Form body */}
             <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px" }}>
               {/* Routing section */}
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>Routing</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>Routing</div>
               {field("Account", "account", ext.account_source || "ai", ext.account, null)}
               {field("Origin", "origin", "ai", ext.origin, null)}
               {field("Destination", "destination", "ai", ext.destination, null)}
@@ -1000,18 +1000,18 @@ export default function InboxView({ handleLoadClick }) {
               {field("Equipment", "equipment", pb.equipment ? "playbook" : "ai", ext.equipment || pb.equipment, pb.equipment)}
 
               {/* Reference section */}
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 8, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.5px" }}>Reference</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", marginBottom: 8, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.5px" }}>Reference</div>
               {field("Container #", "container", "ai", ext.container, null)}
               {field("BOL / Booking", "bol", "ai", ext.bol, null)}
               {field("Vessel", "vessel", "ai", ext.vessel, null)}
 
               {/* Dates section */}
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 8, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.5px" }}>Dates</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", marginBottom: 8, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.5px" }}>Dates</div>
               {field("ETA", "eta", "ai", ext.eta, null)}
               {field("LFD", "lfd", "ai", ext.lfd, null)}
 
               {/* Carrier + Rates section */}
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 8, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.5px" }}>Carrier & Rates</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", marginBottom: 8, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.5px" }}>Carrier & Rates</div>
               {field("Carrier", "carrier", pb.carrier_name ? "playbook" : "ai", ext.carrier || "", pb.carrier_name)}
               {field("Carrier Rate ($)", "carrier_pay", pb.carrier_rate ? "playbook" : "ai",
                 ext.carrier_rate ? String(ext.carrier_rate) : "",
@@ -1020,11 +1020,11 @@ export default function InboxView({ handleLoadClick }) {
                 ext.customer_rate ? String(ext.customer_rate) : "",
                 pb.customer_rate ? String(pb.customer_rate) : null)}
               {pb.margin_pct != null && (
-                <div style={{ fontSize: 9, color: "#8B95A8", marginBottom: 4 }}>Playbook margin: {pb.margin_pct}%</div>
+                <div style={{ fontSize: 11, color: "#8B95A8", marginBottom: 4 }}>Playbook margin: {pb.margin_pct}%</div>
               )}
 
               {/* Cargo section */}
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 8, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.5px" }}>Cargo</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", marginBottom: 8, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.5px" }}>Cargo</div>
               {field("Commodity", "commodity", "ai", ext.commodity, null)}
               {field("Weight (lbs)", "weight_lbs", "ai", ext.weight_lbs ? String(ext.weight_lbs) : "", pb.typical_weight ? String(pb.typical_weight) : null)}
 
@@ -1032,16 +1032,16 @@ export default function InboxView({ handleLoadClick }) {
               {pb.instructions && (
                 <div style={{ margin: "16px 0 8px", padding: "8px 12px", borderRadius: 6, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.12)" }}>
                   <div style={{ fontSize: 8, fontWeight: 700, color: "#00D4AA", textTransform: "uppercase", marginBottom: 4 }}>Playbook Instructions</div>
-                  <div style={{ fontSize: 10, color: "#C8CDD8", lineHeight: 1.5 }}>{pb.instructions}</div>
+                  <div style={{ fontSize: 11, color: "#C8CDD8", lineHeight: 1.5 }}>{pb.instructions}</div>
                 </div>
               )}
 
               {/* Multi-load warning */}
               {pb.multi_load && pb.total_loads > 1 && (
                 <div style={{ margin: "8px 0", padding: "6px 10px", borderRadius: 6, background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.12)" }}>
-                  <div style={{ fontSize: 9, color: "#3B82F6", fontWeight: 600 }}>Multi-load lane: {pb.total_loads} loads required</div>
+                  <div style={{ fontSize: 11, color: "#3B82F6", fontWeight: 600 }}>Multi-load lane: {pb.total_loads} loads required</div>
                   {(pb.loads || []).map((ld, i) => (
-                    <div key={i} style={{ fontSize: 9, color: "#8B95A8", marginTop: 2 }}>
+                    <div key={i} style={{ fontSize: 11, color: "#8B95A8", marginTop: 2 }}>
                       Load {ld.load_number}: {ld.move_type} ({ld.equipment}) — {ld.origin_facility} {"\u2192"} {ld.destination_facility}
                     </div>
                   ))}
@@ -1051,11 +1051,11 @@ export default function InboxView({ handleLoadClick }) {
               {/* Contacts preview from playbook */}
               {pb.contacts && pb.contacts.length > 0 && (
                 <div style={{ marginTop: 16 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Key Contacts</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Key Contacts</div>
                   {pb.contacts.map((c, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.03)", fontSize: 10 }}>
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.03)", fontSize: 11 }}>
                       <span style={{ color: "#F0F2F5", fontWeight: 500 }}>{c.name}</span>
-                      <span style={{ color: "#5A6478", fontSize: 9 }}>{c.role}</span>
+                      <span style={{ color: "#5A6478", fontSize: 11 }}>{c.role}</span>
                     </div>
                   ))}
                 </div>
@@ -1067,8 +1067,8 @@ export default function InboxView({ handleLoadClick }) {
                   <input type="checkbox" checked={indexAsPlaybook} onChange={e => setIndexAsPlaybook(e.target.checked)}
                     style={{ accentColor: "#F59E0B" }} />
                   <div>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: "#F59E0B" }}>Index as new playbook after completion</div>
-                    <div style={{ fontSize: 9, color: "#8B95A8" }}>Auto-generate a draft playbook from this load data</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#F59E0B" }}>Index as new playbook after completion</div>
+                    <div style={{ fontSize: 11, color: "#8B95A8" }}>Auto-generate a draft playbook from this load data</div>
                   </div>
                 </label>
               )}

@@ -8,9 +8,9 @@ export default function TrackingBadge({ tracking, mpStatus, mpDisplayStatus, mpD
 
   const label = display || raw;
   if (!label) {
-    if (!tracking) return <span style={{ fontSize: 9, color: "#5A6478", fontStyle: "italic" }}>No MP</span>;
+    if (!tracking) return <span style={{ fontSize: 11, color: "#5A6478", fontStyle: "italic" }}>No MP</span>;
     const st = (tracking.status || "").trim();
-    if (!st) return <span style={{ fontSize: 9, color: "#5A6478", fontStyle: "italic" }}>No MP</span>;
+    if (!st) return <span style={{ fontSize: 11, color: "#5A6478", fontStyle: "italic" }}>No MP</span>;
   }
 
   const ll = (label || "").toLowerCase();
@@ -53,7 +53,7 @@ export default function TrackingBadge({ tracking, mpStatus, mpDisplayStatus, mpD
   return (
     <span
       title={tooltip || undefined}
-      style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 12, fontSize: 9, fontWeight: 700, color, background: bg, border: `1px solid ${border}`, whiteSpace: "nowrap", cursor: tooltip ? "help" : "default" }}
+      style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700, color, background: bg, border: `1px solid ${border}`, whiteSpace: "nowrap", cursor: tooltip ? "help" : "default" }}
     >{label}</span>
   );
 }

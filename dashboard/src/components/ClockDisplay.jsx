@@ -10,9 +10,9 @@ export default function ClockDisplay({ lastSyncTime, apiError }) {
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
         <div style={{ width: 6, height: 6, borderRadius: "50%", background: apiError ? "#EF4444" : syncAgo !== null && syncAgo < 120 ? "#22C55E" : "#F59E0B", animation: apiError ? "alert-pulse 1.5s ease infinite" : "none" }} />
-        <span style={{ fontSize: 10, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{timeStr}</span>
+        <span style={{ fontSize: 11, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{timeStr}</span>
       </div>
-      <span style={{ fontSize: 9, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>sync {syncLabel}</span>
+      <span style={{ fontSize: 11, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>sync {syncLabel}</span>
     </div>
   );
 }

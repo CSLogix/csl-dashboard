@@ -278,7 +278,7 @@ export default function BOLGeneratorView({ loaded }) {
         <div className="dash-panel" style={{ padding: 20 }}>
           {/* Account selector */}
           <div style={{ marginBottom: 14 }}>
-            <label style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "1.5px", marginBottom: 6, display: "block", textTransform: "uppercase" }}>Account</label>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "1.5px", marginBottom: 6, display: "block", textTransform: "uppercase" }}>Account</label>
             <select value={account} onChange={e => { setAccount(e.target.value); handleClear(); }}
               style={{ width: "100%", padding: "10px 14px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "#F0F2F5", fontSize: 12, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               {accounts.map(a => <option key={a.key} value={a.key} style={{ background: "#0D1119" }}>{a.label}</option>)}
@@ -294,7 +294,7 @@ export default function BOLGeneratorView({ loaded }) {
               { key: "screenshot", label: "Screenshot" },
             ].map(m => (
               <button key={m.key} onClick={() => { setInputMode(m.key); if (m.key !== "paste") handleClear(); }}
-                style={{ padding: "5px 12px", borderRadius: 5, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                style={{ padding: "5px 12px", borderRadius: 5, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
                   background: inputMode === m.key ? "#1E2738" : "transparent", color: inputMode === m.key ? "#F0F2F5" : "#8B95A8" }}>{m.label}</button>
             ))}
           </div>
@@ -310,15 +310,15 @@ export default function BOLGeneratorView({ loaded }) {
               {file ? (
                 <>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#00D4AA" }}>{file.name}</div>
-                  <div style={{ fontSize: 10, color: "#5A6478", marginTop: 4 }}>{(file.size / 1024).toFixed(1)} KB {"\u2014"} {rowCount} row{rowCount !== 1 ? "s" : ""} detected</div>
+                  <div style={{ fontSize: 11, color: "#5A6478", marginTop: 4 }}>{(file.size / 1024).toFixed(1)} KB {"\u2014"} {rowCount} row{rowCount !== 1 ? "s" : ""} detected</div>
                   <button onClick={(e) => { e.stopPropagation(); handleClear(); }}
-                    style={{ marginTop: 8, padding: "4px 12px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6, color: "#8B95A8", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Clear</button>
+                    style={{ marginTop: 8, padding: "4px 12px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6, color: "#8B95A8", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Clear</button>
                 </>
               ) : (
                 <>
                   <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.3 }}>{"\uD83D\uDCC4"}</div>
                   <div style={{ fontSize: 12, fontWeight: 700, color: "#8B95A8" }}>Drop CSV/XLSX or click to upload</div>
-                  <div style={{ fontSize: 10, color: "#3D4557", marginTop: 4 }}>Piedra Solar pickup & delivery plan</div>
+                  <div style={{ fontSize: 11, color: "#3D4557", marginTop: 4 }}>Piedra Solar pickup & delivery plan</div>
                 </>
               )}
             </div>
@@ -335,9 +335,9 @@ export default function BOLGeneratorView({ loaded }) {
               />
               {pasteText.trim() && (
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-                  <span style={{ fontSize: 10, color: "#5A6478" }}>{rowCount} row{rowCount !== 1 ? "s" : ""} detected</span>
+                  <span style={{ fontSize: 11, color: "#5A6478" }}>{rowCount} row{rowCount !== 1 ? "s" : ""} detected</span>
                   <button onClick={handleClear}
-                    style={{ padding: "3px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6, color: "#8B95A8", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Clear</button>
+                    style={{ padding: "3px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6, color: "#8B95A8", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Clear</button>
                 </div>
               )}
             </div>
@@ -349,13 +349,13 @@ export default function BOLGeneratorView({ loaded }) {
               {manualRows.map((row, ri) => (
                 <div key={ri} style={{ marginBottom: 10, padding: "10px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.04)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <span style={{ fontSize: 9, fontWeight: 700, color: "#00D4AA", letterSpacing: "1px" }}>BOL {ri + 1}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#00D4AA", letterSpacing: "1px" }}>BOL {ri + 1}</span>
                     <div style={{ display: "flex", gap: 4 }}>
                       <button onClick={() => duplicateManualRow(ri)} title="Duplicate"
-                        style={{ padding: "2px 8px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, color: "#8B95A8", fontSize: 9, cursor: "pointer", fontFamily: "inherit" }}>Copy</button>
+                        style={{ padding: "2px 8px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, color: "#8B95A8", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Copy</button>
                       {manualRows.length > 1 && (
                         <button onClick={() => removeManualRow(ri)} title="Remove"
-                          style={{ padding: "2px 8px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 4, color: "#ef4444", fontSize: 9, cursor: "pointer", fontFamily: "inherit" }}>X</button>
+                          style={{ padding: "2px 8px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 4, color: "#ef4444", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>X</button>
                       )}
                     </div>
                   </div>
@@ -365,7 +365,7 @@ export default function BOLGeneratorView({ loaded }) {
                         <label style={{ fontSize: 8, fontWeight: 600, color: "#5A6478", letterSpacing: "0.5px", marginBottom: 2, display: "block" }}>{col}</label>
                         <input value={row[col] || ""} onChange={e => updateManualRow(ri, col, e.target.value)}
                           placeholder={col}
-                          style={{ width: "100%", padding: "6px 10px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 6, color: "#F0F2F5", fontSize: 10, outline: "none", fontFamily: "'JetBrains Mono', monospace" }} />
+                          style={{ width: "100%", padding: "6px 10px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 6, color: "#F0F2F5", fontSize: 11, outline: "none", fontFamily: "'JetBrains Mono', monospace" }} />
                       </div>
                     ))}
                   </div>
@@ -393,18 +393,18 @@ export default function BOLGeneratorView({ loaded }) {
                 ) : screenshotPreview ? (
                   <>
                     <img src={screenshotPreview} alt="Screenshot" style={{ maxWidth: "100%", maxHeight: 150, borderRadius: 8, marginBottom: 8, opacity: 0.8 }} />
-                    <div style={{ fontSize: 10, color: "#5A6478" }}>Click to upload a different image</div>
+                    <div style={{ fontSize: 11, color: "#5A6478" }}>Click to upload a different image</div>
                   </>
                 ) : (
                   <>
                     <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.3 }}>{"\uD83D\uDCF7"}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: "#8B95A8" }}>Upload a screenshot</div>
-                    <div style={{ fontSize: 10, color: "#3D4557", marginTop: 4 }}>Image of a spreadsheet or delivery plan</div>
+                    <div style={{ fontSize: 11, color: "#3D4557", marginTop: 4 }}>Image of a spreadsheet or delivery plan</div>
                   </>
                 )}
               </div>
               {screenshotPreview && !extracting && (
-                <div style={{ fontSize: 10, color: "#5A6478", marginTop: 8, lineHeight: 1.5 }}>
+                <div style={{ fontSize: 11, color: "#5A6478", marginTop: 8, lineHeight: 1.5 }}>
                   OCR extracted text will appear in the Paste tab for review. Adjust column alignment as needed before generating.
                 </div>
               )}
@@ -414,7 +414,7 @@ export default function BOLGeneratorView({ loaded }) {
 
         {/* Right: Expected Format */}
         <div className="dash-panel" style={{ padding: 20 }}>
-          <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "1.5px", marginBottom: 12, textTransform: "uppercase" }}>Expected CSV Columns</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "1.5px", marginBottom: 12, textTransform: "uppercase" }}>Expected CSV Columns</div>
           {selectedAccount ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {selectedAccount.columns.map((col, i) => {
@@ -431,7 +431,7 @@ export default function BOLGeneratorView({ loaded }) {
                 <div style={{ marginTop: 6, padding: "6px 10px", background: "rgba(96,165,250,0.04)", borderRadius: 8, border: "1px solid rgba(96,165,250,0.1)" }}>
                   <div style={{ fontSize: 8, fontWeight: 700, color: "#60a5fa", letterSpacing: "0.5px", marginBottom: 4 }}>COMBINED COLUMNS</div>
                   {selectedAccount.combined_columns.map(cc => (
-                    <div key={cc.name} style={{ fontSize: 10, color: "#8B95A8", marginBottom: 2 }}>
+                    <div key={cc.name} style={{ fontSize: 11, color: "#8B95A8", marginBottom: 2 }}>
                       <span style={{ color: "#C8D0DC", fontWeight: 600 }}>{cc.name}</span> = {cc.sources.join(" + ")}
                     </div>
                   ))}
@@ -447,10 +447,10 @@ export default function BOLGeneratorView({ loaded }) {
       {/* Preview Table */}
       {previewRows && previewRows.length > 0 && !previewRows[0]._info && (
         <div className="dash-panel" style={{ padding: 16, marginBottom: 14, overflowX: "auto" }}>
-          <div style={{ fontSize: 9, fontWeight: 700, color: "#8B95A8", letterSpacing: "1.5px", marginBottom: 10, textTransform: "uppercase" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "1.5px", marginBottom: 10, textTransform: "uppercase" }}>
             Preview ({previewRows.length} row{previewRows.length !== 1 ? "s" : ""})
           </div>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
             <thead>
               <tr>
                 {displayCols.map(h => (
@@ -469,7 +469,7 @@ export default function BOLGeneratorView({ loaded }) {
             </tbody>
           </table>
           {previewRows.length > 10 && (
-            <div style={{ fontSize: 10, color: "#5A6478", marginTop: 8, textAlign: "center" }}>
+            <div style={{ fontSize: 11, color: "#5A6478", marginTop: 8, textAlign: "center" }}>
               Showing 10 of {previewRows.length} rows
             </div>
           )}

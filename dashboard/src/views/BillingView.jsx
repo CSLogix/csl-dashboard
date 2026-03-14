@@ -113,7 +113,7 @@ export default function BillingView({ loaded, shipments, handleStatusUpdate, han
               background: billingTab === t.key ? "rgba(0,212,170,0.08)" : "rgba(255,255,255,0.02)",
               color: billingTab === t.key ? "#00D4AA" : "#8B95A8", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
             {t.label}
-            <span style={{ background: billingTab === t.key ? "#00D4AA22" : "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 8, fontSize: 10, fontWeight: 700,
+            <span style={{ background: billingTab === t.key ? "#00D4AA22" : "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 8, fontSize: 11, fontWeight: 700,
               color: billingTab === t.key ? "#00D4AA" : "#8B95A8" }}>{t.count}</span>
           </button>
         ))}
@@ -128,7 +128,7 @@ export default function BillingView({ loaded, shipments, handleStatusUpdate, han
                   border: billingFilter === c.filter ? `1px solid ${c.color}44` : "1px solid rgba(255,255,255,0.06)",
                   background: billingFilter === c.filter ? `${c.color}0A` : "rgba(255,255,255,0.02)" }}>
                 <div style={{ fontSize: 22, fontWeight: 800, color: c.color, fontFamily: "'JetBrains Mono', monospace" }}>{c.count}</div>
-                <div style={{ fontSize: 10, color: "#8B95A8", fontWeight: 600, marginTop: 2 }}>{c.label}</div>
+                <div style={{ fontSize: 11, color: "#8B95A8", fontWeight: 600, marginTop: 2 }}>{c.label}</div>
               </div>
             ))}
           </div>
@@ -150,13 +150,13 @@ export default function BillingView({ loaded, shipments, handleStatusUpdate, han
             {(billingFilter !== "all" || billRepFilter !== "All Reps" || billAcctFilter !== "All Accounts" || billSearch) && (
               <button onClick={() => { setBillingFilter("all"); setBillRepFilter("All Reps"); setBillAcctFilter("All Accounts"); setBillSearch(""); }}
                 style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)",
-                  color: "#8B95A8", fontSize: 10, cursor: "pointer" }}>Clear</button>
+                  color: "#8B95A8", fontSize: 11, cursor: "pointer" }}>Clear</button>
             )}
             {counts.close_ready > 0 && (
               <button onClick={handleBulkCloseReady} disabled={bulkClosing}
                 style={{ marginLeft: "auto", padding: "6px 14px", borderRadius: 8, border: "1px solid rgba(34,197,94,0.4)",
                   background: bulkClosing ? "rgba(34,197,94,0.05)" : "rgba(34,197,94,0.12)",
-                  color: "#22C55E", fontSize: 10, fontWeight: 700, cursor: bulkClosing ? "wait" : "pointer", whiteSpace: "nowrap" }}>
+                  color: "#22C55E", fontSize: 11, fontWeight: 700, cursor: bulkClosing ? "wait" : "pointer", whiteSpace: "nowrap" }}>
                 {bulkClosing ? "Closing..." : `Close All Ready (${counts.close_ready})`}
               </button>
             )}
@@ -167,7 +167,7 @@ export default function BillingView({ loaded, shipments, handleStatusUpdate, han
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                   {["EFJ #", "Account", "Rep", "Container/Load", "Carrier", "Route", "Docs", "Delivered", "Status", "Invoiced", ""].map(h => (
-                    <th key={h} style={{ padding: "10px 12px", textAlign: "left", color: "#8B95A8", fontSize: 10, fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>{h}</th>
+                    <th key={h} style={{ padding: "10px 12px", textAlign: "left", color: "#8B95A8", fontSize: 11, fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -192,7 +192,7 @@ export default function BillingView({ loaded, shipments, handleStatusUpdate, han
                       <td style={{ padding: "10px 12px", color: "#8B95A8" }}>{s.carrier}</td>
                       <td style={{ padding: "10px 12px", color: "#8B95A8", fontSize: 11 }}>{s.origin && s.destination ? `${s.origin} \u2192 ${s.destination}` : s.destination || "\u2014"}</td>
                       <td style={{ padding: "10px 12px" }}>
-                        <span style={{ display: "inline-flex", gap: 4, fontSize: 10 }}>
+                        <span style={{ display: "inline-flex", gap: 4, fontSize: 11 }}>
                           <span title="Carrier Invoice" style={{ color: readiness.present.includes("carrier_invoice") ? "#22C55E" : "#EF4444", fontWeight: 700 }}>
                             {readiness.present.includes("carrier_invoice") ? "INV\u2713" : "INV\u2717"}
                           </span>
@@ -208,14 +208,14 @@ export default function BillingView({ loaded, shipments, handleStatusUpdate, han
                         {readiness.ready ? (
                           <button onClick={e => { e.stopPropagation(); handleStatusUpdate(s.id, "billed_closed"); }}
                             style={{ padding: "4px 12px", borderRadius: 8, border: "1px solid rgba(34,197,94,0.4)", background: "rgba(34,197,94,0.15)",
-                              color: "#22C55E", fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                              color: "#22C55E", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
                             Close {"\u2713"}
                           </button>
                         ) : (
                           <button onClick={e => { e.stopPropagation(); smartAdvanceBillingStatus(s); }}
                             title={readiness.missing.length > 0 ? `Missing: ${readiness.missing.join(", ")}` : ""}
                             style={{ padding: "4px 12px", borderRadius: 8, border: `1px solid ${bColor}44`, background: `${bColor}15`,
-                              color: bColor, fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                              color: bColor, fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
                             {bStatus?.label || s.status}
                           </button>
                         )}
@@ -224,14 +224,14 @@ export default function BillingView({ loaded, shipments, handleStatusUpdate, han
                         <button onClick={e => { e.stopPropagation(); handleInvoicedToggle(s); }}
                           style={{ width: 18, height: 18, borderRadius: 4, border: s._invoiced ? "2px solid #A855F7" : "2px solid #3D4557",
                             background: s._invoiced ? "#A855F7" : "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
-                          {s._invoiced && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>{"\u2713"}</span>}
+                          {s._invoiced && <span style={{ color: "#fff", fontSize: 11, lineHeight: 1 }}>{"\u2713"}</span>}
                         </button>
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <button onClick={e => { e.stopPropagation(); handleStatusUpdate(s.id, "billed_closed"); }}
                           title="Close out"
                           style={{ padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(34,197,94,0.3)", background: "rgba(34,197,94,0.08)",
-                            color: "#22C55E", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Close</button>
+                            color: "#22C55E", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Close</button>
                       </td>
                     </tr>
                   );

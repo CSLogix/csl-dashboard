@@ -728,7 +728,7 @@ export default function DispatchDashboard() {
                 borderLeft: isActive ? "3px solid #00D4AA" : "3px solid transparent",
                 color: isActive ? "#00D4AA" : "#8B95A8" }}>
               <svg aria-hidden="true" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d={item.icon} /></svg>
-              {!sidebarCollapsed && <span aria-hidden="true" style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.5px" }}>{item.label}</span>}
+              {!sidebarCollapsed && <span aria-hidden="true" style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.5px" }}>{item.label}</span>}
             </button>
           );
         })}
@@ -751,11 +751,11 @@ export default function DispatchDashboard() {
         <div className="dash-topbar" style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.08)", background: "#0D1119" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 16, fontWeight: 800, background: "linear-gradient(135deg, #F0F2F5, #8B95A8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>COMMON SENSE</span>
-            <span style={{ fontSize: 10, color: "#8B95A8", fontWeight: 400, letterSpacing: "2px", textTransform: "uppercase" }}>Logistics</span>
+            <span style={{ fontSize: 11, color: "#8B95A8", fontWeight: 400, letterSpacing: "2px", textTransform: "uppercase" }}>Logistics</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {dataSource === "sheets" && (
-              <div className="glass" style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 100, fontSize: 10, color: "#f59e0b", fontWeight: 600, border: "1px solid rgba(245,158,11,0.3)", background: "rgba(245,158,11,0.08)" }}>
+              <div className="glass" style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 100, fontSize: 11, color: "#f59e0b", fontWeight: 600, border: "1px solid rgba(245,158,11,0.3)", background: "rgba(245,158,11,0.08)" }}>
                 SHEETS MODE
               </div>
             )}
@@ -799,7 +799,7 @@ export default function DispatchDashboard() {
                   setAskAIOpen(true);
                 } catch {}
               }}
-              style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, fontSize: 10, fontWeight: 700, cursor: "pointer",
+              style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer",
                 background: askAIDragOver ? "rgba(0,212,170,0.35)" : "rgba(0,212,170,0.10)",
                 color: "#00D4AA",
                 border: askAIDragOver ? "2px solid #00D4AA" : "1px solid rgba(0,212,170,0.25)",
@@ -817,7 +817,7 @@ export default function DispatchDashboard() {
             {/* Email Drafts badge */}
             {emailDrafts.length > 0 && (
               <button onClick={() => { setShowDraftModal(true); }}
-                style={{ position: "relative", display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, fontSize: 10, fontWeight: 700, cursor: "pointer",
+                style={{ position: "relative", display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer",
                   background: "rgba(37,99,235,0.10)", color: "#60a5fa", border: "1px solid rgba(37,99,235,0.25)", letterSpacing: "0.3px", transition: "all 0.15s" }}
                 onMouseEnter={e => { e.currentTarget.style.background = "rgba(37,99,235,0.18)"; }}
                 onMouseLeave={e => { e.currentTarget.style.background = "rgba(37,99,235,0.10)"; }}>
@@ -825,7 +825,7 @@ export default function DispatchDashboard() {
                   <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" />
                 </svg>
                 Drafts
-                <span style={{ background: "#2563eb", color: "#fff", borderRadius: "50%", width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800 }}>
+                <span style={{ background: "#2563eb", color: "#fff", borderRadius: "50%", width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800 }}>
                   {emailDrafts.length}
                 </span>
               </button>
@@ -839,7 +839,7 @@ export default function DispatchDashboard() {
                     background: "rgba(255,255,255,0.04)", color: "#8B95A8", border: "1px solid rgba(255,255,255,0.08)", letterSpacing: "0.3px" }}
                   onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
                   onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}>
-                  <div style={{ width: 22, height: 22, borderRadius: "50%", background: "linear-gradient(135deg, #3b82f6, #2563eb)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, color: "#fff" }}>
+                  <div style={{ width: 22, height: 22, borderRadius: "50%", background: "linear-gradient(135deg, #3b82f6, #2563eb)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#fff" }}>
                     {(currentUser.rep_name || currentUser.username || "?").charAt(0).toUpperCase()}
                   </div>
                   {currentUser.rep_name || currentUser.username}
@@ -851,8 +851,8 @@ export default function DispatchDashboard() {
                     <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", background: "#161e2c", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 6, minWidth: 180, zIndex: 999, boxShadow: "0 12px 40px rgba(0,0,0,0.5)" }}>
                       <div style={{ padding: "8px 12px", fontSize: 11, color: "#7b8ba3", borderBottom: "1px solid rgba(255,255,255,0.06)", marginBottom: 4 }}>
                         <div style={{ fontWeight: 700, color: "#e8ecf4", marginBottom: 2 }}>{currentUser.rep_name || currentUser.username}</div>
-                        <div style={{ fontSize: 10 }}>{currentUser.email}</div>
-                        <div style={{ fontSize: 9, marginTop: 2, textTransform: "uppercase", letterSpacing: 1, color: currentUser.role === "admin" ? "#f59e0b" : "#3b82f6" }}>{currentUser.role}</div>
+                        <div style={{ fontSize: 11 }}>{currentUser.email}</div>
+                        <div style={{ fontSize: 11, marginTop: 2, textTransform: "uppercase", letterSpacing: 1, color: currentUser.role === "admin" ? "#f59e0b" : "#3b82f6" }}>{currentUser.role}</div>
                       </div>
                       <button onClick={() => { setShowUserMenu(false); setShowChangePassword(true); setPwForm({ current: "", newPw: "", confirm: "" }); setPwError(null); setPwSuccess(false); }}
                         style={{ width: "100%", padding: "8px 12px", background: "none", border: "none", color: "#e8ecf4", fontSize: 11, textAlign: "left", cursor: "pointer", borderRadius: 6, fontFamily: "inherit" }}
@@ -1052,10 +1052,10 @@ export default function DispatchDashboard() {
             {/* Results */}
             {parseResult && (
               <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 16 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 12 }}>
                   Extracted Fields
                   {parseResult.confidence && (
-                    <span style={{ marginLeft: 8, padding: "1px 6px", borderRadius: 4, fontSize: 9, background: parseResult.confidence === "high" ? "rgba(34,197,94,0.12)" : parseResult.confidence === "medium" ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.10)", color: parseResult.confidence === "high" ? "#22C55E" : parseResult.confidence === "medium" ? "#F59E0B" : "#EF4444" }}>
+                    <span style={{ marginLeft: 8, padding: "1px 6px", borderRadius: 4, fontSize: 11, background: parseResult.confidence === "high" ? "rgba(34,197,94,0.12)" : parseResult.confidence === "medium" ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.10)", color: parseResult.confidence === "high" ? "#22C55E" : parseResult.confidence === "medium" ? "#F59E0B" : "#EF4444" }}>
                       {parseResult.confidence.toUpperCase()} CONFIDENCE
                     </span>
                   )}
@@ -1068,7 +1068,7 @@ export default function DispatchDashboard() {
                     { label: "Carrier", val: parseResult.carrier, color: "#F97316" },
                   ].map(({ label, val, color }) => (
                     <div key={label} style={{ padding: "10px 12px", borderRadius: 8, background: val ? `rgba(${color === "#00D4AA" ? "0,212,170" : color === "#22C55E" ? "34,197,94" : color === "#3B82F6" ? "59,130,246" : "249,115,22"},0.06)` : "rgba(255,255,255,0.02)", border: `1px solid ${val ? `${color}22` : "rgba(255,255,255,0.04)"}`, transition: "all 0.3s ease", animation: val ? "fade-in 0.4s ease" : "none" }}>
-                      <div style={{ fontSize: 9, color: "#6B7280", fontWeight: 600, letterSpacing: "0.5px", marginBottom: 4, textTransform: "uppercase" }}>{label}</div>
+                      <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, letterSpacing: "0.5px", marginBottom: 4, textTransform: "uppercase" }}>{label}</div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: val ? color : "#3A4255", fontFamily: val ? "'JetBrains Mono', monospace" : "inherit" }}>
                         {val || "—"}
                       </div>
@@ -1126,7 +1126,7 @@ export default function DispatchDashboard() {
               style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, border: "none", background: "none", cursor: "pointer", padding: "6px 12px", minWidth: 44, minHeight: 44,
                 color: isActive ? "#00D4AA" : "#5A6478" }}>
               <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d={item.icon} /></svg>
-              <span style={{ fontSize: 9, fontWeight: 600 }}>{item.label}</span>
+              <span style={{ fontSize: 11, fontWeight: 600 }}>{item.label}</span>
             </button>
           );
         })}
@@ -1140,7 +1140,7 @@ export default function DispatchDashboard() {
           <span style={{ fontSize: 16 }}>📧</span>
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#60a5fa" }}>Email draft ready</div>
-            <div style={{ fontSize: 10, color: "#8B95A8" }}>{draftToast.loadNumber || draftToast.efj}</div>
+            <div style={{ fontSize: 11, color: "#8B95A8" }}>{draftToast.loadNumber || draftToast.efj}</div>
           </div>
           <button onClick={() => {
             setDraftToast(null);
@@ -1148,7 +1148,7 @@ export default function DispatchDashboard() {
             apiFetch(`${API_BASE}/api/email-drafts/${draftToast.id}`).then(r => r.ok ? r.json() : null).then(d => {
               if (d) { setActiveDraft(d); setShowDraftModal(true); }
             });
-          }} style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(37,99,235,0.2)", border: "1px solid rgba(37,99,235,0.3)", color: "#60a5fa", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
+          }} style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(37,99,235,0.2)", border: "1px solid rgba(37,99,235,0.3)", color: "#60a5fa", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
             Review
           </button>
           <button onClick={() => setDraftToast(null)} style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 14, padding: "0 4px" }}>✕</button>
@@ -1183,17 +1183,17 @@ export default function DispatchDashboard() {
                 {/* Editable fields */}
                 <div style={{ display: "grid", gap: 10, marginBottom: 16 }}>
                   <div>
-                    <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px" }}>To</label>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px" }}>To</label>
                     <input value={activeDraft.to_email} onChange={e => setActiveDraft({...activeDraft, to_email: e.target.value})}
                       style={{ width: "100%", padding: "8px 12px", borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#F0F2F5", fontSize: 12, outline: "none", boxSizing: "border-box" }} />
                   </div>
                   <div>
-                    <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px" }}>CC</label>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px" }}>CC</label>
                     <input value={activeDraft.cc_email || ""} onChange={e => setActiveDraft({...activeDraft, cc_email: e.target.value})}
                       style={{ width: "100%", padding: "8px 12px", borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#F0F2F5", fontSize: 12, outline: "none", boxSizing: "border-box" }} />
                   </div>
                   <div>
-                    <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px" }}>Subject</label>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px" }}>Subject</label>
                     <input value={activeDraft.subject} onChange={e => setActiveDraft({...activeDraft, subject: e.target.value})}
                       style={{ width: "100%", padding: "8px 12px", borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#F0F2F5", fontSize: 12, outline: "none", boxSizing: "border-box" }} />
                   </div>
@@ -1252,7 +1252,7 @@ export default function DispatchDashboard() {
                     <div style={{ width: 8, height: 8, borderRadius: "50%", background: d.milestone === "delivered" ? "#16a34a" : d.milestone === "picked_up" ? "#2563eb" : d.milestone === "in_transit" ? "#4f46e5" : d.milestone === "out_for_delivery" ? "#ea580c" : "#0d9488", flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: "#F0F2F5", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.subject}</div>
-                      <div style={{ fontSize: 10, color: "#5A6478", marginTop: 2 }}>{d.efj} · {d.milestone?.replace(/_/g, " ")} · {new Date(d.created_at).toLocaleTimeString()}</div>
+                      <div style={{ fontSize: 11, color: "#5A6478", marginTop: 2 }}>{d.efj} · {d.milestone?.replace(/_/g, " ")} · {new Date(d.created_at).toLocaleTimeString()}</div>
                     </div>
                     <svg width="14" height="14" fill="none" stroke="#5A6478" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6" /></svg>
                   </div>

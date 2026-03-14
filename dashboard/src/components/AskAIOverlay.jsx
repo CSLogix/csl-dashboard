@@ -104,7 +104,7 @@ export default function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, init
           <div key={`tbl-${elements.length}`} style={{ overflowX: "auto", margin: "8px 0" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
               <thead>
-                <tr>{headers.map((h, i) => <th key={i} style={{ padding: "6px 10px", textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.1)", color: "#00D4AA", fontWeight: 700, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.5px" }}>{h.trim()}</th>)}</tr>
+                <tr>{headers.map((h, i) => <th key={i} style={{ padding: "6px 10px", textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.1)", color: "#00D4AA", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.5px" }}>{h.trim()}</th>)}</tr>
               </thead>
               <tbody>
                 {dataRows.map((row, ri) => (
@@ -177,13 +177,13 @@ export default function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, init
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 16 }}>✨</span>
             <span style={{ fontWeight: 800, fontSize: 14, color: "#F0F2F5" }}>Ask AI</span>
-            <span style={{ fontSize: 9, color: "rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 4 }}>Claude • Tool-Calling</span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 4 }}>Claude • Tool-Calling</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {messages.length > 0 && (
-              <button onClick={() => setMessages([])} style={{ fontSize: 9, color: "rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>Clear</button>
+              <button onClick={() => setMessages([])} style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>Clear</button>
             )}
-            <span onClick={onClose} style={{ cursor: "pointer", color: "rgba(255,255,255,0.3)", fontSize: 9, background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 4 }}>ESC</span>
+            <span onClick={onClose} style={{ cursor: "pointer", color: "rgba(255,255,255,0.3)", fontSize: 11, background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 4 }}>ESC</span>
           </div>
         </div>
 
@@ -213,7 +213,7 @@ export default function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, init
                   {msg.files && msg.files.length > 0 && (
                     <div style={{ marginBottom: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
                       {msg.files.map((f, fi) => (
-                        <span key={fi} style={{ fontSize: 9, padding: "2px 6px", borderRadius: 6, background: "rgba(0,212,170,0.15)", border: "1px solid rgba(0,212,170,0.25)" }}>📎 {f.name}</span>
+                        <span key={fi} style={{ fontSize: 11, padding: "2px 6px", borderRadius: 6, background: "rgba(0,212,170,0.15)", border: "1px solid rgba(0,212,170,0.25)" }}>📎 {f.name}</span>
                       ))}
                     </div>
                   )}
@@ -224,7 +224,7 @@ export default function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, init
                   {msg.tool_calls && msg.tool_calls.length > 0 && (
                     <div style={{ marginBottom: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
                       {msg.tool_calls.map((tc, ti) => (
-                        <span key={ti} style={{ fontSize: 9, color: "#a78bfa", background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.15)", padding: "2px 8px", borderRadius: 10 }}>
+                        <span key={ti} style={{ fontSize: 11, color: "#a78bfa", background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.15)", padding: "2px 8px", borderRadius: 10 }}>
                           🔧 {tc.tool || tc.name || (typeof tc === "string" ? tc : JSON.stringify(tc))}
                         </span>
                       ))}
@@ -232,7 +232,7 @@ export default function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, init
                   )}
                   {renderText(msg.text)}
                   {msg.sources && msg.sources.length > 0 && (
-                    <div style={{ marginTop: 8, fontSize: 9, color: "rgba(255,255,255,0.2)" }}>Sources: {msg.sources.join(", ")}</div>
+                    <div style={{ marginTop: 8, fontSize: 11, color: "rgba(255,255,255,0.2)" }}>Sources: {msg.sources.join(", ")}</div>
                   )}
                 </div>
               )}
@@ -250,7 +250,7 @@ export default function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, init
         {attachedFiles.length > 0 && (
           <div style={{ padding: "6px 20px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexWrap: "wrap", gap: 6 }}>
             {attachedFiles.map((f, i) => (
-              <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 8, background: "rgba(0,212,170,0.1)", border: "1px solid rgba(0,212,170,0.2)", fontSize: 10, color: "#00D4AA" }}>
+              <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 8, background: "rgba(0,212,170,0.1)", border: "1px solid rgba(0,212,170,0.2)", fontSize: 11, color: "#00D4AA" }}>
                 📎 {f.name} <span style={{ opacity: 0.5 }}>({(f.size / 1024).toFixed(0)}KB)</span>
                 <span onClick={() => setAttachedFiles(prev => prev.filter((_, j) => j !== i))} style={{ cursor: "pointer", marginLeft: 2, opacity: 0.6 }}>✕</span>
               </span>
@@ -281,7 +281,7 @@ export default function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, init
         </div>
 
         {/* Footer */}
-        <div style={{ padding: "6px 20px 10px", display: "flex", justifyContent: "space-between", fontSize: 9, color: "rgba(255,255,255,0.15)" }}>
+        <div style={{ padding: "6px 20px 10px", display: "flex", justifyContent: "space-between", fontSize: 11, color: "rgba(255,255,255,0.15)" }}>
           <span>Enter to send · Shift+Enter for newline · 📎 to attach · ESC to close</span>
           <span>Ctrl+K to toggle</span>
         </div>

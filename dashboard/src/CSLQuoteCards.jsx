@@ -204,7 +204,7 @@ export function QuoteCard({ data, label }) {
                   </div>
                   <div
                     style={{
-                      fontSize: 10,
+                      fontSize: 11,
                       color: "rgba(255,255,255,0.3)",
                       fontWeight: 500,
                       marginTop: 1,

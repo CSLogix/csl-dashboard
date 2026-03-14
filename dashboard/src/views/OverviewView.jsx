@@ -107,7 +107,7 @@ export default function OverviewView({ loaded, shipments, apiStats, accountOverv
             <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: s.emphasis ? 3 : 3, background: s.indicator, borderRadius: "0 0 2px 2px" }} />
             {/* Value in accent color */}
             <div className="stat-value" style={{ fontSize: s.emphasis ? 34 : 26, fontWeight: 800, letterSpacing: "-0.04em", lineHeight: 1.1, color: s.color, marginBottom: 2 }}>{s.value}</div>
-            <div className="stat-label" style={{ fontSize: 10, fontWeight: 700, color: "#6B7A90", textTransform: "uppercase", letterSpacing: "0.08em" }}>{s.label}</div>
+            <div className="stat-label" style={{ fontSize: 11, fontWeight: 700, color: "#6B7A90", textTransform: "uppercase", letterSpacing: "0.08em" }}>{s.label}</div>
           </div>
           );
         })}
@@ -127,9 +127,9 @@ export default function OverviewView({ loaded, shipments, apiStats, accountOverv
           </div>
           {/* Column headers */}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 1fr) 56px 68px", gap: 4, marginBottom: 6, padding: "0 10px", alignItems: "center" }}>
-            <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Rep</div>
-            <div style={{ fontSize: 9, color: "#00b8d4", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active loads (not archived)">Loads</div>
-            <div style={{ fontSize: 9, color: "#00b8d4", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active revenue (all priced loads)">Rev</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Rep</div>
+            <div style={{ fontSize: 11, color: "#00b8d4", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active loads (not archived)">Loads</div>
+            <div style={{ fontSize: 11, color: "#00b8d4", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active revenue (all priced loads)">Rev</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             {repData.map(r => {
@@ -161,14 +161,14 @@ export default function OverviewView({ loaded, shipments, apiStats, accountOverv
                       <img src={`${API_BASE}${repProfiles[r.name].avatar_url}`} alt={r.name}
                         style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover", flexShrink: 0, border: `2px solid ${r.color}66`, boxShadow: `0 0 8px ${r.color}33` }} />
                     ) : (
-                      <div style={{ width: 28, height: 28, borderRadius: "50%", background: `linear-gradient(135deg, ${r.color}44, ${r.color}99)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#fff", flexShrink: 0, border: `2px solid ${r.color}55`, boxShadow: `0 0 10px ${r.color}22` }}>
+                      <div style={{ width: 28, height: 28, borderRadius: "50%", background: `linear-gradient(135deg, ${r.color}44, ${r.color}99)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff", flexShrink: 0, border: `2px solid ${r.color}55`, boxShadow: `0 0 10px ${r.color}22` }}>
                         {r.name.slice(0, 2).toUpperCase()}
                       </div>
                     )}
                     <div style={{ minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                         <span style={{ fontSize: 12, fontWeight: 600, color: "#F0F2F5" }}>{r.name}</span>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>{r.total}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>{r.total}</span>
                       </div>
                     </div>
                   </div>
@@ -222,7 +222,7 @@ export default function OverviewView({ loaded, shipments, apiStats, accountOverv
                       style={{ display: "grid", gridTemplateColumns: "24px 1fr 40px", gap: 10, alignItems: "center", padding: "6px 10px", borderRadius: 8, transition: "background 0.15s ease", cursor: "pointer" }}
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
                       onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      <div style={{ width: 24, height: 24, borderRadius: 6, background: `linear-gradient(135deg, ${acct.color}33, ${acct.color}66)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{acct.name[0]}</div>
+                      <div style={{ width: 24, height: 24, borderRadius: 6, background: `linear-gradient(135deg, ${acct.color}33, ${acct.color}66)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{acct.name[0]}</div>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 13, color: "#F0F2F5", fontWeight: 600, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acct.name}</div>
                         <div style={{ height: 3, borderRadius: 100, background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
@@ -246,7 +246,7 @@ export default function OverviewView({ loaded, shipments, apiStats, accountOverv
                   <span style={{ fontSize: 8, color: "#00D4AA", fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(0,212,170,0.12)", letterSpacing: "0.08em", animation: "pulse-glow 2s ease infinite" }}>LIVE</span>
                 </div>
                 <span onClick={() => setAcctSortMode(nextSort[acctSortMode])}
-                  style={{ fontSize: 9, color: "#5A6478", cursor: "pointer", fontWeight: 600, padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.06)", transition: "all 0.15s", userSelect: "none" }}
+                  style={{ fontSize: 11, color: "#5A6478", cursor: "pointer", fontWeight: 600, padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.06)", transition: "all 0.15s", userSelect: "none" }}
                   onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "#8B95A8"; }}
                   onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#5A6478"; }}
                   title={`Sort by ${nextSort[acctSortMode]}`}>
@@ -255,9 +255,9 @@ export default function OverviewView({ loaded, shipments, apiStats, accountOverv
               </div>
               {/* Column headers */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 44px 56px", gap: 4, marginBottom: 4, padding: "0 10px", alignItems: "center" }}>
-                <div style={{ fontSize: 9, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Account</div>
-                <div style={{ fontSize: 9, color: "#00b8d4", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active loads">Loads</div>
-                <div style={{ fontSize: 9, color: "#00b8d4", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Revenue">Rev</div>
+                <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>Account</div>
+                <div style={{ fontSize: 11, color: "#00b8d4", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active loads">Loads</div>
+                <div style={{ fontSize: 11, color: "#00b8d4", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Revenue">Rev</div>
               </div>
               {/* Account rows */}
               <div style={{ display: "flex", flexDirection: "column", gap: 3, maxHeight: 340, overflowY: "auto", scrollbarGutter: "stable" }}>
