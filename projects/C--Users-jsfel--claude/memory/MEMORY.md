@@ -94,7 +94,8 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 
 ### Mar 14, 2026 Dashboard Changes (late)
 - **Dispatch Column Picker**: `☷ Columns (N/16)` toolbar button with checkbox dropdown. `hiddenCols` persisted to localStorage. Default hidden: carrierEmail, trailer, margin. `cellStyleFor(key)` replaced counter pattern. Missing MGN body cell added.
-- **LoadSlideOver action consolidation**: 8 buttons → 4 primary (Copy EFJ, Email, Call, Tracking) + overflow ⋯ menu (View BOL, AI Summary, Share Link, Edit MP URL). Outside-click-to-close dropdown, hover highlights, auto-dismiss on action. `marginLeft:auto` pushes ⋯ right.
+- **LoadSlideOver action consolidation**: 8 buttons → 4 primary + overflow ⋯ menu. Outside-click-to-close dropdown.
+- **Global 11px font floor**: 501 instances of fontSize 9-10px → 11px across 26 files. Zero sub-11px fonts remain.
 - **Dispatch nav removed** (again): Dispatch link removed from `NAV_ITEMS` in constants.js — accessible only via stat cards on Overview. Was accidentally re-added.
 - **Overview panels simplified**: "Rep Scoreboard" → "Rep Overview" (loads + rev only, removed COMMS/DOCS/STALE defense columns). "Account Health" → "Accounts" (loads + rev only, removed Friction/HS columns and red/green health score styling). Neutral row styling.
 - **Overview grid equalized**: Both rows changed from `6fr 4fr` → `1fr 1fr`. All 4 panels (Rep Overview, Accounts, Today's Actions, Live Alerts) now equal width in clean 2×2 grid.
@@ -187,10 +188,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 ## Remaining Work
 
 ### Completed (all deployed)
-Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Account Health View, Auto-Status Email Drafter, Directory ↔ Quote Builder, Boviet Project Cards, Mobile layout, Billing Flow (auto-advance + bulk close), Container Update emails disabled, Rate IQ UI Redesign (deployed Mar 14), Outlook rate backfill (318 rates, 0 errors), Dispatch Column Picker (deployed Mar 14), LoadSlideOver action consolidation (deployed Mar 14)
+Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Account Health View, Auto-Status Email Drafter, Directory ↔ Quote Builder, Boviet Project Cards, Mobile layout, Billing Flow (auto-advance + bulk close), Container Update emails disabled, Rate IQ UI Redesign (deployed Mar 14), Outlook rate backfill (318 rates, 0 errors), Dispatch Column Picker (deployed Mar 14), LoadSlideOver action consolidation (deployed Mar 14), Global 11px font floor (501 replacements, deployed Mar 14)
 
 ### Remaining
-- **Global font floor**: 11px minimum in all tables (currently 9-10px, ~56 instances)
 - **Carrier Auto-Quote Request**: PLANNED — AI picks top 3 carriers from Directory, auto-drafts rate request emails. Not started.
 - Rate IQ Phase 2: OOG IQ (real data), FTL IQ (not built)
 - Tolead/Boviet slide-over fields (driver phone, delivery date, appt_id)
