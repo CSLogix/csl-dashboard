@@ -57,6 +57,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 
 ## Recent Bot Changes (Deployed)
 
+### Mar 14, 2026 Bot Changes
+- **Tolead origin/dest fix** (#103): `_shorten_address()` in `csl_sheet_sync.py` was broken — regex body got stranded after `_get_sheet_hyperlinks()` was inserted mid-function. Function returned `None` for all non-empty addresses. All Tolead origin/destination synced as `NULL` since hyperlinks patch. Fixed + manual sync backfilled all 25 active Tolead loads (ORD/JFK/LAX/DFW). Nancy Feltz reported.
+
 ### Mar 13, 2026 Bot Changes (late night)
 - **Status label→key normalization** (#100): `_STATUS_LABEL_TO_KEY` + `_normalize_status()` in v2.py. `_SHEET_STATUS_MAP` + `_normalize_sheet_status()` in sheet sync. Archive check expanded to include "billed & closed". Fixed EFJ107285 reappearing after Billed & Closed. Normalized 370+ PG rows.
 - **Ask AI body_text + PDF vision** (#101): `body_text` TEXT column on both email tables. Scanner `get_full_body_text()` extracts full plain text or HTML→text. `read_load_document` tool in ai_assistant.py — PDF→image via pdftoppm + Claude Sonnet vision. COALESCE(body_text, body_preview) in AI queries. body_text in inbox API responses. Remaining: backfill body_text for ~6700 existing emails.
@@ -117,6 +120,8 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 - **Bug fix: handleApplyRate field corruption**: Was hard-coding `field: "carrier_pay"` — "Apply CX Rate" saved customer rate as carrier pay. Now reads `quote._field` and maps to correct state key (`carrierPay` vs `customerRate`).
 - **Bug fix: showSaveToast scope**: Called from root but defined in LoadSlideOver. Now passed as `{ toast }` callback — toasts show correctly on inline field saves.
 - **Bug fix: setRateApplied scope**: Called from root but state lived in LoadSlideOver. Now passed as `{ onApplied }` callback — rate suggestion banner hides after applying.
+- **Rate IQ dark dropdowns** (#103): Directory Markets/Ports/Tier `<select>` dropdowns now use `#151926` background on `<option>` elements (was OS-default white). All 3 selects fixed.
+- **Lane Search transload badge**: Added `can_transload` (🔄, sky blue `#38bdf8`) to `capBadges` in Lane Search carrier table. Was missing — only 6 of 7 capabilities were shown.
 
 ### Mar 13, 2026 Dashboard Changes (late night)
 - **Smart Inbox Auto-Actions** (#102): Actions column in inbox table with contextual one-click buttons. `getAutoAction(thread)` maps email_type → suggested action. Buttons: "Save [type]" (teal, for doc emails with attachments), "Delivered" (green, delivery confirmations), "Draft" (blue, opens Ask AI with reply context), "Done" (gray, marks actioned). Thread detail panel: "Draft Reply" + "Save Docs" buttons. Backend `POST /api/inbox/{thread_id}/auto-action` — 3 actions: save_attachment (Gmail API download → load_documents + SHA-256 dedup + billing advance check), mark_delivered, mark_actioned. Optimistic UI updates + flash animation.
