@@ -34,6 +34,7 @@ import AnalyticsView from "./views/AnalyticsView";
 import BillingView from "./views/BillingView";
 import RateIQView from "./views/RateIQView";
 import BOLGeneratorView from "./views/BOLGeneratorView";
+import PlaybooksView from "./views/PlaybooksView";
 import UserManagementView from "./views/UserManagementView";
 import AddForm from "./views/AddForm";
 
@@ -295,6 +296,16 @@ export default function DispatchDashboard() {
     return () => clearTimeout(fallback);
   }, [fetchData, fetchProfiles, fetchScoreboard, fetchAccountHealth, fetchEmailDrafts]);
   useEffect(() => { const i = setInterval(fetchData, 90000); return () => clearInterval(i); }, [fetchData]);
+  // Fast-poll tracking summary (30s) so MP webhook updates appear quickly in dispatch table
+  useEffect(() => {
+    const i = setInterval(async () => {
+      try {
+        const r = await apiFetch(`${API_BASE}/api/shipments/tracking-summary`);
+        if (r.ok) { const d = await r.json(); setTrackingSummary(d.tracking || {}); }
+      } catch {}
+    }, 30000);
+    return () => clearInterval(i);
+  }, [setTrackingSummary]);
   useEffect(() => { const i = setInterval(fetchScoreboard, 120000); return () => clearInterval(i); }, [fetchScoreboard]);
   useEffect(() => { const i = setInterval(fetchAccountHealth, 120000); return () => clearInterval(i); }, [fetchAccountHealth]);
   useEffect(() => { const i = setInterval(fetchEmailDrafts, 30000); return () => clearInterval(i); }, [fetchEmailDrafts]);
@@ -634,6 +645,9 @@ export default function DispatchDashboard() {
       }
       const result = await res.json();
       addSheetLog(`New row → Sheet | ${result.efj} (${result.tab})`);
+      if (result.playbook_match) {
+        addSheetLog(`Playbook matched | ${result.playbook_match.lane_code} → ${result.efj} (carrier: ${result.playbook_match.carrier || "—"})`);
+      }
 
       // Upload pending documents after load creation
       if (pendingDocs && pendingDocs.length > 0) {
@@ -871,8 +885,8 @@ export default function DispatchDashboard() {
         </div>
 
         {/* View Content */}
-        <div className="dash-content-area" style={{ flex: 1, overflow: "auto", display: "grid", justifyContent: "center" }}>
-          <div style={{ maxWidth: 1400, width: "100vw", padding: "0 24px 24px", boxSizing: "border-box" }}>
+        <div className="dash-content-area" style={{ flex: 1, overflow: "auto" }}>
+          <div style={{ padding: "0 24px 24px" }}>
           {apiError && (
             <div style={{ margin: "8px 0", padding: "10px 16px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", display: "flex", alignItems: "center", justifyContent: "space-between", animation: "slide-up 0.3s ease" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -955,6 +969,9 @@ export default function DispatchDashboard() {
           )}
           {activeView === "quotes" && (
             <RateIQView />
+          )}
+          {activeView === "playbooks" && (
+            <PlaybooksView />
           )}
           {activeView === "analytics" && (
             <AnalyticsView loaded={loaded} botStatus={botStatus} botHealth={botHealth} cronStatus={cronStatus} sheetLog={sheetLog} />

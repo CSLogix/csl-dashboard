@@ -84,6 +84,12 @@ export default function InboxView({ handleLoadClick }) {
   const [hideActioned, setHideActioned] = useState(true);
   const [actioningThread, setActioningThread] = useState(null);
   const [actionFlash, setActionFlash] = useState(null);
+  const [bookingLoading, setBookingLoading] = useState(false);
+  const [bookingResult, setBookingResult] = useState(null);
+  const [showBookingSlideOver, setShowBookingSlideOver] = useState(false);
+  const [bookingEdits, setBookingEdits] = useState({});
+  const [indexAsPlaybook, setIndexAsPlaybook] = useState(false);
+  const [createLoadLoading, setCreateLoadLoading] = useState(false);
 
   const handleAutoAction = async (thread, action, docType) => {
     setActioningThread(thread.thread_id);
@@ -194,6 +200,125 @@ export default function InboxView({ handleLoadClick }) {
     if (!efj) return;
     const ship = (Array.isArray(shipments) ? shipments : []).find(s => s.efj === efj);
     if (ship) { setSelectedShipment(ship); setSelectedThread(null); }
+  };
+
+  // ── Process Booking: AI extraction + playbook match ──
+  const handleProcessBooking = async (thread) => {
+    setBookingLoading(true);
+    setBookingResult(null);
+    setBookingEdits({});
+    setIndexAsPlaybook(false);
+    try {
+      const latestInbound = (thread.messages || []).filter(m => m.direction !== "sent").sort((a, b) => new Date(b.sent_at) - new Date(a.sent_at))[0];
+      const bodyText = latestInbound?.body_text || latestInbound?.body_preview || "";
+      const res = await apiFetch(`${API_BASE}/api/inbox/process-booking`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email_id: latestInbound?.id || "",
+          thread_id: thread.thread_id,
+          body_text: bodyText,
+          sender: latestInbound?.sender || thread.latest_sender || "",
+          subject: thread.latest_subject || "",
+        }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || e.error || "Extraction failed"); }
+      const data = await res.json();
+      setBookingResult(data);
+      setShowBookingSlideOver(true);
+    } catch (e) {
+      console.error("Process booking failed:", e);
+      alert(`Extraction failed: ${e.message}`);
+    } finally {
+      setBookingLoading(false);
+    }
+  };
+
+  // ── Create Load from booking extraction ──
+  const handleCreateFromBooking = async () => {
+    if (!bookingResult) return;
+    setCreateLoadLoading(true);
+    try {
+      const ext = bookingResult.extracted_load || {};
+      const pb = bookingResult.playbook_defaults || {};
+      const edits = bookingEdits;
+      // Merge: extracted → playbook defaults → user edits (highest priority)
+      const carrier = edits.carrier ?? pb.carrier_name ?? ext.carrier ?? "";
+      const carrierPay = edits.carrier_pay != null ? parseFloat(edits.carrier_pay) : (pb.carrier_rate ?? ext.carrier_rate ?? null);
+      const customerRate = edits.customer_rate != null ? parseFloat(edits.customer_rate) : (pb.customer_rate ?? ext.customer_rate ?? null);
+
+      // Generate next EFJ number
+      const statsRes = await apiFetch(`${API_BASE}/api/stats`);
+      const statsData = statsRes.ok ? await statsRes.json() : {};
+      const lastEfj = statsData.last_efj || "EFJ107500";
+      const nextNum = parseInt(lastEfj.replace(/\D/g, "")) + 1;
+      const efj = edits.efj || `EFJ${nextNum}`;
+
+      const loadData = {
+        efj,
+        account: edits.account || ext.account || "",
+        move_type: edits.move_type || ext.move_type || "",
+        container: edits.container || ext.container || "",
+        bol: edits.bol || ext.bol || "",
+        vessel: edits.vessel || ext.vessel || "",
+        carrier,
+        origin: edits.origin || ext.origin || "",
+        destination: edits.destination || ext.destination || "",
+        eta: edits.eta || ext.eta || "",
+        lfd: edits.lfd || ext.lfd || "",
+        status: "pending",
+        notes: ext.special_instructions || "",
+        customer_rate: customerRate,
+        carrier_pay: carrierPay,
+      };
+
+      // Create load via v2 endpoint
+      const addRes = await apiFetch(`${API_BASE}/api/v2/load/add`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(loadData),
+      });
+      if (!addRes.ok) { const e = await addRes.json().catch(() => ({})); throw new Error(e.detail || e.error || "Create failed"); }
+      const addResult = await addRes.json();
+
+      // Write to rate_quotes history
+      if (customerRate || carrierPay) {
+        try {
+          await apiFetch(`${API_BASE}/api/load/${efj}/rate-quotes`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              lane: `${ext.origin_city || ""} → ${ext.destination_city || ""}`,
+              origin: ext.origin || "",
+              destination: ext.destination || "",
+              carrier_name: carrier,
+              rate_amount: carrierPay,
+              customer_name: ext.account || "",
+              total_estimate: customerRate,
+              source: bookingResult.playbook_found ? `Playbook: ${bookingResult.playbook_match?.lane_code}` : "Booking extraction",
+              move_type: ext.move_type || "",
+              status: "applied",
+              quote_direction: "inbound",
+            }),
+          });
+        } catch (e) { console.warn("Rate history write failed:", e); }
+      }
+
+      // Index as new playbook if checked
+      if (indexAsPlaybook && !bookingResult.playbook_found) {
+        setAskAIInitialQuery(`Index this as a new lane playbook:\n\nAccount: ${ext.account}\nOrigin: ${ext.origin}\nDestination: ${ext.destination}\nMove Type: ${ext.move_type}\nEquipment: ${ext.equipment}\nCommodity: ${ext.commodity}\nCustomer Rate: $${customerRate || "TBD"}\nCarrier: ${carrier || "TBD"}\nCarrier Rate: $${carrierPay || "TBD"}\n\nPlease create a draft playbook for this lane.`);
+        setAskAIOpen(true);
+      }
+
+      setShowBookingSlideOver(false);
+      setBookingResult(null);
+      setSelectedThread(null);
+      // Refresh shipments
+      window.dispatchEvent(new Event("csl-refresh-shipments"));
+      alert(`Load ${efj} created successfully!${addResult.playbook_match ? ` Playbook ${addResult.playbook_match.lane_code} auto-applied.` : ""}`);
+    } catch (e) {
+      console.error("Create load failed:", e);
+      alert(`Failed to create load: ${e.message}`);
+    } finally {
+      setCreateLoadLoading(false);
+    }
   };
 
   const threads = inboxThreads;
@@ -554,6 +679,12 @@ export default function InboxView({ handleLoadClick }) {
                   </a>
                 );
               })()}
+              {/* Process Booking button */}
+              <button onClick={() => handleProcessBooking(selThread)}
+                disabled={bookingLoading}
+                style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(249,115,22,0.15)", color: "#F97316", border: "1px solid rgba(249,115,22,0.3)", cursor: bookingLoading ? "wait" : "pointer", flexShrink: 0, opacity: bookingLoading ? 0.5 : 1 }}>
+                {bookingLoading ? "Extracting..." : "\u2728 Build Load"}
+              </button>
               {/* Draft Reply button */}
               <button onClick={() => {
                 const msgs = (selThread.messages || []).map(m =>
@@ -791,6 +922,174 @@ export default function InboxView({ handleLoadClick }) {
           </div>
         </div>
       )}
+
+      {/* ── Booking Confirmation Slide-Over ── */}
+      {showBookingSlideOver && bookingResult && (() => {
+        const ext = bookingResult.extracted_load || {};
+        const pb = bookingResult.playbook_defaults || {};
+        const match = bookingResult.playbook_match;
+        const conf = bookingResult.confidence;
+        const confColor = conf === "high" ? "#22C55E" : conf === "medium" ? "#F59E0B" : "#EF4444";
+        const missing = bookingResult.missing_fields || [];
+
+        const field = (label, key, source, value, pbValue) => {
+          const edited = bookingEdits[key];
+          const displayVal = edited ?? value ?? "";
+          const hasPbOverride = pbValue != null && pbValue !== "" && pbValue !== value;
+          const hasDiscrepancy = hasPbOverride && value && pbValue && String(value) !== String(pbValue);
+          const isMissing = missing.includes(key);
+          return (
+            <div key={key} style={{ marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}>
+                <span style={{ fontSize: 8, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px" }}>{label}</span>
+                {source === "playbook" && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(0,212,170,0.12)", color: "#00D4AA", fontWeight: 600 }}>PLAYBOOK</span>}
+                {source === "ai" && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(59,130,246,0.12)", color: "#3B82F6", fontWeight: 600 }}>AI</span>}
+                {source === "domain" && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(168,85,247,0.12)", color: "#A855F7", fontWeight: 600 }}>DOMAIN</span>}
+                {isMissing && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(245,158,11,0.15)", color: "#F59E0B", fontWeight: 600 }}>MISSING</span>}
+                {hasDiscrepancy && <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, background: "rgba(239,68,68,0.12)", color: "#EF4444", fontWeight: 600 }} title={`AI: ${value} vs Playbook: ${pbValue}`}>MISMATCH</span>}
+              </div>
+              <input
+                value={displayVal}
+                onChange={e => setBookingEdits(prev => ({ ...prev, [key]: e.target.value }))}
+                style={{ width: "100%", padding: "5px 8px", borderRadius: 5, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: isMissing ? "rgba(245,158,11,0.08)" : "rgba(255,255,255,0.04)", color: "#F0F2F5", border: `1px solid ${isMissing ? "rgba(245,158,11,0.25)" : hasDiscrepancy ? "rgba(239,68,68,0.25)" : "rgba(255,255,255,0.08)"}`, outline: "none", boxSizing: "border-box" }}
+              />
+            </div>
+          );
+        };
+
+        return (
+          <div style={{ position: "fixed", top: 0, right: 0, width: 420, height: "100vh", zIndex: Z.panel + 10, display: "flex", flexDirection: "column", animation: "slide-right 0.3s ease", borderLeft: "1px solid rgba(255,255,255,0.08)" }} className="glass-strong">
+            {/* Header */}
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ fontSize: 14, fontWeight: 800, color: "#F0F2F5" }}>Load Confirmation</span>
+                <button onClick={() => { setShowBookingSlideOver(false); setBookingResult(null); }}
+                  style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 16 }}>{"\u2715"}</button>
+              </div>
+              {/* Status banner */}
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                {bookingResult.playbook_found ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 12, fontSize: 9, fontWeight: 700, background: "rgba(34,197,94,0.12)", color: "#22C55E", border: "1px solid rgba(34,197,94,0.25)" }}>
+                    {"\u2713"} Active Playbook Applied
+                  </span>
+                ) : (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 12, fontSize: 9, fontWeight: 700, background: "rgba(245,158,11,0.12)", color: "#F59E0B", border: "1px solid rgba(245,158,11,0.25)" }}>
+                    {"\u2606"} New Lane Detected
+                  </span>
+                )}
+                <span style={{ padding: "3px 8px", borderRadius: 12, fontSize: 9, fontWeight: 700, background: `${confColor}15`, color: confColor, border: `1px solid ${confColor}30` }}>
+                  {conf.toUpperCase()} confidence
+                </span>
+                {match && (
+                  <button onClick={() => { setActiveView("playbooks"); setShowBookingSlideOver(false); }}
+                    style={{ padding: "3px 8px", borderRadius: 12, fontSize: 9, fontWeight: 600, cursor: "pointer", background: "rgba(0,212,170,0.08)", color: "#00D4AA", border: "1px solid rgba(0,212,170,0.15)", textDecoration: "none" }}>
+                    View Playbook: {match.lane_code}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Form body */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px" }}>
+              {/* Routing section */}
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>Routing</div>
+              {field("Account", "account", ext.account_source || "ai", ext.account, null)}
+              {field("Origin", "origin", "ai", ext.origin, null)}
+              {field("Destination", "destination", "ai", ext.destination, null)}
+              {field("Move Type", "move_type", "ai", ext.move_type, null)}
+              {field("Equipment", "equipment", pb.equipment ? "playbook" : "ai", ext.equipment || pb.equipment, pb.equipment)}
+
+              {/* Reference section */}
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 8, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.5px" }}>Reference</div>
+              {field("Container #", "container", "ai", ext.container, null)}
+              {field("BOL / Booking", "bol", "ai", ext.bol, null)}
+              {field("Vessel", "vessel", "ai", ext.vessel, null)}
+
+              {/* Dates section */}
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 8, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.5px" }}>Dates</div>
+              {field("ETA", "eta", "ai", ext.eta, null)}
+              {field("LFD", "lfd", "ai", ext.lfd, null)}
+
+              {/* Carrier + Rates section */}
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 8, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.5px" }}>Carrier & Rates</div>
+              {field("Carrier", "carrier", pb.carrier_name ? "playbook" : "ai", ext.carrier || "", pb.carrier_name)}
+              {field("Carrier Rate ($)", "carrier_pay", pb.carrier_rate ? "playbook" : "ai",
+                ext.carrier_rate ? String(ext.carrier_rate) : "",
+                pb.carrier_rate ? String(pb.carrier_rate) : null)}
+              {field("Customer Rate ($)", "customer_rate", pb.customer_rate ? "playbook" : "ai",
+                ext.customer_rate ? String(ext.customer_rate) : "",
+                pb.customer_rate ? String(pb.customer_rate) : null)}
+              {pb.margin_pct != null && (
+                <div style={{ fontSize: 9, color: "#8B95A8", marginBottom: 4 }}>Playbook margin: {pb.margin_pct}%</div>
+              )}
+
+              {/* Cargo section */}
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 8, marginTop: 16, textTransform: "uppercase", letterSpacing: "0.5px" }}>Cargo</div>
+              {field("Commodity", "commodity", "ai", ext.commodity, null)}
+              {field("Weight (lbs)", "weight_lbs", "ai", ext.weight_lbs ? String(ext.weight_lbs) : "", pb.typical_weight ? String(pb.typical_weight) : null)}
+
+              {/* Playbook instructions */}
+              {pb.instructions && (
+                <div style={{ margin: "16px 0 8px", padding: "8px 12px", borderRadius: 6, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.12)" }}>
+                  <div style={{ fontSize: 8, fontWeight: 700, color: "#00D4AA", textTransform: "uppercase", marginBottom: 4 }}>Playbook Instructions</div>
+                  <div style={{ fontSize: 10, color: "#C8CDD8", lineHeight: 1.5 }}>{pb.instructions}</div>
+                </div>
+              )}
+
+              {/* Multi-load warning */}
+              {pb.multi_load && pb.total_loads > 1 && (
+                <div style={{ margin: "8px 0", padding: "6px 10px", borderRadius: 6, background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.12)" }}>
+                  <div style={{ fontSize: 9, color: "#3B82F6", fontWeight: 600 }}>Multi-load lane: {pb.total_loads} loads required</div>
+                  {(pb.loads || []).map((ld, i) => (
+                    <div key={i} style={{ fontSize: 9, color: "#8B95A8", marginTop: 2 }}>
+                      Load {ld.load_number}: {ld.move_type} ({ld.equipment}) — {ld.origin_facility} {"\u2192"} {ld.destination_facility}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Contacts preview from playbook */}
+              {pb.contacts && pb.contacts.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Key Contacts</div>
+                  {pb.contacts.map((c, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.03)", fontSize: 10 }}>
+                      <span style={{ color: "#F0F2F5", fontWeight: 500 }}>{c.name}</span>
+                      <span style={{ color: "#5A6478", fontSize: 9 }}>{c.role}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Index as new playbook checkbox */}
+              {!bookingResult.playbook_found && (
+                <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16, padding: "8px 12px", borderRadius: 6, background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.12)", cursor: "pointer" }}>
+                  <input type="checkbox" checked={indexAsPlaybook} onChange={e => setIndexAsPlaybook(e.target.checked)}
+                    style={{ accentColor: "#F59E0B" }} />
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#F59E0B" }}>Index as new playbook after completion</div>
+                    <div style={{ fontSize: 9, color: "#8B95A8" }}>Auto-generate a draft playbook from this load data</div>
+                  </div>
+                </label>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: "12px 20px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", gap: 8 }}>
+              <button onClick={() => { setShowBookingSlideOver(false); setBookingResult(null); }}
+                style={{ flex: 1, padding: "10px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#8B95A8", border: "1px solid rgba(255,255,255,0.08)" }}>
+                Cancel
+              </button>
+              <button onClick={handleCreateFromBooking} disabled={createLoadLoading || conf === "low"}
+                style={{ flex: 2, padding: "10px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: createLoadLoading ? "wait" : "pointer",
+                  background: conf === "low" ? "rgba(239,68,68,0.15)" : "#00D4AA", color: conf === "low" ? "#EF4444" : "#0A0E17",
+                  border: "none", opacity: createLoadLoading ? 0.6 : 1 }}>
+                {createLoadLoading ? "Creating..." : conf === "low" ? "Low confidence — review first" : "Create Load & Dispatch"}
+              </button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

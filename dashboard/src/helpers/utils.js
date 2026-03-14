@@ -52,6 +52,7 @@ export function mapShipment(s, idx) {
     mpLastUpdated: s.mp_last_updated || "",
     email_count: s.email_count || 0,
     email_max_priority: s.email_max_priority || 0,
+    playbookLaneCode: s.playbook_lane_code || null,
     synced: true,
   };
 }

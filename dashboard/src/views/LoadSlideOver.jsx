@@ -125,13 +125,19 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
       .then(r => r.ok ? r.json() : { quotes: [] })
       .then(data => { setLoadRateQuotes(data.quotes || []); setRateApplied(false); setRateDismissed(false); })
       .catch(() => setLoadRateQuotes([]));
-    // Fetch tracking for FTL loads
+    // Fetch tracking for FTL loads — sync back to global trackingSummary
     if (selectedShipment.moveType === "FTL" || selectedShipment.macropointUrl) {
       setTrackingLoading(true);
       apiFetch(`${API_BASE}/api/macropoint/${selectedShipment.efj}`)
         .then(r => r.ok ? r.json() : null)
         .then(data => {
-          if (data) setTrackingData(data);
+          if (data) {
+            setTrackingData(data);
+            // Push fresh MP data into global store so dispatch table updates immediately
+            const efjBare = (selectedShipment.efj || "").replace(/^EFJ\s*/i, "");
+            const { setTrackingSummary } = useAppStore.getState();
+            setTrackingSummary(prev => ({ ...prev, [efjBare]: { ...prev[efjBare], mpStatus: data.mpStatus || data.status, mpDisplayStatus: data.mpDisplayStatus || data.display_status, mpDisplayDetail: data.mpDisplayDetail || data.display_detail, mpLastUpdated: data.mpLastUpdated || data.last_updated } }));
+          }
           setTrackingLoading(false);
         })
         .catch(() => setTrackingLoading(false));
@@ -334,6 +340,12 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
             <div>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 800, color: "#F0F2F5" }}>{selectedShipment.loadNumber}</div>
               <div style={{ fontSize: 10, color: "#8B95A8", marginTop: 2 }}>{selectedShipment.container} | {selectedShipment.moveType}</div>
+              {selectedShipment.playbookLaneCode && (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4, padding: "2px 8px", borderRadius: 4, background: "rgba(0,212,170,0.12)", border: "1px solid rgba(0,212,170,0.25)", cursor: "pointer" }} title={`Playbook: ${selectedShipment.playbookLaneCode}`} onClick={() => { /* Could nav to playbook */ }}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#00D4AA" strokeWidth="2.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: "#00D4AA", letterSpacing: "0.03em" }}>{selectedShipment.playbookLaneCode}</span>
+                </div>
+              )}
               <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4 }}>
                 <span style={{ width: 5, height: 5, borderRadius: "50%", background: selectedShipment.synced ? "#34d399" : "#fbbf24", animation: selectedShipment.synced ? "none" : "pulse 1s ease infinite" }} />
                 <span style={{ fontSize: 9, color: selectedShipment.synced ? "#34d399" : "#fbbf24", fontWeight: 600 }}>{selectedShipment.synced ? "All changes saved" : "Saving..."}</span>

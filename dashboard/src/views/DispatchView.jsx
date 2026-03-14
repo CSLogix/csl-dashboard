@@ -49,6 +49,22 @@ export default function DispatchView({
   const [zebraStripe, setZebraStripe] = useState(true);
   const [columnFilters, setColumnFilters] = useState({});
   const [openFilterCol, setOpenFilterCol] = useState(null);
+  const [showColPicker, setShowColPicker] = useState(false);
+
+  // Column visibility — persisted to localStorage
+  const DEFAULT_HIDDEN = ["carrierEmail", "trailer", "margin"];
+  const [hiddenCols, setHiddenCols] = useState(() => {
+    try { const s = localStorage.getItem("dispatch_hidden_cols"); return s ? JSON.parse(s) : DEFAULT_HIDDEN; }
+    catch { return DEFAULT_HIDDEN; }
+  });
+  const toggleCol = (key) => {
+    setHiddenCols(prev => {
+      const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
+      localStorage.setItem("dispatch_hidden_cols", JSON.stringify(next));
+      return next;
+    });
+  };
+  const isColVisible = (key) => !hiddenCols.includes(key);
 
   // Close column filter dropdown on outside click
   useEffect(() => {
@@ -57,6 +73,14 @@ export default function DispatchView({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [openFilterCol]);
+
+  // Close column picker on outside click
+  useEffect(() => {
+    if (!showColPicker) return;
+    const handler = (e) => { if (!e.target.closest('.col-picker-dd')) setShowColPicker(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showColPicker]);
 
   const activeStatusList = useMemo(() => {
     if (moveTypeFilter === "ftl") return FTL_STATUSES;
@@ -171,6 +195,31 @@ export default function DispatchView({
           <h2 style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", margin: 0 }}>Loadboard</h2>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <div className="col-picker-dd" style={{ position: "relative" }}>
+            <button onClick={() => setShowColPicker(p => !p)} style={{ border: `1px solid ${hiddenCols.length > 0 ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.08)"}`, background: hiddenCols.length > 0 ? "rgba(59,130,246,0.08)" : "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 14px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: hiddenCols.length > 0 ? "#60A5FA" : "#8B95A8", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              {"\u2637"} Columns {hiddenCols.length > 0 && `(${DISPATCH_COLS.length - hiddenCols.length}/${DISPATCH_COLS.length})`}
+            </button>
+            {showColPicker && (
+              <div className="col-picker-dd" style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, zIndex: 40, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 8, minWidth: 200, boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#5A6478", letterSpacing: "1px", textTransform: "uppercase", padding: "4px 8px", marginBottom: 4 }}>Toggle Columns</div>
+                {DISPATCH_COLS.map(col => (
+                  <label key={col.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 500, color: isColVisible(col.key) ? "#F0F2F5" : "#5A6478", background: isColVisible(col.key) ? "rgba(255,255,255,0.03)" : "transparent" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
+                    onMouseLeave={e => e.currentTarget.style.background = isColVisible(col.key) ? "rgba(255,255,255,0.03)" : "transparent"}>
+                    <input type="checkbox" checked={isColVisible(col.key)} onChange={() => toggleCol(col.key)}
+                      style={{ accentColor: "#00D4AA", width: 14, height: 14, cursor: "pointer" }} />
+                    {col.label}
+                  </label>
+                ))}
+                <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: 6, paddingTop: 6, display: "flex", gap: 6 }}>
+                  <button onClick={() => { setHiddenCols([]); localStorage.setItem("dispatch_hidden_cols", "[]"); }}
+                    style={{ flex: 1, padding: "4px 8px", borderRadius: 5, border: "none", background: "rgba(0,212,170,0.1)", color: "#00D4AA", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Show All</button>
+                  <button onClick={() => { setHiddenCols(DEFAULT_HIDDEN); localStorage.setItem("dispatch_hidden_cols", JSON.stringify(DEFAULT_HIDDEN)); }}
+                    style={{ flex: 1, padding: "4px 8px", borderRadius: 5, border: "none", background: "rgba(255,255,255,0.05)", color: "#8B95A8", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Reset</button>
+                </div>
+              </div>
+            )}
+          </div>
           <button onClick={() => setZebraStripe(z => !z)} style={{ border: `1px solid ${zebraStripe ? "rgba(0,212,170,0.3)" : "rgba(255,255,255,0.08)"}`, background: zebraStripe ? "rgba(0,212,170,0.08)" : "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 14px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: zebraStripe ? "#00D4AA" : "#8B95A8", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{zebraStripe ? "\u2630 Striped" : "\u2630 Flat"}</button>
           <button onClick={exportCSV} style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 14px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "#8B95A8", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{"\u2193"} CSV</button>
           <button onClick={onAddLoad} className="btn-primary" style={{ border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 12, fontWeight: 700, cursor: "pointer", color: "#fff" }}>+ New Load</button>
@@ -363,6 +412,7 @@ export default function DispatchView({
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#00D4AA", fontSize: 13 }}>{s.loadNumber}</span>
+                  {s.playbookLaneCode && <span title={`Playbook: ${s.playbookLaneCode}`} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: 3, background: "rgba(0,212,170,0.15)" }}><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#00D4AA" strokeWidth="2.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>}
                   <span style={{ fontSize: 10, fontWeight: 600, color: "#F0F2F5" }}>{s.account}</span>
                 </div>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 10, fontSize: 8, fontWeight: 700,
@@ -391,7 +441,7 @@ export default function DispatchView({
         <table style={{ width: "100%", minWidth: 1600, borderCollapse: "collapse", fontSize: 11 }}>
           <thead>
             <tr>
-              {DISPATCH_COLS.map((col, ci) => {
+              {DISPATCH_COLS.filter(c => isColVisible(c.key)).map((col, ci) => {
                 const isFilterable = FILTERABLE_KEYS.includes(col.key);
                 const hasColFilter = !!columnFilters[col.key];
                 const isOpen = openFilterCol === col.key;
@@ -402,7 +452,7 @@ export default function DispatchView({
                       color: hasColFilter ? "#00D4AA" : sortCol === col.key ? "#00D4AA" : "#8B95A8",
                       letterSpacing: "0.8px", textTransform: "uppercase",
                       borderBottom: hasColFilter ? "2px solid rgba(0,212,170,0.4)" : "1px solid rgba(255,255,255,0.08)",
-                      borderRight: ci < DISPATCH_COLS.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none",
+                      borderRight: ci < DISPATCH_COLS.filter(c => isColVisible(c.key)).length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none",
                       background: hasColFilter ? "rgba(0,212,170,0.04)" : "#0D1119",
                       position: "sticky", top: 0, zIndex: isOpen ? Z.panelBackdrop : Z.table, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", maxWidth: col.w }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
@@ -463,17 +513,18 @@ export default function DispatchView({
               const del = splitDateTime(s.deliveryDate);
               const isInlineEditing = inlineEditId === s.id;
               const inlineInputStyle = { background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 4, color: "#F0F2F5", padding: "2px 5px", fontSize: 11, width: 90, outline: "none", fontFamily: "'JetBrains Mono', monospace" };
-              const cellStyle = (ci) => ({ padding: "5px 8px", borderBottom: "1px solid rgba(255,255,255,0.06)", borderRight: ci < DISPATCH_COLS.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" });
+              const visCols = DISPATCH_COLS.filter(c => isColVisible(c.key));
+              const visColKeys = visCols.map(c => c.key);
+              const cellStyleFor = (key) => { const ci = visColKeys.indexOf(key); return { padding: "5px 8px", borderBottom: "1px solid rgba(255,255,255,0.06)", borderRight: ci < visCols.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }; };
               const zebraBg = zebraStripe && rowIdx % 2 === 1 ? "rgba(255,255,255,0.025)" : "transparent";
               const dispTermInfo = parseTerminalNotes(s.botAlert);
               const termBg = dispTermInfo?.isReady ? "rgba(34,197,94,0.06)" : dispTermInfo?.hasHolds ? "rgba(239,68,68,0.05)" : null;
               const rowBg = isSelected ? `${sc.main}10` : termBg || zebraBg;
-              let colIdx = 0;
               return (
                 <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`} onClick={() => { if (!isInlineEditing) handleLoadClick(s); }}
                   style={{ cursor: "pointer", background: highlightedEfj === s.efj ? undefined : rowBg }}>
-                  <td style={{ ...cellStyle(colIdx++), color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}>{s.account}</td>
-                  <td style={{ ...cellStyle(colIdx++), position: "relative" }}
+                  {isColVisible("account") && <td style={{ ...cellStyleFor("account"), color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}>{s.account}</td>}
+                  {isColVisible("status") && <td style={{ ...cellStyleFor("status"), position: "relative" }}
                     onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                     {isInlineEditing && inlineEditField === "status" ? (
                       <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
@@ -512,10 +563,11 @@ export default function DispatchView({
                       <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
                       {resolveStatusLabel(s)}
                     </span>
-                  </td>
-                  <td style={cellStyle(colIdx++)}>
+                  </td>}
+                  {isColVisible("efj") && <td style={cellStyleFor("efj")}>
                     <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
                       <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{s.loadNumber}</span>
+                      {s.playbookLaneCode && <span title={`Playbook: ${s.playbookLaneCode}`} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: 3, background: "rgba(0,212,170,0.15)", flexShrink: 0, cursor: "default" }}><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#00D4AA" strokeWidth="2.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>}
                       {!s.synced && <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#fbbf24", display: "inline-block", animation: "pulse-glow 1s ease infinite" }} />}
                       <DocIndicators docs={docs} />
                       {dispTermInfo?.hasHolds && (
@@ -533,12 +585,12 @@ export default function DispatchView({
                         </span>
                       )}
                     </div>
-                  </td>
-                  <td style={{ ...cellStyle(colIdx++), fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>
-                  {hasFTL && <td style={cellStyle(colIdx++)}>
+                  </td>}
+                  {isColVisible("container") && <td style={{ ...cellStyleFor("container"), fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#F0F2F5" }}>{s.container}</td>}
+                  {hasFTL && isColVisible("mpStatus") && <td style={cellStyleFor("mpStatus")}>
                     {(isFTL || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} mpLastUpdated={s.mpLastUpdated} /> : <span style={{ color: "#5A6478", fontSize: 9, fontStyle: "italic" }}>No MP</span>}
                   </td>}
-                  <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
+                  {isColVisible("pickup") && <td style={cellStyleFor("pickup")} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
                     {isInlineEditing && inlineEditField === "pickup" ? (
                       <div onClick={e => e.stopPropagation()}>
                         <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
@@ -560,10 +612,10 @@ export default function DispatchView({
                         {pu.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickupTime"); setInlineEditValue(pu.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{pu.time}</span> : null}
                       </span>
                     )}
-                  </td>
-                  <td style={{ ...cellStyle(colIdx++), fontSize: 10, color: "#F0F2F5", fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.origin}>{s.origin || "\u2014"}</td>
-                  <td style={{ ...cellStyle(colIdx++), fontSize: 10, color: "#F0F2F5", fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.destination}>{s.destination || "\u2014"}</td>
-                  <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
+                  </td>}
+                  {isColVisible("origin") && <td style={{ ...cellStyleFor("origin"), fontSize: 10, color: "#F0F2F5", fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.origin}>{s.origin || "\u2014"}</td>}
+                  {isColVisible("destination") && <td style={{ ...cellStyleFor("destination"), fontSize: 10, color: "#F0F2F5", fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.destination}>{s.destination || "\u2014"}</td>}
+                  {isColVisible("delivery") && <td style={cellStyleFor("delivery")} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                     {isInlineEditing && inlineEditField === "delivery" ? (
                       <div onClick={e => e.stopPropagation()}>
                         <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
@@ -585,8 +637,8 @@ export default function DispatchView({
                         {del.time ? <span onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("deliveryTime"); setInlineEditValue(del.time); }} style={{ color: "#8B95A8", marginLeft: 4 }}>{del.time}</span> : null}
                       </span>
                     )}
-                  </td>
-                  <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("truckType"); setInlineEditValue(s.truckType || ""); }}>
+                  </td>}
+                  {isColVisible("truckType") && <td style={cellStyleFor("truckType")} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("truckType"); setInlineEditValue(s.truckType || ""); }}>
                     {isInlineEditing && inlineEditField === "truckType" ? (
                       <select autoFocus value={inlineEditValue}
                         onChange={e => { const v = e.target.value; setInlineEditValue(v); handleMetadataUpdate(s, "truckType", v); setInlineEditId(null); }}
@@ -599,8 +651,8 @@ export default function DispatchView({
                     ) : (
                       <span style={{ fontSize: 10, color: s.truckType ? "#F0F2F5" : "#3D4557", cursor: "pointer" }}>{s.truckType || "\u2014"}</span>
                     )}
-                  </td>
-                  <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("trailer"); setInlineEditValue(s.trailerNumber || tracking?.trailer || ""); }}>
+                  </td>}
+                  {isColVisible("trailer") && <td style={cellStyleFor("trailer")} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("trailer"); setInlineEditValue(s.trailerNumber || tracking?.trailer || ""); }}>
                     {isInlineEditing && inlineEditField === "trailer" ? (
                       <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
                         onBlur={() => { handleDriverFieldUpdate(s, "trailer", inlineEditValue); setInlineEditId(null); }}
@@ -609,8 +661,8 @@ export default function DispatchView({
                     ) : (
                       <span style={{ fontSize: 10, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{s.trailerNumber || tracking?.trailer || "\u2014"}</span>
                     )}
-                  </td>
-                  <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("driverPhone"); setInlineEditValue(s.driverPhone || tracking?.driverPhone || ""); }}>
+                  </td>}
+                  {isColVisible("driverPhone") && <td style={cellStyleFor("driverPhone")} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("driverPhone"); setInlineEditValue(s.driverPhone || tracking?.driverPhone || ""); }}>
                     {isInlineEditing && inlineEditField === "driverPhone" ? (
                       <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
                         onBlur={() => { handleDriverFieldUpdate(s, "driverPhone", inlineEditValue); setInlineEditId(null); }}
@@ -619,8 +671,8 @@ export default function DispatchView({
                     ) : (
                       <span style={{ fontSize: 10, color: (s.driverPhone || tracking?.driverPhone) ? "#F0F2F5" : "#3D4557", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{s.driverPhone || tracking?.driverPhone || "\u2014"}</span>
                     )}
-                  </td>
-                  <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("carrierEmail"); setInlineEditValue(s.carrierEmail || ""); }}>
+                  </td>}
+                  {isColVisible("carrierEmail") && <td style={cellStyleFor("carrierEmail")} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("carrierEmail"); setInlineEditValue(s.carrierEmail || ""); }}>
                     {isInlineEditing && inlineEditField === "carrierEmail" ? (
                       <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
                         onBlur={() => { handleDriverFieldUpdate(s, "carrierEmail", inlineEditValue); setInlineEditId(null); }}
@@ -629,8 +681,8 @@ export default function DispatchView({
                     ) : (
                       <span style={{ fontSize: 10, color: s.carrierEmail ? "#8B95A8" : "#3D4557", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.carrierEmail || ""}>{s.carrierEmail || "\u2014"}</span>
                     )}
-                  </td>
-                  <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("customerRate"); setInlineEditValue(s.customerRate || ""); }}>
+                  </td>}
+                  {isColVisible("customerRate") && <td style={cellStyleFor("customerRate")} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("customerRate"); setInlineEditValue(s.customerRate || ""); }}>
                     {isInlineEditing && inlineEditField === "customerRate" ? (
                       <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
                         onBlur={() => { handleMetadataUpdate(s, "customerRate", inlineEditValue); setInlineEditId(null); }}
@@ -639,8 +691,11 @@ export default function DispatchView({
                     ) : (
                       <span style={{ fontSize: 10, color: s.customerRate ? "#22C55E" : "#3D4557", fontFamily: "'JetBrains Mono', monospace", cursor: "text", fontWeight: s.customerRate ? 600 : 400 }}>{s.customerRate || "\u2014"}</span>
                     )}
-                  </td>
-                  <td style={cellStyle(colIdx++)} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("notes"); setInlineEditValue(s.notes || ""); }}>
+                  </td>}
+                  {isColVisible("margin") && <td style={cellStyleFor("margin")}>
+                    {(() => { const mgn = calcMarginPct(s.customerRate, s.carrierPay); return mgn !== null ? <span style={{ fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: mgn < 0 ? "#EF4444" : mgn < 10 ? "#F59E0B" : "#22C55E" }}>{mgn}%</span> : <span style={{ color: "#3D4557", fontSize: 10 }}>{"\u2014"}</span>; })()}
+                  </td>}
+                  {isColVisible("notes") && <td style={cellStyleFor("notes")} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("notes"); setInlineEditValue(s.notes || ""); }}>
                     {isInlineEditing && inlineEditField === "notes" ? (
                       <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
                         onBlur={() => { handleMetadataUpdate(s, "notes", inlineEditValue); setInlineEditId(null); }}
@@ -651,7 +706,7 @@ export default function DispatchView({
                     ) : (
                       <span style={{ fontSize: 10, color: s.notes ? "#F0F2F5" : "#3D4557", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.notes || ""}>{s.notes || "\u2014"}</span>
                     )}
-                  </td>
+                  </td>}
                 </tr>
               );
             })}

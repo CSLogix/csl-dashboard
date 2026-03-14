@@ -75,7 +75,7 @@ export const useAppStore = create((set) => ({
   setCronStatus: (v) => set({ cronStatus: v }),
   setApiStats: (v) => set({ apiStats: v }),
   setAccountOverview: (v) => set({ accountOverview: v }),
-  setTrackingSummary: (v) => set({ trackingSummary: v }),
+  setTrackingSummary: (v) => set(typeof v === 'function' ? (state) => ({ trackingSummary: v(state.trackingSummary) }) : { trackingSummary: v }),
   setDocSummary: (v) => set({ docSummary: v }),
   setUnbilledOrders: (v) => set({ unbilledOrders: v }),
   setUnbilledStats: (v) => set({ unbilledStats: v }),

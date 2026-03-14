@@ -81,6 +81,7 @@ export default function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, init
   };
 
   const quickActions = [
+    { label: "Process Booking", q: "I have a booking email to process. Check for a matching lane playbook, extract the shipment details, and create the load with playbook defaults applied." },
     { label: "Who covers Savannah?", q: "Which carriers cover Savannah? Show me their capabilities." },
     { label: "Rate for Houston → Dallas", q: "What do we typically pay for Houston to Dallas?" },
     { label: "Status of EFJ", q: "What is the status of EFJ" },
