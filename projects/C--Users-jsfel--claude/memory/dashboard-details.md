@@ -1,23 +1,36 @@
 # Dashboard Details
 
-## Component Line Map (DispatchDashboard.jsx)
-Lines shift as code evolves — use Grep to find exact positions.
+## Component File Map (split Mar 14, 2026)
+No longer a monolith. Root `DispatchDashboard.jsx` (1,298 lines) contains state, handlers, layout.
 
-| Component | Purpose |
-|-----------|---------|
-| `DocIndicators` | Document type icons per shipment |
-| `TrackingBadge` | FTL tracking status badge |
-| `ClockDisplay` | Live clock + sync status |
-| `DispatchDashboard` | Root — all state, API fetching, nav |
-| `OverviewView` | Homepage: KPIs, stat cards (incl. Yesterday), Rep Scoreboard (left) + Account Health grid (right) above Actions+Alerts |
-| `RepDashboardView` | Individual rep: Dray/FTL view toggle, account cards, inline date editing |
-| `AnalyticsView` | Bot status, sync log, Sheets connections |
-| `LoadSlideOver` | Right panel: tracking, docs, driver, emails |
-| `DispatchView` | Dispatch table: filters, search, sorting. No sidebar nav — accessed via Overview stat cards. Has `← Overview` back button |
-| `HistoryView` | Archived/completed loads (needs backend) |
-| `MacropointModal` | Macropoint map, progress, driver info |
-| `UnbilledView` | Unbilled: Excel upload, aged table, dismiss |
-| `AddForm` | Modal form to add new shipment (EFJ PRO # + sheet routing) |
+| File | Lines | Purpose |
+|------|-------|---------|
+| `src/DispatchDashboard.jsx` | 1,298 | Root — state, API fetching, handlers, nav, layout |
+| `src/store.js` | 118 | Zustand store (askAI state lifted here) |
+| `src/styles.js` | 67 | GLOBAL_STYLES CSS constant |
+| `src/helpers/api.js` | 8 | apiFetch wrapper + API_BASE |
+| `src/helpers/constants.js` | 325 | STATUS_MAP, NAV_ITEMS, REP_ACCOUNTS, equipment, move-type helpers |
+| `src/helpers/utils.js` | 367 | normalizeStatus, mapShipment, filters, date helpers, useIsMobile |
+| `src/components/AskAIOverlay.jsx` | 294 | Ctrl+K AI assistant overlay |
+| `src/components/CommandPalette.jsx` | 93 | Ctrl+F shipment search |
+| `src/components/ClockDisplay.jsx` | 18 | Live clock + sync status |
+| `src/components/DocIndicators.jsx` | 14 | Document type icons |
+| `src/components/TerminalBadge.jsx` | 25 | Terminal status badge |
+| `src/components/TrackingBadge.jsx` | 59 | FTL tracking badge |
+| `src/views/OverviewView.jsx` | 536 | Homepage: KPIs, Scoreboard + Account Health |
+| `src/views/RepDashboardView.jsx` | 1,027 | Rep dashboard: Dray/FTL toggle, inline editing |
+| `src/views/DispatchView.jsx` | 673 | Dispatch table: filters, search, sorting |
+| `src/views/InboxView.jsx` | 796 | Inbox Command Center (has LOCAL inbox constants) |
+| `src/views/LoadSlideOver.jsx` | 1,171 | Right panel: tracking, docs, driver, emails |
+| `src/views/AnalyticsView.jsx` | 254 | Bot status, sync log (includes DataSourceToggle) |
+| `src/views/BillingView.jsx` | 251 | Billing queue + sub-tab to UnbilledView |
+| `src/views/UnbilledView.jsx` | 360 | Unbilled: Excel upload, aged table |
+| `src/views/RateIQView.jsx` | 713 | Rate IQ + HistoryTabContent |
+| `src/views/BOLGeneratorView.jsx` | 500 | BOL generator |
+| `src/views/HistoryView.jsx` | 177 | Archived/completed loads |
+| `src/views/MacropointModal.jsx` | 270 | Macropoint map, progress |
+| `src/views/AddForm.jsx` | 334 | New load form |
+| `src/views/UserManagementView.jsx` | 152 | Admin user management |
 
 ## Alert System Architecture
 - **Snapshot alerts** (useMemo): `delivered_needs_billing`, `tracking_behind`, `pod_received`, `needs_driver` — recomputed each render from shipment data

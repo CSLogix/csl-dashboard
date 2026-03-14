@@ -13,10 +13,10 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
 
-## Git — Mar 13, 2026
-- **Latest**: Mar 13 — Multi-user auth (frontend+backend), app.py monolith split, user account consolidation
-- **Repo**: `CSLogix/CSLogix_Bot` (private), single `master` branch
-- **VPS, GitHub, Local** all in sync at `781d7d6`
+## Git — Mar 14, 2026
+- **Latest**: Mar 14 — Frontend monolith split (10K→25 files) + 3 bug fixes
+- **Repos**: `CSLogix/CSLogix_Bot` (private, `master`) | `CSLogix/csl-dashboard` (private, `main` at `b688b27`)
+- **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
 - **State files** (`ftl_sent_alerts.json`, `last_check.json`, `export_state.json`) are runtime dedup/state — gitignored, live on VPS only
 
@@ -25,8 +25,15 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - **Local**: `C:\Users\jsfel\.claude` — SSH remote set, tracking `origin/master`
 - **SSH key**: `~/.ssh/id_ed25519` added to GitHub (`CSLogix` account)
 
-## Dashboard Component Map (DispatchDashboard.jsx)
-Single-file React SPA (~10100 lines). Key components: `DispatchDashboard` (root), `OverviewView`, `RepDashboardView`, `DispatchView`, `InboxView`, `LoadSlideOver`, `AnalyticsView`, `UnbilledView`, `HistoryView`, `AddForm`, `AskAIOverlay`, `RateIQView` (with Directory, Lane Search, Scorecard tabs), `UserManagementView`.
+## Dashboard Component Map (split Mar 14, 2026)
+**No longer a monolith.** `DispatchDashboard.jsx` is 1,298 lines (root state + handlers + layout). Components organized into:
+- `src/helpers/` — `api.js`, `constants.js` (STATUS_MAP, NAV_ITEMS, REP_ACCOUNTS, equipment, etc.), `utils.js` (normalizeStatus, mapShipment, parseTerminalNotes, getBillingReadiness, filters, date helpers, useIsMobile), `index.js` (barrel)
+- `src/components/` — AskAIOverlay, ClockDisplay, CommandPalette, DocIndicators, TerminalBadge, TrackingBadge
+- `src/views/` — OverviewView, RepDashboardView, DispatchView, InboxView (has LOCAL inbox constants different from helpers), LoadSlideOver, AnalyticsView (includes DataSourceToggle), BillingView, UnbilledView, HistoryView, MacropointModal, RateIQView (includes HistoryTabContent), BOLGeneratorView, AddForm, UserManagementView
+- `src/styles.js` — GLOBAL_STYLES CSS constant
+- `src/store.js` — Zustand store (askAIOpen/askAIInitialQuery/askAIInitialFiles lifted from local state)
+
+**Callback pattern**: `handleFieldUpdate`/`handleMetadataUpdate` accept `{ toast }` callback. `handleApplyRate` accepts `{ onApplied }` callback. LoadSlideOver passes `showSaveToast`/`setRateApplied` via these.
 
 ## Services Architecture (as of Mar 2026)
 
@@ -104,6 +111,12 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 - **Other**: Boviet invoice writer, dray daily report HTML fix, MP alert subject rename ("CSL Tracking"), margin guard + date/terminal normalizers
 
 ## Recent Dashboard Changes (Deployed)
+
+### Mar 14, 2026 Dashboard Changes
+- **Frontend monolith split**: `DispatchDashboard.jsx` 10,428 → 1,298 lines. 25 files across `helpers/`, `components/`, `views/`. Clean Vite build, deployed.
+- **Bug fix: handleApplyRate field corruption**: Was hard-coding `field: "carrier_pay"` — "Apply CX Rate" saved customer rate as carrier pay. Now reads `quote._field` and maps to correct state key (`carrierPay` vs `customerRate`).
+- **Bug fix: showSaveToast scope**: Called from root but defined in LoadSlideOver. Now passed as `{ toast }` callback — toasts show correctly on inline field saves.
+- **Bug fix: setRateApplied scope**: Called from root but state lived in LoadSlideOver. Now passed as `{ onApplied }` callback — rate suggestion banner hides after applying.
 
 ### Mar 13, 2026 Dashboard Changes (late night)
 - **Smart Inbox Auto-Actions** (#102): Actions column in inbox table with contextual one-click buttons. `getAutoAction(thread)` maps email_type → suggested action. Buttons: "Save [type]" (teal, for doc emails with attachments), "Delivered" (green, delivery confirmations), "Draft" (blue, opens Ask AI with reply context), "Done" (gray, marks actioned). Thread detail panel: "Draft Reply" + "Save Docs" buttons. Backend `POST /api/inbox/{thread_id}/auto-action` — 3 actions: save_attachment (Gmail API download → load_documents + SHA-256 dedup + billing advance check), mark_delivered, mark_actioned. Optimistic UI updates + flash animation.
