@@ -30,7 +30,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 **No longer a monolith.** `DispatchDashboard.jsx` is 1,298 lines (root state + handlers + layout). Components organized into:
 - `src/helpers/` — `api.js`, `constants.js` (STATUS_MAP, NAV_ITEMS, REP_ACCOUNTS, equipment, etc.), `utils.js` (normalizeStatus, mapShipment, parseTerminalNotes, getBillingReadiness, filters, date helpers, useIsMobile), `index.js` (barrel)
 - `src/components/` — AskAIOverlay, ClockDisplay, CommandPalette, DocIndicators, TerminalBadge, TrackingBadge
-- `src/views/` — OverviewView, RepDashboardView, DispatchView, InboxView (has LOCAL inbox constants different from helpers), LoadSlideOver, AnalyticsView (includes DataSourceToggle), BillingView, UnbilledView, HistoryView, MacropointModal, RateIQView (includes HistoryTabContent), BOLGeneratorView, AddForm, UserManagementView
+- `src/views/` — OverviewView, RepDashboardView, DispatchView, InboxView (has LOCAL inbox constants different from helpers), LoadSlideOver, AnalyticsView (includes DataSourceToggle), BillingView, UnbilledView, HistoryView, MacropointModal, RateIQView (includes HistoryTabContent), PlaybooksView, BOLGeneratorView, AddForm, UserManagementView
 - `src/styles.js` — GLOBAL_STYLES CSS constant
 - `src/store.js` — Zustand store (askAIOpen/askAIInitialQuery/askAIInitialFiles lifted from local state)
 
@@ -102,6 +102,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 - **Bug fix: handleApplyRate field corruption**: Was hard-coding `field: "carrier_pay"` — "Apply CX Rate" saved customer rate as carrier pay. Now reads `quote._field` and maps to correct state key (`carrierPay` vs `customerRate`).
 - **Bug fix: showSaveToast scope**: Called from root but defined in LoadSlideOver. Now passed as `{ toast }` callback — toasts show correctly on inline field saves.
 - **Bug fix: setRateApplied scope**: Called from root but state lived in LoadSlideOver. Now passed as `{ onApplied }` callback — rate suggestion banner hides after applying.
+- **Lane Playbooks frontend** (#104): `PlaybooksView.jsx` — self-contained view with list/detail sub-views. List: card grid with search + status filter (Active/Draft/Inactive/All). Detail: 2-column layout — overview cards (commodity, weight, revenue, margin, structure, container), load structure, carriers, customer rates table, accessorials (with rule text), facilities (hours/scheduling/capabilities), contacts (9 with roles/emails), workflow timeline (7 steps with notify lists), escalation rules (3 tiers), changelog. "Index New Lane" button opens Ask AI. Nav: between Rate IQ and Analytics in sidebar. Book icon SVG.
 - **Rate IQ dark dropdowns** (#103): Directory Markets/Ports/Tier `<select>` dropdowns now use `#151926` background on `<option>` elements (was OS-default white). All 3 selects fixed.
 - **Lane Search transload badge**: Added `can_transload` (🔄, sky blue `#38bdf8`) to `capBadges` in Lane Search carrier table. Was missing — only 6 of 7 capabilities were shown.
 
@@ -172,7 +173,6 @@ Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Accou
 
 ### Remaining
 - **Carrier Auto-Quote Request**: PLANNED — AI picks top 3 carriers from Directory, auto-drafts rate request emails. Not started.
-- **Lane Playbooks frontend**: Viewer/editor in dashboard (new tab or Rate IQ sub-tab)
 - Rate IQ Phase 2: OOG IQ (real data), FTL IQ (not built)
 - Tolead/Boviet slide-over fields (driver phone, delivery date, appt_id)
 - Warehouse extract: `POST /api/warehouses/extract` handler
