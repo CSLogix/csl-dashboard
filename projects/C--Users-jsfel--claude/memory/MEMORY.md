@@ -91,6 +91,18 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 
 ## Recent Dashboard Changes (Deployed)
 
+### Mar 14, 2026 UI Audit (no code changes)
+- **Comprehensive UI analysis** done across all views. Key problem areas identified:
+  - **Dispatch table**: 15 columns, requires 2000px+ viewport — needs column picker (hide/show)
+  - **LoadSlideOver actions**: 8 buttons in 380px wraps badly — reduce to 4 primary + overflow menu
+  - **Font sizes**: 9-10px in dispatch table cells — below legibility threshold, bump to 11px min
+  - **RateIQ tabs**: 7 tabs crowded in one row — redesign planned (see below)
+  - **Filter bar**: 5+ inputs overflow at <1360px — needs floating filter drawer or popover
+  - **Button inconsistency**: 3 different styles with no clear hierarchy
+  - **Status colors**: 17 distinct colors, several nearly-identical blues
+  - **Spacing**: Ad-hoc (3/5/6/7px) — needs 8px grid enforcement
+- **Next**: Rate IQ UI redesign (starting in new chat)
+
 ### Mar 14, 2026 Dashboard Changes
 - **MP Status real-time sync**: LoadSlideOver now pushes fresh `/api/macropoint/{efj}` data back into global `trackingSummary` Zustand store. Dispatch table MP STATUS column updates immediately when slide-over opens (was stale until next poll). `setTrackingSummary` upgraded to support function updaters.
 - **30s tracking fast-poll**: Dedicated `setInterval(30000)` polls `/api/shipments/tracking-summary` so webhook-triggered MP updates appear in dispatch table within 30s (was 90s full fetchData cycle).
@@ -169,6 +181,10 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Account Health View, Auto-Status Email Drafter, Directory ↔ Quote Builder, Boviet Project Cards, Mobile layout, Billing Flow (auto-advance + bulk close), Container Update emails disabled
 
 ### Remaining
+- **Rate IQ UI Redesign**: NEXT — tab crowding (7 tabs), directory filter overload, font/spacing polish. Starting new chat.
+- **Dispatch Column Picker**: Hide/show columns toggle — 15 cols currently overwhelming
+- **LoadSlideOver action consolidation**: 4 primary + overflow menu
+- **Global font floor**: 11px minimum in all tables (currently 9-10px)
 - **Carrier Auto-Quote Request**: PLANNED — AI picks top 3 carriers from Directory, auto-drafts rate request emails. Not started.
 - Rate IQ Phase 2: OOG IQ (real data), FTL IQ (not built)
 - Tolead/Boviet slide-over fields (driver phone, delivery date, appt_id)
