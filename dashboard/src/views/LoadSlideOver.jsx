@@ -58,6 +58,9 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
   // Macropoint URL edit state
   const [editingMpUrl, setEditingMpUrl] = useState(false);
   const [mpUrlVal, setMpUrlVal] = useState("");
+  // Overflow menu state
+  const [showOverflow, setShowOverflow] = useState(false);
+  const overflowRef = useRef(null);
 
   // Save feedback toast
   const [saveToast, setSaveToast] = useState(null); // { message, type: "success"|"error" }
@@ -67,6 +70,14 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
     setSaveToast({ message, type });
     saveToastTimer.current = setTimeout(() => setSaveToast(null), 2200);
   };
+
+  // Close overflow menu on outside click
+  useEffect(() => {
+    if (!showOverflow) return;
+    const handler = (e) => { if (overflowRef.current && !overflowRef.current.contains(e.target)) setShowOverflow(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showOverflow]);
 
   // Auto-expand emails section + scroll when opened from NEEDS REPLY
   useEffect(() => {
@@ -397,8 +408,8 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
             <button onClick={() => setSelectedShipment(null)} aria-label="Close shipment details" style={{ background: "rgba(255,255,255,0.05)", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 14, width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>&#x2715;</button>
           </div>
 
-          {/* Quick Action Strip */}
-          <div style={{ padding: "8px 20px 10px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {/* Quick Action Strip — 4 primary + overflow */}
+          <div style={{ padding: "8px 20px 10px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", gap: 6, alignItems: "center" }}>
             {[
               { icon: "\u{1F4CB}", label: copiedEfj ? "Copied!" : "Copy EFJ", color: copiedEfj ? "#34d399" : "rgba(255,255,255,0.5)",
                 onClick: () => { navigator.clipboard.writeText(selectedShipment.efj); setCopiedEfj(true); setTimeout(() => setCopiedEfj(false), 1500); }, enabled: true },
@@ -411,18 +422,6 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
               { icon: "\u{1F4CD}", label: "Tracking", color: "#3B82F6",
                 onClick: () => { const url = trackingData?.macropointUrl || driverInfo.macropointUrl || selectedShipment.macropointUrl; if (url) window.open(url, '_blank'); },
                 enabled: !!(trackingData?.macropointUrl || driverInfo.macropointUrl || selectedShipment.macropointUrl) },
-              { icon: "\u270F\uFE0F", label: editingMpUrl ? "Cancel" : "Edit MP URL", color: "#8B5CF6",
-                onClick: () => { if (editingMpUrl) { setEditingMpUrl(false); } else { setMpUrlVal(driverInfo.macropointUrl || selectedShipment.macropointUrl || ""); setEditingMpUrl(true); } },
-                enabled: true },
-              { icon: "\u{1F4C4}", label: "BOL", color: "rgba(255,255,255,0.5)",
-                onClick: () => { const bol = loadDocs.find(d => d.doc_type === 'bol'); if (bol) setPreviewDoc(bol); },
-                enabled: loadDocs.some(d => d.doc_type === 'bol') },
-              { icon: "\u2726", label: aiSummaryLoading ? "Thinking..." : "AI Summary",
-                color: aiSummaryLoading ? "#fbbf24" : "#00D4AA",
-                onClick: requestAiSummary, enabled: !aiSummaryLoading },
-              { icon: "\u{1F517}", label: linkGenerating ? "Generating..." : copiedLink ? "Copied!" : "Share Link",
-                color: copiedLink ? "#34d399" : linkGenerating ? "#fbbf24" : "#a78bfa",
-                onClick: handleShareLink, enabled: !linkGenerating },
             ].map((btn, i) => (
               <button key={i} onClick={btn.enabled ? btn.onClick : undefined}
                 style={{ background: btn.enabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.02)", border: `1px solid ${btn.enabled ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.04)"}`,
@@ -432,6 +431,42 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 title={!btn.enabled ? "Not available" : btn.label}
               >{btn.icon} {btn.label}</button>
             ))}
+            {/* Overflow menu */}
+            <div ref={overflowRef} style={{ position: "relative", marginLeft: "auto" }}>
+              <button onClick={() => setShowOverflow(v => !v)}
+                style={{ background: showOverflow ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)",
+                  borderRadius: 6, padding: "5px 10px", cursor: "pointer", color: "rgba(255,255,255,0.5)", fontSize: 12, fontWeight: 700,
+                  fontFamily: "'Plus Jakarta Sans', sans-serif", transition: "all 0.15s ease", letterSpacing: 1 }}
+                title="More actions">{"\u22EF"}</button>
+              {showOverflow && (
+                <div style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", background: "#1E2536", border: "1px solid rgba(255,255,255,0.10)",
+                  borderRadius: 8, padding: 4, minWidth: 170, zIndex: 50, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+                  {[
+                    { icon: "\u{1F4C4}", label: "View BOL", color: "rgba(255,255,255,0.6)",
+                      onClick: () => { const bol = loadDocs.find(d => d.doc_type === 'bol'); if (bol) { setPreviewDoc(bol); setShowOverflow(false); } },
+                      enabled: loadDocs.some(d => d.doc_type === 'bol') },
+                    { icon: "\u2726", label: aiSummaryLoading ? "Thinking..." : "AI Summary",
+                      color: aiSummaryLoading ? "#fbbf24" : "#00D4AA",
+                      onClick: () => { requestAiSummary(); setShowOverflow(false); }, enabled: !aiSummaryLoading },
+                    { icon: "\u{1F517}", label: linkGenerating ? "Generating..." : copiedLink ? "Copied!" : "Share Link",
+                      color: copiedLink ? "#34d399" : linkGenerating ? "#fbbf24" : "#a78bfa",
+                      onClick: () => { handleShareLink(); }, enabled: !linkGenerating },
+                    { icon: "\u270F\uFE0F", label: editingMpUrl ? "Cancel Edit URL" : "Edit MP URL", color: "#8B5CF6",
+                      onClick: () => { if (editingMpUrl) { setEditingMpUrl(false); } else { setMpUrlVal(driverInfo.macropointUrl || selectedShipment.macropointUrl || ""); setEditingMpUrl(true); } setShowOverflow(false); },
+                      enabled: true },
+                  ].map((item, i) => (
+                    <button key={i} onClick={item.enabled ? item.onClick : undefined}
+                      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: "transparent", border: "none",
+                        borderRadius: 6, padding: "7px 10px", cursor: item.enabled ? "pointer" : "default", color: item.enabled ? item.color : "rgba(255,255,255,0.2)",
+                        fontSize: 11, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 500, textAlign: "left", opacity: item.enabled ? 1 : 0.5,
+                        transition: "background 0.12s" }}
+                      onMouseEnter={e => { if (item.enabled) e.target.style.background = "rgba(255,255,255,0.06)"; }}
+                      onMouseLeave={e => { e.target.style.background = "transparent"; }}
+                    ><span style={{ fontSize: 13 }}>{item.icon}</span> {item.label}</button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* MP URL Edit — inline input */}
