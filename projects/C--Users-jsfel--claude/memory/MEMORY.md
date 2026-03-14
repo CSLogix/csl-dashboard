@@ -189,7 +189,8 @@ Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Accou
 
 ### Remaining
 - **Rate IQ UI Redesign**: Autocomplete + recent searches + Quick Quote + enhanced carrier cell + Email RC built locally, NOT YET DEPLOYED. See rateiq.md.
-- **Gmail Backfill**: Complete — 17 rates from 159 threads (Sonnet 4). Outlook .msg dump (322 files) upload in progress.
+- **Rate Backfill COMPLETE**: Gmail (17 rates/159 threads) + Outlook (190 rates/322 .msg files) = 207 new rates. DB total ~355. See rateiq.md.
+- **Outlook 35 errors**: NoneType bug in classify_mode — fixable by guarding args. Low priority (most were no-rate emails anyway).
 - **Dispatch Column Picker**: Hide/show columns toggle — 15 cols currently overwhelming
 - **LoadSlideOver action consolidation**: 4 primary + overflow menu
 - **Global font floor**: 11px minimum in all tables (currently 9-10px)
@@ -209,7 +210,7 @@ Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Accou
 
 ## Health Check Baseline — Mar 12, 2026
 - **Server**: 6% disk (184G free), 2.3G/15G RAM, load 0.44, 8 days uptime
-- **DB**: 844 shipments (231→~166 active after archive), 904→835 docs (192 reclassified from "other"), 2,344 emails, 92 rate quotes, 307 unbilled
+- **DB**: 844 shipments (231→~166 active after archive), 904→835 docs (192 reclassified from "other"), 2,344 emails, ~355 rate quotes (was 92→165 gmail→355 outlook), 307 unbilled
 - **Status distribution after cleanup**: 27 distinct statuses → normalized to standard set (Title Case)
 - **Ghost prevention**: EFJ prefix guard deployed in sheet sync. Tolead container numbers no longer create ghost EFJ rows.
 

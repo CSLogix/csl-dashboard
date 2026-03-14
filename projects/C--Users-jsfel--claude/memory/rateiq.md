@@ -220,9 +220,14 @@ Upgraded `quote_extractor.py` from basic Haiku extraction to Sonnet 4.6 with ful
 - **State file**: `backfill_rate_state.json` for resumable processing
 - **Folder mode**: `--folder /path/` for Outlook PDF dump import
 
-## Outlook .msg Extraction (Mar 14, 2026)
-- **322 .msg files** exported to `C:\Users\jsfel\OneDrive\Desktop\Rate Exports\`
-- **Extraction script**: `/root/csl-bot/extract_msg_attachments.py` — uses `extract-msg` library
-- **Pipeline**: .msg → extract attachments (PDFs/images) + body text → `/root/csl-bot/rate-imports/` → `backfill_rate_history.py --folder`
-- **Server dirs**: `/root/csl-bot/rate-msg-dump/` (raw .msg), `/root/csl-bot/rate-imports/` (extracted attachments)
-- **Status**: Upload in progress (handled in separate chat)
+## Outlook .msg Extraction (Mar 14, 2026) — COMPLETE
+- **322 .msg files** from `C:\Users\jsfel\OneDrive\Desktop\Rate Exports\`
+- **Script**: `extract_msg_rates.py` (local: `C:\Users\jsfel\csl-patches\extract_msg_rates.py`, server: `/tmp/extract_msg_rates.py`)
+- **Pipeline**: .msg → `extract-msg` library (body + PDF attachments) → `pdftoppm` → Sonnet vision → `rate_quotes` INSERT
+- **Classification**: DRAY/TRANSLOAD/FTL with post-extraction reclassification (ramp regex, container regex, keyword scoring)
+- **Accessorials**: JSONB column — stored as `{"fuel_surcharge": N}` when numeric
+- **Results**: 322 processed → **190 rates extracted** (59% hit rate), 97 no rate, 35 errors (NoneType on null origin/dest from AI)
+- **Breakdown**: 140 dray, 47 transload, 3 FTL
+- **DB total after backfill**: ~355 rates (165 existing + 190 Outlook)
+- **35 errors**: Caused by AI returning `null` for origin/dest fields. `classify_mode()` concatenation failed on NoneType. Non-fatal (try/except), just skipped those files. Fix: guard with `or ""` in classify_mode args.
+- **Server files**: `/tmp/rate-exports/` (322 .msg), `/tmp/msg_extraction.log` (full run log)
