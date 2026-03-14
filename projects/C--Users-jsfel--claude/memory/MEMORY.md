@@ -59,6 +59,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 ## Recent Bot Changes (Deployed)
 
 ### Mar 14, 2026 Bot Changes
+- **RC Rate Extraction** (#108): `_extract_rate_from_doc()` in routes/emails.py — when `save_attachment` auto-action saves a `carrier_rate` or `customer_rate` doc, triggers Haiku vision extraction (pdftoppm → PNG → Claude) and inserts `rate_quotes` row with `source='document'`. `doc_id` + `source` columns added to `rate_quotes` table. Suggestion banner appears automatically in LoadSlideOver Financials.
 - **Auto-Match Playbook Engine** (#106): `playbook_lane_code` column on shipments (indexed). `_try_playbook_match()` in ai_assistant.py — queries active playbooks by account+origin+destination, auto-populates carrier/rates/equipment on exact single match. Hooked into `_exec_bulk_create_loads` (AI tool) and `POST /api/v2/load/add` (dashboard). `GET /api/playbooks/shipment/{efj}` endpoint. Added to `_shipment_row_to_dict` serializer.
 - **Process Booking** (#107): `POST /api/inbox/process-booking` — two-click load creation. Sender domain→account lookup (17 domains). Claude Sonnet AI extraction. Confidence scoring. Fuzzy playbook match with full defaults. Source tracking per field (ai/domain/playbook).
 - **Playbook-Aware Ask AI prompt**: System prompt instructs Claude to always call `get_lane_playbook` before `bulk_create_loads` and merge defaults. "Process Booking" chip in AskAIOverlay.
@@ -91,6 +92,8 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 ## Recent Dashboard Changes (Deployed)
 
 ### Mar 14, 2026 Dashboard Changes
+- **MP Status real-time sync**: LoadSlideOver now pushes fresh `/api/macropoint/{efj}` data back into global `trackingSummary` Zustand store. Dispatch table MP STATUS column updates immediately when slide-over opens (was stale until next poll). `setTrackingSummary` upgraded to support function updaters.
+- **30s tracking fast-poll**: Dedicated `setInterval(30000)` polls `/api/shipments/tracking-summary` so webhook-triggered MP updates appear in dispatch table within 30s (was 90s full fetchData cycle).
 - **Playbook badge in dispatch**: Book icon next to EFJ# in dispatch table (desktop + mobile) when `playbookLaneCode` is set. Teal lane code badge in LoadSlideOver header.
 - **Process Booking / Build Load button**: Orange "Build Load" button in inbox thread detail header. Fires AI extraction + playbook match.
 - **Load Confirmation slide-over**: 420px right-side drawer. Green "Active Playbook Applied" or Yellow "New Lane Detected" banner. Editable form with source badges (AI blue, DOMAIN purple, PLAYBOOK teal). MISMATCH/MISSING field highlighting. Multi-load warning, key contacts, playbook instructions. "Index as new playbook" checkbox → Ask AI. "Create Load & Dispatch" button → v2/load/add + rate_quotes history. Low-confidence guard.
@@ -139,7 +142,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 - **Batched sheet writes**: ~12 API calls vs ~96
 - **API auth**: `csl_session` cookie (HMAC-signed, password_gen checked, fail-closed) OR `X-Dev-Key` + IP allowlist. Forced pw change on first login (`password_gen <= 1` → `/change-password`)
 - **Vite dev**: proxy `/api/*` → production server with dev key header
-- **Zustand store**: `setShipments` supports function updaters
+- **Zustand store**: `setShipments` and `setTrackingSummary` support function updaters
 - **Multi-provider tracking**: SeaRates → JSONCargo → Playwright. Cache `jsoncargo_cache.json` 6hr TTL
 - **PG dual-write**: `csl_pg_writer.py` (UPSERT/archive) + `csl_sheet_writer.py` (fire-and-forget sheets)
 - **Data source fallback**: Zustand `dataSource` ("postgres"|"sheets"). Yellow "SHEETS MODE" badge when active
