@@ -95,6 +95,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 ### Mar 14, 2026 Dashboard Changes (late)
 - **Dispatch nav removed** (again): Dispatch link removed from `NAV_ITEMS` in constants.js — accessible only via stat cards on Overview. Was accidentally re-added.
 - **Overview panels simplified**: "Rep Scoreboard" → "Rep Overview" (loads + rev only, removed COMMS/DOCS/STALE defense columns). "Account Health" → "Accounts" (loads + rev only, removed Friction/HS columns and red/green health score styling). Neutral row styling.
+- **Overview grid equalized**: Both rows changed from `6fr 4fr` → `1fr 1fr`. All 4 panels (Rep Overview, Accounts, Today's Actions, Live Alerts) now equal width in clean 2×2 grid.
 
 ### Mar 14, 2026 UI Audit (no code changes)
 - **Comprehensive UI analysis** done across all views. Key problem areas identified:
