@@ -199,7 +199,7 @@ Upgraded `quote_extractor.py` from basic Haiku extraction to Sonnet 4.6 with ful
 - Preview panel: width 560, flexShrink 0
 - Directory: `maxWidth: "none"` (full width for wide table)
 
-## Rate IQ UX Redesign (Mar 14, 2026) — Built, Not Yet Deployed
+## Rate IQ UX Redesign (Mar 14, 2026) — DEPLOYED
 - **Autocomplete search**: Origin + Destination inputs with dropdown suggestions from `rateLaneSummaries`. Shows lane count + avg rate per location. `useMemo` client-side filtering.
 - **Recent searches**: Saved to `localStorage` ("rateiq_recent"), shown as blue pills when inputs empty. Max 5.
 - **Quick Quote on LaneCard**: Hover-revealed gradient button → jumps to quote view with lane pre-selected.
@@ -226,8 +226,10 @@ Upgraded `quote_extractor.py` from basic Haiku extraction to Sonnet 4.6 with ful
 - **Pipeline**: .msg → `extract-msg` library (body + PDF attachments) → `pdftoppm` → Sonnet vision → `rate_quotes` INSERT
 - **Classification**: DRAY/TRANSLOAD/FTL with post-extraction reclassification (ramp regex, container regex, keyword scoring)
 - **Accessorials**: JSONB column — stored as `{"fuel_surcharge": N}` when numeric
-- **Results**: 322 processed → **190 rates extracted** (59% hit rate), 97 no rate, 35 errors (NoneType on null origin/dest from AI)
-- **Breakdown**: 140 dray, 47 transload, 3 FTL
-- **DB total after backfill**: ~355 rates (165 existing + 190 Outlook)
-- **35 errors**: Caused by AI returning `null` for origin/dest fields. `classify_mode()` concatenation failed on NoneType. Non-fatal (try/except), just skipped those files. Fix: guard with `or ""` in classify_mode args.
-- **Server files**: `/tmp/rate-exports/` (322 .msg), `/tmp/msg_extraction.log` (full run log)
+- **Initial run**: 322 processed → 190 rates extracted (59% hit rate), 97 no rate, 35 errors (NoneType on null origin/dest from AI)
+- **NoneType fix (Mar 14)**: Added `text = text or ""` / `origin = origin or ""` / `dest = dest or ""` guards in `classify_mode()` in both `extract_msg_rates.py` and `backfill_rate_history.py`
+- **Retry run**: 322 reprocessed with dedup → **128 new rates** extracted, 101 skipped (already in DB), 93 no rate, **0 errors**
+- **Retry breakdown**: 79 dray, 47 transload, 2 FTL
+- **Total Outlook rates**: 318 (190 initial + 128 retry)
+- **DB total after retry**: ~483 rates (355 existing + 128 new)
+- **Server files**: `/tmp/rate-exports/` (322 .msg), `/tmp/extract_msg_rates.py` (fixed), `/tmp/retry_outlook_errors.py` (dedup retry)
