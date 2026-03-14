@@ -36,6 +36,11 @@ export const useAppStore = create((set) => ({
   // ── Current User ──
   currentUser: null,  // { id, username, email, role, rep_name }
 
+  // ── Ask AI ──
+  askAIOpen: false,
+  askAIInitialQuery: null,
+  askAIInitialFiles: null,
+
   // ── Email Drafts ──
   emailDrafts: [],
   draftToast: null,  // { id, efj, subject } — shown briefly after milestone status change
@@ -87,6 +92,9 @@ export const useAppStore = create((set) => ({
   setInboxInitialSearch: (v) => set({ inboxInitialSearch: v }),
   setInboxInitialRep: (v) => set({ inboxInitialRep: v }),
   setCurrentUser: (v) => set({ currentUser: v }),
+  setAskAIOpen: (v) => set({ askAIOpen: v }),
+  setAskAIInitialQuery: (v) => set({ askAIInitialQuery: v }),
+  setAskAIInitialFiles: (v) => set({ askAIInitialFiles: v }),
   setEmailDrafts: (v) => set({ emailDrafts: Array.isArray(v) ? v : [] }),
   setDraftToast: (v) => set({ draftToast: v }),
   setDataSource: (v) => set({ dataSource: v }),
