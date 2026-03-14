@@ -15,7 +15,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [lane-playbooks.md](lane-playbooks.md) — Lane playbook system, schema, AI tools, API endpoints
 
 ## Git — Mar 14, 2026
-- **Latest**: Mar 14 — Frontend monolith split (10K→25 files) + 3 bug fixes
+- **Latest**: Mar 14 — Auto-Match Playbook Engine (#106), Process Booking (#107), Build Load UI
 - **Repos**: `CSLogix/CSLogix_Bot` (private, `master`) | `CSLogix/csl-dashboard` (private, `main` at `b688b27`)
 - **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
@@ -60,25 +60,16 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 
 ### Mar 14, 2026 Bot Changes
 - **Auto-Match Playbook Engine** (#106): `playbook_lane_code` column on shipments (indexed). `_try_playbook_match()` in ai_assistant.py — queries active playbooks by account+origin+destination, auto-populates carrier/rates/equipment on exact single match. Hooked into `_exec_bulk_create_loads` (AI tool) and `POST /api/v2/load/add` (dashboard). `GET /api/playbooks/shipment/{efj}` endpoint. Added to `_shipment_row_to_dict` serializer.
-- **Process Booking** (#107): `POST /api/inbox/process-booking` — two-click load creation. Sender domain→account lookup (17 domains). Claude Sonnet AI extraction (account, origin/dest, move type, equipment, container, booking#, vessel, dates, rates, commodity). Confidence scoring (high/medium/low). Fuzzy playbook match with full defaults (carrier, rates, contacts, workflow, multi-load, escalation). Source tracking per field (ai/domain/playbook).
+- **Process Booking** (#107): `POST /api/inbox/process-booking` — two-click load creation. Sender domain→account lookup (17 domains). Claude Sonnet AI extraction. Confidence scoring. Fuzzy playbook match with full defaults. Source tracking per field (ai/domain/playbook).
+- **Playbook-Aware Ask AI prompt**: System prompt instructs Claude to always call `get_lane_playbook` before `bulk_create_loads` and merge defaults. "Process Booking" chip in AskAIOverlay.
 - **Lane Playbooks** (#103): `lane_playbooks` PG table (JSONB + GIN index), `routes/playbooks.py` (6 CRUD endpoints), 3 AI tools, DSV-RICH-WANDO seeded. Schema v2: versioning, changelog, detention_rules, booking_defaults, seasonal_notes.
 - **Other**: Tolead origin/dest fix (backfilled 25 loads), DFW destination fix (12 rows), Guest access system (`/guest?code=XXXX`).
 
-### Mar 13, 2026 Bot Changes (late night)
-- **Status label→key normalization** (#100): `_STATUS_LABEL_TO_KEY` + `_normalize_status()` in v2.py. `_SHEET_STATUS_MAP` + `_normalize_sheet_status()` in sheet sync. Archive check expanded to include "billed & closed". Fixed EFJ107285 reappearing after Billed & Closed. Normalized 370+ PG rows.
-- **Ask AI body_text + PDF vision** (#101): `body_text` TEXT column on both email tables. Scanner `get_full_body_text()` extracts full plain text or HTML→text. `read_load_document` tool in ai_assistant.py — PDF→image via pdftoppm + Claude Sonnet vision. COALESCE(body_text, body_preview) in AI queries. body_text in inbox API responses. Remaining: backfill body_text for ~6700 existing emails.
-
-### Mar 13, 2026 Bot Changes (evening)
-- **Session security hardening**: Rotated `.session_secret`, fail-closed verify_session_token(), reject tokens without user_id.
-- **Forced password change**: `/change-password` routes, login redirect when `password_gen <= 1`.
-- **Analytics router fix**: `routes/analytics.py` not mounted after monolith split — added import + include_router.
-- **Eli termination**: Deactivated rep. 20 loads reassigned to John F.
-
-### Mar 13, 2026 Bot Changes
-- **Auto-Status Email Drafter**: `routes/email_drafts.py` — milestone triggers → HTML email drafts. Ask AI `bulk_create_loads` fix.
-- **Multi-user auth**: PG `users` table (bcrypt), 7 users, session tokens carry user_id/role/rep_name.
-- **Monolith split**: 9,794-line `app.py` → 15 APIRouter modules in `routes/` + `shared.py`.
-- **Async cache warming** (#96) + **Missing endpoints restored** (#97).
+### Mar 13, 2026 Bot Changes (condensed)
+- **Status normalization** (#100): label→key mapping in v2.py + sheet sync. Fixed archive check for "billed & closed". Normalized 370+ PG rows.
+- **Ask AI body_text + PDF vision** (#101): `body_text` TEXT column on email tables. `read_load_document` AI tool (PDF→image via pdftoppm + Sonnet vision).
+- **Security**: Session hardening (fail-closed), forced password change, analytics router fix, Eli termination (20 loads reassigned).
+- **Auto-Status Email Drafter**, Multi-user auth (7 users, bcrypt), Monolith split (9,794→15 routers + shared.py), Async cache warming (#96), Missing endpoints (#97).
 
 ### Mar 12, 2026 Bot Changes (night)
 - **Scanner 5-Tier Matching**: `match_email_to_efj()` upgraded from 2-tier to 5-tier. Was only matching EFJ pattern + searching `email_threads.body_preview` for containers (broken). Now: (1) EFJ pattern, (2) Tolead hub IDs (`LAX1260312023`) → `shipments.container`, (3) Container# (`MSCU1234567`) → `shipments.container`, (4) Bare 6-digit (`107330`) → `shipments.efj` (subject-only), (5) BOL/Booking → `shipments.bol`. Patch: `patch_scanner_matching.py` (#95). Rescue script matched 123/6702 unmatched emails (59 hub, 58 container, 6 BOL).
@@ -103,6 +94,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 - **Playbook badge in dispatch**: Book icon next to EFJ# in dispatch table (desktop + mobile) when `playbookLaneCode` is set. Teal lane code badge in LoadSlideOver header.
 - **Process Booking / Build Load button**: Orange "Build Load" button in inbox thread detail header. Fires AI extraction + playbook match.
 - **Load Confirmation slide-over**: 420px right-side drawer. Green "Active Playbook Applied" or Yellow "New Lane Detected" banner. Editable form with source badges (AI blue, DOMAIN purple, PLAYBOOK teal). MISMATCH/MISSING field highlighting. Multi-load warning, key contacts, playbook instructions. "Index as new playbook" checkbox → Ask AI. "Create Load & Dispatch" button → v2/load/add + rate_quotes history. Low-confidence guard.
+- **Playbook-Aware Ask AI**: System prompt updated — Claude always checks `get_lane_playbook` before `bulk_create_loads`, merges defaults. "Process Booking" quick-action chip added to AskAIOverlay.
 - **Lane Playbooks frontend** (#104): `PlaybooksView.jsx` — list/detail sub-views, card grid with search + status filter, 2-column detail layout (overview, carriers, rates, facilities, contacts, workflow, escalation, changelog). "Index New Lane" opens Ask AI.
 - **Frontend monolith split**: `DispatchDashboard.jsx` 10,428 → 1,298 lines. 25 files across `helpers/`, `components/`, `views/`.
 - **Bug fixes**: handleApplyRate field corruption (CX rate→carrier pay), showSaveToast scope, setRateApplied scope.

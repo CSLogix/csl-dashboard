@@ -49,7 +49,35 @@ type: project
 - `extract_lane_playbook_schema_v2.json` — JSON Schema for extraction tool
 - Both at `C:\Users\jsfel\Downloads\`
 
+## Auto-Match Engine (#106)
+- `playbook_lane_code` TEXT column on `shipments` (indexed)
+- `_try_playbook_match(efj, account, origin, destination, move_type)` in ai_assistant.py
+- Only auto-applies on exactly 1 active playbook match (0 = no match, 2+ = ambiguous)
+- Auto-populates: carrier, carrier_pay, customer_rate, equipment_type, bot_notes
+- Hooked into: `_exec_bulk_create_loads` (Ask AI) + `POST /api/v2/load/add` (dashboard Add Form)
+- `GET /api/playbooks/shipment/{efj}` — check if a shipment has/can match a playbook
+
+## Process Booking (#107)
+- `POST /api/inbox/process-booking` in routes/emails.py
+- **Step 1**: Sender domain → account lookup (17 domains in `_DOMAIN_ACCOUNT_MAP`)
+- **Step 2**: Claude Sonnet AI extraction (structured JSON: account, origin/dest, move_type, equipment, container, booking#, vessel, dates, rates, commodity)
+- **Step 3**: Cross-check domain vs AI account (domain wins, logs discrepancy)
+- **Step 4**: Confidence scoring — high (all required + 3/4 nice-to-have), medium (missing 1 required), low (2+ missing)
+- **Step 5**: Fuzzy playbook match (ILIKE on city names) → full defaults (carrier, rates, contacts, workflow, multi-load, escalation)
+- Returns: `extracted_load` + `playbook_defaults` + `playbook_match` + `confidence` + `source` per field (ai/domain/playbook)
+
+## Playbook-Aware Ask AI
+- System prompt updated: Claude ALWAYS calls `get_lane_playbook` before `bulk_create_loads`
+- If playbook found + origin/dest match → merges carrier, carrier_pay, customer_rate, equipment_type
+- If no match → proceeds normally + suggests indexing the lane afterward
+- "Process Booking" quick-action chip added to AskAIOverlay
+
+## Frontend
+- **PlaybooksView.jsx**: List/detail sub-views, card grid, 2-column detail layout
+- **Dispatch badge**: Teal book icon next to EFJ# when `playbookLaneCode` set (desktop + mobile)
+- **LoadSlideOver badge**: Clickable teal lane code badge in header
+- **InboxView Build Load**: Orange "Build Load" button → Load Confirmation slide-over (editable form with source badges, MISMATCH/MISSING highlighting, "Index as new playbook" checkbox, "Create Load & Dispatch" button)
+
 ## What's Next
-- Frontend: Playbook viewer/editor in dashboard (new tab or within Rate IQ)
 - More lane seeds as team indexes bookings via Ask AI
 - Retrieval optimization: when lane count > 5, remove inline playbook from system prompt, rely solely on tool retrieval
