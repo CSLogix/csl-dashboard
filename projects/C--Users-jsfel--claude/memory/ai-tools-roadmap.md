@@ -4,7 +4,7 @@ description: Ask AI tool inventory — 24 tools deployed across 4 tiers in ai_as
 type: project
 ---
 
-## Deployed (24 tools in ai_assistant.py)
+## Deployed (27 tools in ai_assistant.py)
 
 ### Original 5
 - `query_lane_history` — lane rate search
@@ -39,6 +39,11 @@ type: project
 - `daily_briefing` — morning standup: arriving loads, expiring LFDs, containers to return, missing docs, low-margin alerts
 - `smart_dispatch_suggest` — "need carrier for 40HC PNCT→ATL" — combines lane rates + carrier DB + compliance into ranked suggestions
 - `read_load_document` — PDF/image vision: downloads doc from uploads dir, converts PDF→image via pdftoppm, sends to Claude Sonnet vision. Can read rate confirmations, BOLs, PODs, invoices. Deployed Mar 13, 2026.
+
+### Lane Playbook Tools (deployed Mar 14, 2026)
+- `get_lane_playbook` — Retrieve playbook by lane_code (exact) or account+origin+destination (fuzzy ILIKE). Returns full JSONB with contacts, rates, carriers, facilities, workflow steps
+- `save_lane_playbook` — Create or update lane playbook. Version increment + changelog append. Used in extraction mode ("index this", "learn this lane")
+- `list_lane_playbooks` — List all configured playbooks with summary info (lane, revenue, margin, total_loads). Optional account/status filters
 
 ### Not implemented (covered by existing tools)
 - `port_schedule_lookup` — functionality covered by existing vessel schedule data in check_efj_status
