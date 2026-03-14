@@ -93,6 +93,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 ## Recent Dashboard Changes (Deployed)
 
 ### Mar 14, 2026 Dashboard Changes (late)
+- **Dispatch Column Picker**: `☷ Columns (N/16)` toolbar button with checkbox dropdown. `hiddenCols` state persisted to `localStorage('dispatch_hidden_cols')`. Default hidden: carrierEmail, trailer, margin. `isColVisible(key)` wraps each `<td>`. `cellStyleFor(key)` replaced `cellStyle(colIdx++)` counter pattern (dynamic column count breaks counter). Missing MGN body cell added (header existed, no `<td>`). Show All / Reset buttons.
 - **Dispatch nav removed** (again): Dispatch link removed from `NAV_ITEMS` in constants.js — accessible only via stat cards on Overview. Was accidentally re-added.
 - **Overview panels simplified**: "Rep Scoreboard" → "Rep Overview" (loads + rev only, removed COMMS/DOCS/STALE defense columns). "Account Health" → "Accounts" (loads + rev only, removed Friction/HS columns and red/green health score styling). Neutral row styling.
 - **Overview grid equalized**: Both rows changed from `6fr 4fr` → `1fr 1fr`. All 4 panels (Rep Overview, Accounts, Today's Actions, Live Alerts) now equal width in clean 2×2 grid.
@@ -185,10 +186,9 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 ## Remaining Work
 
 ### Completed (all deployed)
-Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Account Health View, Auto-Status Email Drafter, Directory ↔ Quote Builder, Boviet Project Cards, Mobile layout, Billing Flow (auto-advance + bulk close), Container Update emails disabled, Rate IQ UI Redesign (deployed Mar 14), Outlook rate backfill (318 rates, 0 errors)
+Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Account Health View, Auto-Status Email Drafter, Directory ↔ Quote Builder, Boviet Project Cards, Mobile layout, Billing Flow (auto-advance + bulk close), Container Update emails disabled, Rate IQ UI Redesign (deployed Mar 14), Outlook rate backfill (318 rates, 0 errors), Dispatch Column Picker (deployed Mar 14)
 
 ### Remaining
-- **Dispatch Column Picker**: Hide/show columns toggle — 15 cols currently overwhelming
 - **LoadSlideOver action consolidation**: 4 primary + overflow menu
 - **Global font floor**: 11px minimum in all tables (currently 9-10px, ~56 instances)
 - **Carrier Auto-Quote Request**: PLANNED — AI picks top 3 carriers from Directory, auto-drafts rate request emails. Not started.
