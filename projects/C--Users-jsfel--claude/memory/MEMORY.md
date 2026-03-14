@@ -13,6 +13,7 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [unbilled-orders.md](unbilled-orders.md) — schema, state machines, archive gate, tech debt
 - [ai-tools-roadmap.md](ai-tools-roadmap.md) — Ask AI tool expansion plan: 11 deployed + 14 to build
 - [lane-playbooks.md](lane-playbooks.md) — Lane playbook system, schema, AI tools, API endpoints
+- [feedback_overview_simplicity.md](feedback_overview_simplicity.md) — Keep Overview panels simple (loads+rev only), no Dispatch in nav
 
 ## Git — Mar 14, 2026
 - **Latest**: Mar 14 — Auto-Match Playbook Engine (#106), Process Booking (#107), Build Load UI
@@ -91,6 +92,10 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 
 ## Recent Dashboard Changes (Deployed)
 
+### Mar 14, 2026 Dashboard Changes (late)
+- **Dispatch nav removed** (again): Dispatch link removed from `NAV_ITEMS` in constants.js — accessible only via stat cards on Overview. Was accidentally re-added.
+- **Overview panels simplified**: "Rep Scoreboard" → "Rep Overview" (loads + rev only, removed COMMS/DOCS/STALE defense columns). "Account Health" → "Accounts" (loads + rev only, removed Friction/HS columns and red/green health score styling). Neutral row styling.
+
 ### Mar 14, 2026 UI Audit (no code changes)
 - **Comprehensive UI analysis** done across all views. Key problem areas identified:
   - **Dispatch table**: 15 columns, requires 2000px+ viewport — needs column picker (hide/show)
@@ -138,7 +143,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 - **Carrier Intelligence Suite**: Directory tab (cards + inline editing + capability pills), Lane Search (grouped results, inline rate editing, carrier enhancements), schema expansion (12 new columns), Sheet imports (35 carrier tabs, 40 rate tabs), doc dedup (SHA-256), MP→billing bridge, Loadboard rename, BOL systemd
 - **Ask AI Command Palette**: `ai_assistant.py` — Claude Sonnet 4.6, 23 tools across 4 tiers, `POST /api/ask-ai`, `AskAIOverlay` component (Ctrl+K), quick-action chips, markdown rendering
 - **Overview**: + New Load button, Billing Pipeline section (stage cards with counts), STATUS_MAP underscore fix
-- **Team Feedback Fixes**: Dispatch nav removed (accessible via stat cards), Yesterday filter + stat card, ← Overview back button, layout reorder (Team above Actions), Boviet STATUS_MAP, inbox density reduction
+- **Team Feedback Fixes**: Dispatch nav removed (accessible via stat cards — re-confirmed Mar 14), Yesterday filter + stat card, ← Overview back button, layout reorder (Team above Actions), Boviet STATUS_MAP, inbox density reduction
 - **Financials + Margin Guard**: `carrier_pay` column, Financials section in LoadSlideOvers, `calcMarginPct()`, red row bg <10%
 - **pg_dump + Tracking + Reply**: Daily backup, auto-token, Reply button in Inbox, Top Lanes tab, Public tracking portal (`/track/{token}`)
 
