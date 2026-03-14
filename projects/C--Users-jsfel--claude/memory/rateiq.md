@@ -198,3 +198,31 @@ Upgraded `quote_extractor.py` from basic Haiku extraction to Sonnet 4.6 with ful
 - Builder panel: width 480, minWidth 420
 - Preview panel: width 560, flexShrink 0
 - Directory: `maxWidth: "none"` (full width for wide table)
+
+## Rate IQ UX Redesign (Mar 14, 2026) — Built, Not Yet Deployed
+- **Autocomplete search**: Origin + Destination inputs with dropdown suggestions from `rateLaneSummaries`. Shows lane count + avg rate per location. `useMemo` client-side filtering.
+- **Recent searches**: Saved to `localStorage` ("rateiq_recent"), shown as blue pills when inputs empty. Max 5.
+- **Quick Quote on LaneCard**: Hover-revealed gradient button → jumps to quote view with lane pre-selected.
+- **Enhanced Carrier Cell** (CarrierRateTable): 3-line info hub — Line 1: name + capability icons + age. Line 2: MC# + copy button (clipboard). Line 3: dispatch email as mailto link.
+- **Email RC button**: Hover-revealed on carrier rows. Opens `mailto:` with pre-filled rate confirmation details (origin, dest, rate, equipment).
+- **LaneCard volume tags**: High Volume (teal, ≥20), Active (blue, ≥5), Low Volume (muted). Trend arrows with %.
+
+## Gmail Rate Backfill (Mar 14, 2026)
+- **Script**: `/root/csl-bot/backfill_rate_history.py` (local: `C:\Users\jsfel\csl-patches\backfill_rate_history.py`)
+- **Vision model**: `claude-sonnet-4-20250514` (NOT `claude-sonnet-4-6-*` — that 404s)
+- **Gmail run result**: 159 threads → 17 rates extracted (6 DRAY, 10 FTL, 1 TRANSLOAD). 10.7% rate.
+- **Classification**: 3-pass — container regex (DRAY anchor) → transload keywords → keyword scoring (threshold ≥2)
+- **DRAY keywords**: chassis, container, pier, vessel, terminal, port, ssl, steamship, demurrage, per diem, free time, pierpass, clean truck, ramp, intermodal, rail, drayage, csx, bnsf, norfolk southern, union pacific, linehaul, prepull, 20', 40', 40hc, 40 hc, 20gp, 40gp, 20st, oog, open top, flat rack, 20ft, 40ft
+- **Post-extraction reclassification**: Checks AI-returned fields for dray signals (container#, chassis, prepull, ramp/intermodal in origin/dest, equipment patterns). Working — caught "Tampa FL PORT" as DRAY.
+- **Attachment filtering**: SKIP_PATTERNS regex filters image001.png, Outlook-*.png, CamScanner BOL/POD. Size threshold >5000 bytes. PDFs prioritized by size desc.
+- **Dual insert**: `rate_quotes` + `lane_rates` tables, both with `source='gmail_backfill'`
+- **Confidence decay**: `max(0.3, 1.0 - (age_months * 0.06))`
+- **State file**: `backfill_rate_state.json` for resumable processing
+- **Folder mode**: `--folder /path/` for Outlook PDF dump import
+
+## Outlook .msg Extraction (Mar 14, 2026)
+- **322 .msg files** exported to `C:\Users\jsfel\OneDrive\Desktop\Rate Exports\`
+- **Extraction script**: `/root/csl-bot/extract_msg_attachments.py` — uses `extract-msg` library
+- **Pipeline**: .msg → extract attachments (PDFs/images) + body text → `/root/csl-bot/rate-imports/` → `backfill_rate_history.py --folder`
+- **Server dirs**: `/root/csl-bot/rate-msg-dump/` (raw .msg), `/root/csl-bot/rate-imports/` (extracted attachments)
+- **Status**: Upload in progress (handled in separate chat)

@@ -188,7 +188,8 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Account Health View, Auto-Status Email Drafter, Directory ↔ Quote Builder, Boviet Project Cards, Mobile layout, Billing Flow (auto-advance + bulk close), Container Update emails disabled
 
 ### Remaining
-- **Rate IQ UI Redesign**: NEXT — tab crowding (7 tabs), directory filter overload, font/spacing polish. Starting new chat.
+- **Rate IQ UI Redesign**: Autocomplete + recent searches + Quick Quote + enhanced carrier cell + Email RC built locally, NOT YET DEPLOYED. See rateiq.md.
+- **Gmail Backfill**: Complete — 17 rates from 159 threads (Sonnet 4). Outlook .msg dump (322 files) upload in progress.
 - **Dispatch Column Picker**: Hide/show columns toggle — 15 cols currently overwhelming
 - **LoadSlideOver action consolidation**: 4 primary + overflow menu
 - **Global font floor**: 11px minimum in all tables (currently 9-10px)
