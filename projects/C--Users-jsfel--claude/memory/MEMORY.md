@@ -59,10 +59,10 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 ## Recent Bot Changes (Deployed)
 
 ### Mar 14, 2026 Bot Changes
-- **Lane Playbooks** (#103): `lane_playbooks` PG table (JSONB + GIN index), `routes/playbooks.py` (6 CRUD endpoints), 3 AI tools (`get_lane_playbook`/`save_lane_playbook`/`list_lane_playbooks`), system prompt updated. DSV-RICH-WANDO seeded (9 contacts, 3 facilities, 7 workflow steps, $2,060 revenue). Schema v2: versioning, changelog, detention_rules, booking_defaults (per-lane not per-shipment), seasonal_notes.
-- **Tolead origin/dest fix**: `_shorten_address()` in `csl_sheet_sync.py` was broken — regex body orphaned after `_get_sheet_hyperlinks()` insertion. Fixed + backfilled 25 active Tolead loads.
-- **DFW destination fix**: 12 Tolead DFW rows had raw ZIP codes (700, 705, etc.) instead of City, ST format. Patched via `fix_tolead_dfw.py`. `psycopg2` `%%` escaping for ILIKE literals.
-- **Guest access system**: `/guest?code=XXXX` endpoint in `routes/auth.py`. `guest_tokens` PG table (code, token, expires_at). Short 6-char codes generated server-side, token stored in DB. One-click mobile-friendly link — sets `csl_session` cookie and redirects to `/app`. Code generator script: `gen_guest_code.py`.
+- **Auto-Match Playbook Engine** (#106): `playbook_lane_code` column on shipments (indexed). `_try_playbook_match()` in ai_assistant.py — queries active playbooks by account+origin+destination, auto-populates carrier/rates/equipment on exact single match. Hooked into `_exec_bulk_create_loads` (AI tool) and `POST /api/v2/load/add` (dashboard). `GET /api/playbooks/shipment/{efj}` endpoint. Added to `_shipment_row_to_dict` serializer.
+- **Process Booking** (#107): `POST /api/inbox/process-booking` — two-click load creation. Sender domain→account lookup (17 domains). Claude Sonnet AI extraction (account, origin/dest, move type, equipment, container, booking#, vessel, dates, rates, commodity). Confidence scoring (high/medium/low). Fuzzy playbook match with full defaults (carrier, rates, contacts, workflow, multi-load, escalation). Source tracking per field (ai/domain/playbook).
+- **Lane Playbooks** (#103): `lane_playbooks` PG table (JSONB + GIN index), `routes/playbooks.py` (6 CRUD endpoints), 3 AI tools, DSV-RICH-WANDO seeded. Schema v2: versioning, changelog, detention_rules, booking_defaults, seasonal_notes.
+- **Other**: Tolead origin/dest fix (backfilled 25 loads), DFW destination fix (12 rows), Guest access system (`/guest?code=XXXX`).
 
 ### Mar 13, 2026 Bot Changes (late night)
 - **Status label→key normalization** (#100): `_STATUS_LABEL_TO_KEY` + `_normalize_status()` in v2.py. `_SHEET_STATUS_MAP` + `_normalize_sheet_status()` in sheet sync. Archive check expanded to include "billed & closed". Fixed EFJ107285 reappearing after Billed & Closed. Normalized 370+ PG rows.
@@ -100,14 +100,13 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 ## Recent Dashboard Changes (Deployed)
 
 ### Mar 14, 2026 Dashboard Changes
-- **Frontend monolith split**: `DispatchDashboard.jsx` 10,428 → 1,298 lines. 25 files across `helpers/`, `components/`, `views/`. Clean Vite build, deployed.
-- **Bug fix: handleApplyRate field corruption**: Was hard-coding `field: "carrier_pay"` — "Apply CX Rate" saved customer rate as carrier pay. Now reads `quote._field` and maps to correct state key (`carrierPay` vs `customerRate`).
-- **Bug fix: showSaveToast scope**: Called from root but defined in LoadSlideOver. Now passed as `{ toast }` callback — toasts show correctly on inline field saves.
-- **Bug fix: setRateApplied scope**: Called from root but state lived in LoadSlideOver. Now passed as `{ onApplied }` callback — rate suggestion banner hides after applying.
-- **Lane Playbooks frontend** (#104): `PlaybooksView.jsx` — self-contained view with list/detail sub-views. List: card grid with search + status filter (Active/Draft/Inactive/All). Detail: 2-column layout — overview cards (commodity, weight, revenue, margin, structure, container), load structure, carriers, customer rates table, accessorials (with rule text), facilities (hours/scheduling/capabilities), contacts (9 with roles/emails), workflow timeline (7 steps with notify lists), escalation rules (3 tiers), changelog. "Index New Lane" button opens Ask AI. Nav: between Rate IQ and Analytics in sidebar. Book icon SVG.
-- **Rate IQ dark dropdowns** (#103): Directory Markets/Ports/Tier `<select>` dropdowns now use `#151926` background on `<option>` elements (was OS-default white). All 3 selects fixed.
-- **Lane Search transload badge**: Added `can_transload` (🔄, sky blue `#38bdf8`) to `capBadges` in Lane Search carrier table. Was missing — only 6 of 7 capabilities were shown.
-- **Account Health sort by loads**: Default sort changed from "Health" to "Loads" (descending) so Boviet/Tolead/DSV appear first. Sort cycle: Loads → Health → Revenue → Friction.
+- **Playbook badge in dispatch**: Book icon next to EFJ# in dispatch table (desktop + mobile) when `playbookLaneCode` is set. Teal lane code badge in LoadSlideOver header.
+- **Process Booking / Build Load button**: Orange "Build Load" button in inbox thread detail header. Fires AI extraction + playbook match.
+- **Load Confirmation slide-over**: 420px right-side drawer. Green "Active Playbook Applied" or Yellow "New Lane Detected" banner. Editable form with source badges (AI blue, DOMAIN purple, PLAYBOOK teal). MISMATCH/MISSING field highlighting. Multi-load warning, key contacts, playbook instructions. "Index as new playbook" checkbox → Ask AI. "Create Load & Dispatch" button → v2/load/add + rate_quotes history. Low-confidence guard.
+- **Lane Playbooks frontend** (#104): `PlaybooksView.jsx` — list/detail sub-views, card grid with search + status filter, 2-column detail layout (overview, carriers, rates, facilities, contacts, workflow, escalation, changelog). "Index New Lane" opens Ask AI.
+- **Frontend monolith split**: `DispatchDashboard.jsx` 10,428 → 1,298 lines. 25 files across `helpers/`, `components/`, `views/`.
+- **Bug fixes**: handleApplyRate field corruption (CX rate→carrier pay), showSaveToast scope, setRateApplied scope.
+- **Other**: Rate IQ dark dropdowns, Lane Search transload badge, Account Health sort by loads.
 
 ### Mar 13, 2026 Dashboard Changes (late night)
 - **Smart Inbox Auto-Actions** (#102): Actions column in inbox table with contextual one-click buttons. `getAutoAction(thread)` maps email_type → suggested action. Buttons: "Save [type]" (teal, for doc emails with attachments), "Delivered" (green, delivery confirmations), "Draft" (blue, opens Ask AI with reply context), "Done" (gray, marks actioned). Thread detail panel: "Draft Reply" + "Save Docs" buttons. Backend `POST /api/inbox/{thread_id}/auto-action` — 3 actions: save_attachment (Gmail API download → load_documents + SHA-256 dedup + billing advance check), mark_delivered, mark_actioned. Optimistic UI updates + flash animation.
