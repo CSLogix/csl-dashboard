@@ -53,7 +53,7 @@ function HistoryTabContent({ rateHistory, historyLoading, onLoad }) {
 // ── Market Rate Card (DrayRates-inspired) ──
 function MarketRateCard({ laneGroup, carrierCapMap }) {
   if (!laneGroup) return null;
-  const { carriers, minRate, maxRate, total, count, port, destination } = laneGroup;
+  const { carriers, minRate, maxRate, total, count, port, destination, miles, origin_zip, dest_zip } = laneGroup;
   const avgRate = count > 0 ? Math.round(total / count) : 0;
   const range = minRate !== Infinity && maxRate > 0 ? `${fmt(minRate)} – ${fmt(maxRate)}` : "—";
 
@@ -61,8 +61,9 @@ function MarketRateCard({ laneGroup, carrierCapMap }) {
   const confidence = count >= 10 ? 99 : count >= 5 ? 85 : count >= 3 ? 70 : count >= 1 ? 50 : 0;
   const confColor = confidence >= 85 ? "#34d399" : confidence >= 60 ? "#FBBF24" : "#fb923c";
 
-  // Rate per mile estimate (rough — avg 250mi round trip if no data)
-  const ratePerMile = avgRate > 0 ? (avgRate / 250).toFixed(2) : "—";
+  // Rate per mile — use actual miles if available, else rough 250mi estimate
+  const milesForCalc = miles || 250;
+  const ratePerMile = avgRate > 0 ? (avgRate / milesForCalc).toFixed(2) : "—";
 
   // Activity level based on carrier count and data freshness
   const activity = carriers.length >= 5 ? "high" : carriers.length >= 3 ? "medium" : "low";
@@ -110,10 +111,14 @@ function MarketRateCard({ laneGroup, carrierCapMap }) {
         </div>
 
         {/* Metrics grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 32px", paddingBottom: 4 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px 32px", paddingBottom: 4 }}>
           <div>
             <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Rate Per Mile</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>${ratePerMile}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>${ratePerMile}{!miles && <span style={{ fontSize: 11, color: "#5A6478", fontWeight: 500 }}> est</span>}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Miles</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: miles ? "#F0F2F5" : "#3D4654", fontFamily: "'JetBrains Mono', monospace" }}>{miles ? miles.toLocaleString() : "—"}</div>
           </div>
           <div>
             <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Activity</div>
@@ -127,6 +132,12 @@ function MarketRateCard({ laneGroup, carrierCapMap }) {
             <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Carriers</div>
             <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>{carriers.length}</div>
           </div>
+          {(origin_zip || dest_zip) && (
+            <div>
+              <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Zip Codes</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{origin_zip || "—"} → {dest_zip || "—"}</div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -196,7 +207,7 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
               const daysSince = cr.created_at ? Math.floor((Date.now() - new Date(cr.created_at).getTime()) / 86400000) : null;
               const isAged = daysSince !== null && daysSince > 30;
               const mcNumber = caps.mc_number || cr.mc_number;
-              const dispatchEmail = caps.contact_email || cr.contact_email;
+              const dispatchEmail = caps.contact_email || cr.carrier_email || cr.contact_email;
               const isHovered = hoveredRow === ci;
 
               return (
@@ -297,7 +308,15 @@ function LaneCard({ lane, onClick, onQuickQuote }) {
           <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5" }}>
             {lane.origin_city || lane.port || "—"} <span style={{ color: "#5A6478" }}>→</span> {lane.dest_city || lane.destination || "—"}
           </div>
-          <div style={{ fontSize: 11, color: "#5A6478", marginTop: 3 }}>{volume} rate{volume !== 1 ? "s" : ""} on file</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
+            <span style={{ fontSize: 11, color: "#5A6478" }}>{volume} rate{volume !== 1 ? "s" : ""} on file</span>
+            {lane.miles && <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{lane.miles.toLocaleString()} mi</span>}
+          </div>
+          {(lane.origin_zip || lane.dest_zip) && (
+            <div style={{ fontSize: 11, color: "#5A6478", marginTop: 2, fontFamily: "'JetBrains Mono', monospace" }}>
+              {lane.origin_zip || "—"} → {lane.dest_zip || "—"}
+            </div>
+          )}
         </div>
         {avgRate > 0 && (
           <div style={{ textAlign: "right" }}>
@@ -453,6 +472,7 @@ export default function RateIQView() {
         can_hazmat: c.can_hazmat, can_overweight: c.can_overweight, can_reefer: c.can_reefer,
         can_bonded: c.can_bonded, can_oog: c.can_oog, can_warehousing: c.can_warehousing,
         can_transload: c.can_transload, tier_rank: c.tier_rank, dnu: c.dnu, mc_number: c.mc_number,
+        contact_email: c.contact_email || c.email, contact_phone: c.contact_phone || c.phone,
       };
     });
     return m;
@@ -491,8 +511,11 @@ export default function RateIQView() {
     const map = {};
     (Array.isArray(laneResults) ? laneResults : []).forEach(r => {
       const key = `${r.port || ""} → ${r.destination || ""}`;
-      if (!map[key]) map[key] = { port: r.port, destination: r.destination, carriers: [], minRate: Infinity, maxRate: 0, total: 0, count: 0 };
+      if (!map[key]) map[key] = { port: r.port, destination: r.destination, carriers: [], minRate: Infinity, maxRate: 0, total: 0, count: 0, miles: null, origin_zip: null, dest_zip: null };
       map[key].carriers.push(r);
+      if (!map[key].miles && r.miles) map[key].miles = r.miles;
+      if (!map[key].origin_zip && r.origin_zip) map[key].origin_zip = r.origin_zip;
+      if (!map[key].dest_zip && r.dest_zip) map[key].dest_zip = r.dest_zip;
       const rate = parseFloat(r.total || r.dray_rate || 0);
       if (rate > 0) { map[key].minRate = Math.min(map[key].minRate, rate); map[key].maxRate = Math.max(map[key].maxRate, rate); map[key].total += rate; map[key].count++; }
     });
@@ -552,7 +575,10 @@ export default function RateIQView() {
       const laneMap = {};
       allRates.forEach(r => {
         const key = `${r.port || ""}|${r.destination || ""}`;
-        if (!laneMap[key]) laneMap[key] = { port: r.port, destination: r.destination, count: 0, totalRate: 0, carriers: new Set(), recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0 };
+        if (!laneMap[key]) laneMap[key] = { port: r.port, destination: r.destination, count: 0, totalRate: 0, carriers: new Set(), recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null };
+        if (!laneMap[key].miles && r.miles) laneMap[key].miles = r.miles;
+        if (!laneMap[key].origin_zip && r.origin_zip) laneMap[key].origin_zip = r.origin_zip;
+        if (!laneMap[key].dest_zip && r.dest_zip) laneMap[key].dest_zip = r.dest_zip;
         laneMap[key].count++;
         const rate = parseFloat(r.total || r.dray_rate || 0);
         if (rate > 0) {
@@ -570,7 +596,7 @@ export default function RateIQView() {
           const recentAvg = l.recentCount > 0 ? l.recentTotal / l.recentCount : null;
           const olderAvg = l.olderCount > 0 ? l.olderTotal / l.olderCount : null;
           const trend_pct = (recentAvg && olderAvg && olderAvg > 0) ? ((recentAvg - olderAvg) / olderAvg) * 100 : null;
-          return { port: l.port, destination: l.destination, load_count: l.count, avg_rate, carrier_count: l.carriers.size, trend_pct };
+          return { port: l.port, destination: l.destination, load_count: l.count, avg_rate, carrier_count: l.carriers.size, trend_pct, miles: l.miles, origin_zip: l.origin_zip, dest_zip: l.dest_zip };
         })
         .sort((a, b) => b.load_count - a.load_count);
       setRateLaneSummaries(summaries);
@@ -752,6 +778,7 @@ export default function RateIQView() {
                   origin_city: group.port, dest_city: group.destination,
                   load_count: group.count, avg_rate: group.count > 0 ? Math.round(group.total / group.count) : 0,
                   carrier_count: group.carriers.length,
+                  miles: group.miles, origin_zip: group.origin_zip, dest_zip: group.dest_zip,
                 }} onClick={() => openLaneDetail(group.port, group.destination, gi)}
                   onQuickQuote={() => { setSelectedLane({ origin: group.port, destination: group.destination }); setView("quote"); }} />
               ))}
