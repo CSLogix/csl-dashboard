@@ -17,7 +17,8 @@ No longer a monolith. Root `DispatchDashboard.jsx` (1,298 lines) contains state,
 | `src/components/DocIndicators.jsx` | 14 | Document type icons |
 | `src/components/TerminalBadge.jsx` | 25 | Terminal status badge |
 | `src/components/TrackingBadge.jsx` | 59 | FTL tracking badge |
-| `src/views/OverviewView.jsx` | 536 | Homepage: KPIs, Scoreboard + Account Health |
+| `src/components/MyActions.jsx` | ~350 | Merged Today's Actions + Live Alerts, rep-scoped, accordion groups |
+| `src/views/OverviewView.jsx` | ~400 | Homepage: KPIs, Rep Overview, Accounts (dark theme, gradient accents) |
 | `src/views/RepDashboardView.jsx` | 1,027 | Rep dashboard: Dray/FTL toggle, inline editing |
 | `src/views/DispatchView.jsx` | 673 | Dispatch table: filters, search, sorting |
 | `src/views/InboxView.jsx` | 796 | Inbox Command Center (has LOCAL inbox constants) |

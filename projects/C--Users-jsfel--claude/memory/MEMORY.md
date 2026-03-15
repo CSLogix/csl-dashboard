@@ -16,8 +16,8 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [feedback_overview_simplicity.md](feedback_overview_simplicity.md) — Keep Overview panels simple (loads+rev only), no Dispatch in nav
 
 ## Git — Mar 15, 2026
-- **Latest**: Mar 15 — Rate IQ miles/zip/MC/email, 11px font floor, Dispatch Column Picker
-- **Repos**: `CSLogix/CSLogix_Bot` (private, `master`) | `CSLogix/csl-dashboard` (private, `main` at `7e1318e`)
+- **Latest**: Mar 15 — Overview redesign (MyActions merge, dark theme), Boviet sheet sync fix (Hanson+Other Shipments columns)
+- **Repos**: `CSLogix/CSLogix_Bot` (private, `master`) | `CSLogix/csl-dashboard` (private, `main`)
 - **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
 - **State files** (`ftl_sent_alerts.json`, `last_check.json`, `export_state.json`) are runtime dedup/state — gitignored, live on VPS only
@@ -92,10 +92,17 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 
 ## Recent Dashboard Changes (Deployed)
 
-### Mar 15, 2026 Changes
-- **Rate IQ miles/zip/MC/email**: Added `miles`, `origin_zip`, `dest_zip` columns to `lane_rates` + `rate_quotes` tables. LEFT JOIN carriers in `/api/lane-rates` + `/api/rate-iq/search-lane` for mc_number/contact_email. LaneCard shows miles + zip. MarketRateCard 3-col metrics with actual miles for RPM calc. Fixed pre-existing search-lane params bug.
-- **Global 11px font floor**: 501 instances of fontSize 9-10px → 11px across 26 files. Zero sub-11px fonts remain.
-- **Dispatch Column Picker**: `☷ Columns (N/16)` toolbar button with checkbox dropdown. `hiddenCols` persisted to localStorage. Default hidden: carrierEmail, trailer, margin. `cellStyleFor(key)` replaced counter pattern. Missing MGN body cell added.
+### Mar 15, 2026 Dashboard Changes
+- **Overview redesign**: Merged Today's Actions + Live Alerts → single full-width `MyActions.jsx` component. Rep-scoped filter + severity tiers (red/amber/gray). Expandable accordion groups with account breakdown pills, overdue countdowns. Gradient left border. Rep avatar dropdown with custom colors.
+- **Overview dark theme**: Gradient accent bar (#00c853→#00b8d4→#2979ff), green revenue values (#00D4AA), cyan column headers, pulsing LIVE badges, gradient panel borders, colored stat card hover glows, rep avatar glow rings.
+- **Removed**: Status pipeline bar from Overview.
+- **Font**: Dashboard uses Plus Jakarta Sans (primary) + JetBrains Mono (numeric).
+
+### Mar 15, 2026 Bot Changes
+- **Boviet sheet sync fix**: "Other Shipments" tab added to `BOVIET_TAB_CONFIGS` (was missing entirely — 5 loads not syncing). Hanson column mapping fixed (Rate column at col 1 shifted all indices by +1 — pickup_date had addresses, status had dates). Fixed 126 Hanson rows + inserted 5 Other Shipments loads. Added `origin_col`/`dest_col` support for dynamic Boviet origins. Hub added to always-sync metadata (tab moves now tracked).
+- **Rate IQ miles/zip/MC/email**: Added `miles`, `origin_zip`, `dest_zip` columns to `lane_rates` + `rate_quotes` tables. LEFT JOIN carriers in `/api/lane-rates` + `/api/rate-iq/search-lane` for mc_number/contact_email. LaneCard shows miles + zip. MarketRateCard 3-col metrics with actual miles for RPM calc.
+- **Global 11px font floor**: 501 instances of fontSize 9-10px → 11px across 26 files.
+- **Dispatch Column Picker**: `☷ Columns (N/16)` toolbar button with checkbox dropdown. `hiddenCols` persisted to localStorage.
 
 ### Mar 14, 2026 Dashboard Changes (late)
 - **LoadSlideOver action consolidation**: 8 buttons → 4 primary + overflow ⋯ menu. Outside-click-to-close dropdown.
@@ -191,7 +198,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 ## Remaining Work
 
 ### Completed (all deployed)
-Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Account Health View, Auto-Status Email Drafter, Directory ↔ Quote Builder, Boviet Project Cards, Mobile layout, Billing Flow (auto-advance + bulk close), Container Update emails disabled, Rate IQ UI Redesign (deployed Mar 14), Outlook rate backfill (318 rates, 0 errors), Dispatch Column Picker (deployed Mar 14-15), LoadSlideOver action consolidation (deployed Mar 14), Global 11px font floor (501 replacements, deployed Mar 15), Rate IQ miles/zip/MC/email (deployed Mar 15)
+Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Account Health View, Auto-Status Email Drafter, Directory ↔ Quote Builder, Boviet Project Cards, Mobile layout, Billing Flow (auto-advance + bulk close), Container Update emails disabled, Rate IQ UI Redesign (deployed Mar 14), Outlook rate backfill (318 rates, 0 errors), Dispatch Column Picker (deployed Mar 14-15), LoadSlideOver action consolidation (deployed Mar 14), Global 11px font floor (deployed Mar 15), Rate IQ miles/zip/MC/email (deployed Mar 15), Overview redesign + MyActions merge (deployed Mar 15), Boviet Hanson+Other Shipments sync fix (deployed Mar 15)
 
 ### Remaining
 - **Carrier Auto-Quote Request**: PLANNED — AI picks top 3 carriers from Directory, auto-drafts rate request emails. Not started.
