@@ -15,9 +15,9 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [lane-playbooks.md](lane-playbooks.md) — Lane playbook system, schema, AI tools, API endpoints
 - [feedback_overview_simplicity.md](feedback_overview_simplicity.md) — Keep Overview panels simple (loads+rev only), no Dispatch in nav
 
-## Git — Mar 14, 2026
-- **Latest**: Mar 14 — Auto-Match Playbook Engine (#106), Process Booking (#107), Build Load UI
-- **Repos**: `CSLogix/CSLogix_Bot` (private, `master`) | `CSLogix/csl-dashboard` (private, `main` at `b688b27`)
+## Git — Mar 15, 2026
+- **Latest**: Mar 15 — Rate IQ miles/zip/MC/email, 11px font floor, Dispatch Column Picker
+- **Repos**: `CSLogix/CSLogix_Bot` (private, `master`) | `CSLogix/csl-dashboard` (private, `main` at `7e1318e`)
 - **VPS, GitHub, Local** all in sync
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials
 - **State files** (`ftl_sent_alerts.json`, `last_check.json`, `export_state.json`) are runtime dedup/state — gitignored, live on VPS only
@@ -92,10 +92,13 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 
 ## Recent Dashboard Changes (Deployed)
 
-### Mar 14, 2026 Dashboard Changes (late)
-- **Dispatch Column Picker**: `☷ Columns (N/16)` toolbar button with checkbox dropdown. `hiddenCols` persisted to localStorage. Default hidden: carrierEmail, trailer, margin. `cellStyleFor(key)` replaced counter pattern. Missing MGN body cell added.
-- **LoadSlideOver action consolidation**: 8 buttons → 4 primary + overflow ⋯ menu. Outside-click-to-close dropdown.
+### Mar 15, 2026 Changes
+- **Rate IQ miles/zip/MC/email**: Added `miles`, `origin_zip`, `dest_zip` columns to `lane_rates` + `rate_quotes` tables. LEFT JOIN carriers in `/api/lane-rates` + `/api/rate-iq/search-lane` for mc_number/contact_email. LaneCard shows miles + zip. MarketRateCard 3-col metrics with actual miles for RPM calc. Fixed pre-existing search-lane params bug.
 - **Global 11px font floor**: 501 instances of fontSize 9-10px → 11px across 26 files. Zero sub-11px fonts remain.
+- **Dispatch Column Picker**: `☷ Columns (N/16)` toolbar button with checkbox dropdown. `hiddenCols` persisted to localStorage. Default hidden: carrierEmail, trailer, margin. `cellStyleFor(key)` replaced counter pattern. Missing MGN body cell added.
+
+### Mar 14, 2026 Dashboard Changes (late)
+- **LoadSlideOver action consolidation**: 8 buttons → 4 primary + overflow ⋯ menu. Outside-click-to-close dropdown.
 - **Dispatch nav removed** (again): Dispatch link removed from `NAV_ITEMS` in constants.js — accessible only via stat cards on Overview. Was accidentally re-added.
 - **Overview panels simplified**: "Rep Scoreboard" → "Rep Overview" (loads + rev only, removed COMMS/DOCS/STALE defense columns). "Account Health" → "Accounts" (loads + rev only, removed Friction/HS columns and red/green health score styling). Neutral row styling.
 - **Overview grid equalized**: Both rows changed from `6fr 4fr` → `1fr 1fr`. All 4 panels (Rep Overview, Accounts, Today's Actions, Live Alerts) now equal width in clean 2×2 grid.
@@ -188,7 +191,7 @@ Note: `csl-ftl` DISABLED (migrated to cron). `csl-export` DISABLED (migrated to 
 ## Remaining Work
 
 ### Completed (all deployed)
-Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Account Health View, Auto-Status Email Drafter, Directory ↔ Quote Builder, Boviet Project Cards, Mobile layout, Billing Flow (auto-advance + bulk close), Container Update emails disabled, Rate IQ UI Redesign (deployed Mar 14), Outlook rate backfill (318 rates, 0 errors), Dispatch Column Picker (deployed Mar 14), LoadSlideOver action consolidation (deployed Mar 14), Global 11px font floor (501 replacements, deployed Mar 14)
+Tracking Portal, Inbox polish, Margin Guard+Bridge+MGN, Rep Scoreboard v2, Account Health View, Auto-Status Email Drafter, Directory ↔ Quote Builder, Boviet Project Cards, Mobile layout, Billing Flow (auto-advance + bulk close), Container Update emails disabled, Rate IQ UI Redesign (deployed Mar 14), Outlook rate backfill (318 rates, 0 errors), Dispatch Column Picker (deployed Mar 14-15), LoadSlideOver action consolidation (deployed Mar 14), Global 11px font floor (501 replacements, deployed Mar 15), Rate IQ miles/zip/MC/email (deployed Mar 15)
 
 ### Remaining
 - **Carrier Auto-Quote Request**: PLANNED — AI picks top 3 carriers from Directory, auto-drafts rate request emails. Not started.
