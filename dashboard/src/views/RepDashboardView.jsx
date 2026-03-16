@@ -285,7 +285,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
 
   // ── FTL Dispatch Table (shared by master + ops in FTL view) ──
   const renderFTLTable = (ships) => {
-    const ftlCols = ["Account", "Status", "EFJ #", "Container/Load #", "MP Status", "Pickup", "Origin", "Destination", "Delivery", "Truck", "Trailer #", "Driver Phone", "Carrier Email", "Rate", "Notes"];
+    const ftlCols = ["", "Account", "Status", "EFJ #", "Container/Load #", "MP Status", "Pickup", "Origin", "Destination", "Delivery", "Truck", "Trailer #", "Driver Phone", "Carrier Email", "Rate", "Notes"];
     const filteredShips = applyColFilters(ships, repColumnFilters, trackingSummary);
     return (
       <div className="dash-panel" style={{ overflow: "hidden" }}>
@@ -313,10 +313,26 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 const dispMarginPct = calcMarginPct(s.customerRate, s.carrierPay);
                 const rowBg = (dispMarginPct !== null && dispMarginPct < 10) ? "rgba(239,68,68,0.10)" : repTermBg;
                 return (
-                  <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`} onClick={() => { if (!isEditing) handleLoadClick(s); }}
-                    style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : rowBg }}>
-                    {/* Account */}
-                    <td style={{ ...tdBase, color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}>{s.account}</td>
+                  <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
+                    style={{ cursor: "default", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : rowBg }}>
+                    {/* Open slide-over button */}
+                    <td style={{ ...tdBase, padding: "5px 4px", width: 24, textAlign: "center" }}>
+                      <button onClick={() => handleLoadClick(s)} title="Open details"
+                        style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
+                        onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
+                    </td>
+                    {/* Account (inline-editable) */}
+                    <td style={{ ...tdBase, color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}
+                      onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("account"); setInlineEditValue(s.account || ""); }}>
+                      {isEditing && inlineEditField === "account" ? (
+                        <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                          onBlur={() => { handleFieldUpdate(s, "account", inlineEditValue); setInlineEditId(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          style={{ ...inlineInputStyle, width: 75, fontWeight: 600 }} onClick={e => e.stopPropagation()} />
+                      ) : (
+                        <span style={{ cursor: "text" }}>{s.account || "\u2014"}</span>
+                      )}
+                    </td>
                     {/* Status (inline-editable) */}
                     <td style={{ ...tdBase, position: "relative" }}
                       onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
@@ -358,10 +374,16 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                         {resolveStatusLabel(s)}
                       </span>
                     </td>
-                    {/* EFJ # */}
-                    <td style={tdBase}>
+                    {/* EFJ # (inline-editable) */}
+                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("efj"); setInlineEditValue(s.efj || ""); }}>
+                      {isEditing && inlineEditField === "efj" ? (
+                        <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                          onBlur={() => { handleFieldUpdate(s, "efj", inlineEditValue); setInlineEditId(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          style={{ ...inlineInputStyle, width: 85, fontWeight: 600, color: "#00D4AA" }} onClick={e => e.stopPropagation()} />
+                      ) : (
                       <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{s.loadNumber}</span>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11, cursor: "text" }}>{s.loadNumber}</span>
                         <DocIndicators docs={docs} />
                         {parseTerminalNotes(s.botAlert)?.hasHolds && (
                           <span title={s.botAlert} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, background: "#EF4444", borderRadius: 3, animation: "alert-pulse 1.8s ease-in-out infinite", flexShrink: 0, cursor: "default" }}>
@@ -369,9 +391,20 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                           </span>
                         )}
                       </div>
+                      )}
                     </td>
-                    {/* Container/Load # */}
-                    <td style={{ ...tdBase, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}>{s.container}</td>
+                    {/* Container/Load # (inline-editable) */}
+                    <td style={{ ...tdBase, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}
+                      onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("container"); setInlineEditValue(s.container || ""); }}>
+                      {isEditing && inlineEditField === "container" ? (
+                        <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                          onBlur={() => { handleFieldUpdate(s, "container", inlineEditValue); setInlineEditId(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          style={{ ...inlineInputStyle, width: 110 }} onClick={e => e.stopPropagation()} />
+                      ) : (
+                        <span style={{ cursor: "text" }}>{s.container || "\u2014"}</span>
+                      )}
+                    </td>
                     {/* MP Status */}
                     <td style={tdBase}>
                       {(s.moveType === "FTL" || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} mpLastUpdated={s.mpLastUpdated} /> : <span style={{ color: "#5A6478", fontSize: 11, fontStyle: "italic" }}>No MP</span>}
@@ -400,10 +433,30 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                         </span>
                       )}
                     </td>
-                    {/* Origin */}
-                    <td style={{ ...tdBase, fontSize: 11, color: "#F0F2F5", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.origin}>{s.origin || "\u2014"}</td>
-                    {/* Destination */}
-                    <td style={{ ...tdBase, fontSize: 11, color: "#F0F2F5", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.destination}>{s.destination || "\u2014"}</td>
+                    {/* Origin (inline-editable) */}
+                    <td style={{ ...tdBase, fontSize: 11, color: "#F0F2F5", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.origin}
+                      onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("origin"); setInlineEditValue(s.origin || ""); }}>
+                      {isEditing && inlineEditField === "origin" ? (
+                        <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                          onBlur={() => { handleFieldUpdate(s, "origin", inlineEditValue); setInlineEditId(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          style={{ ...inlineInputStyle, width: 110 }} onClick={e => e.stopPropagation()} />
+                      ) : (
+                        <span style={{ cursor: "text" }}>{s.origin || "\u2014"}</span>
+                      )}
+                    </td>
+                    {/* Destination (inline-editable) */}
+                    <td style={{ ...tdBase, fontSize: 11, color: "#F0F2F5", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.destination}
+                      onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("destination"); setInlineEditValue(s.destination || ""); }}>
+                      {isEditing && inlineEditField === "destination" ? (
+                        <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                          onBlur={() => { handleFieldUpdate(s, "destination", inlineEditValue); setInlineEditId(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          style={{ ...inlineInputStyle, width: 110 }} onClick={e => e.stopPropagation()} />
+                      ) : (
+                        <span style={{ cursor: "text" }}>{s.destination || "\u2014"}</span>
+                      )}
+                    </td>
                     {/* Delivery (inline-editable, DD-MM + time) */}
                     <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                       {isEditing && inlineEditField === "delivery" ? (
@@ -836,7 +889,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
-                  {["EFJ #", "Container/Load #", "Type", "Carrier", "Origin \u2192 Dest", "ETA/ERD", "PU", "DEL", "Driver", "Status"].map(h => renderFilterTh(h))}
+                  {["", "EFJ #", "Container/Load #", "Type", "Carrier", "Origin \u2192 Dest", "ETA/ERD", "PU", "DEL", "Driver", "Status"].map(h => renderFilterTh(h))}
                 </tr>
               </thead>
               <tbody>
@@ -850,18 +903,41 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                   const isEditing = inlineEditId === s.id;
                   const repDrayMarginPct = calcMarginPct(s.customerRate, s.carrierPay);
                   return (
-                    <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`} onClick={() => { if (!isEditing) handleLoadClick(s); }}
-                      style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : (repDrayMarginPct !== null && repDrayMarginPct < 10 ? "rgba(239,68,68,0.10)" : undefined) }}>
-                      <td style={{ padding: "8px 14px" }}>
+                    <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
+                      style={{ cursor: "default", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : (repDrayMarginPct !== null && repDrayMarginPct < 10 ? "rgba(239,68,68,0.10)" : undefined) }}>
+                      {/* Open slide-over button */}
+                      <td style={{ padding: "5px 4px", width: 24, textAlign: "center" }}>
+                        <button onClick={() => handleLoadClick(s)} title="Open details"
+                          style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
+                          onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
+                      </td>
+                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("efj"); setInlineEditValue(s.efj || ""); }}>
+                        {isEditing && inlineEditField === "efj" ? (
+                          <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { handleFieldUpdate(s, "efj", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 85, fontWeight: 600, color: "#00D4AA" }} onClick={e => e.stopPropagation()} />
+                        ) : (
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{s.loadNumber}</span>
+                          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11, cursor: "text" }}>{s.loadNumber}</span>
                           <DocIndicators docs={docs} />
                           {s.botAlert && s.botAlert.includes("HOLD") && (
                             <span title={s.botAlert} style={{ fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: "rgba(239,68,68,0.15)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.35)", letterSpacing: "0.3px", animation: "alert-pulse 1.8s ease-in-out infinite", cursor: "default" }}>HOLD</span>
                           )}
                         </div>
+                        )}
                       </td>
-                      <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}>{s.container}</td>
+                      <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}
+                        onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("container"); setInlineEditValue(s.container || ""); }}>
+                        {isEditing && inlineEditField === "container" ? (
+                          <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { handleFieldUpdate(s, "container", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 110 }} onClick={e => e.stopPropagation()} />
+                        ) : (
+                          <span style={{ cursor: "text" }}>{s.container || "\u2014"}</span>
+                        )}
+                      </td>
                       {/* Move Type */}
                       <td style={{ padding: "8px 14px" }}>
                         <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
@@ -870,17 +946,49 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                           {s.moveType || "Dray"}
                         </span>
                       </td>
-                      <td style={{ padding: "8px 14px", fontSize: 11, color: "#F0F2F5" }}>{s.carrier}</td>
-                      <td style={{ padding: "8px 14px", fontSize: 11 }}>
-                        <span style={{ color: "#F0F2F5" }}>{s.origin}</span>
-                        <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
-                        <span style={{ color: "#F0F2F5" }}>{s.destination}</span>
+                      <td style={{ padding: "8px 14px", fontSize: 11, color: "#F0F2F5" }}
+                        onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("carrier"); setInlineEditValue(s.carrier || ""); }}>
+                        {isEditing && inlineEditField === "carrier" ? (
+                          <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { handleFieldUpdate(s, "carrier", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 90 }} onClick={e => e.stopPropagation()} />
+                        ) : (
+                          <span style={{ cursor: "text" }}>{s.carrier || "\u2014"}</span>
+                        )}
                       </td>
-                      {/* ETA/ERD */}
-                      <td style={{ padding: "8px 14px" }}>
-                        <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>
-                          {formatDDMM(s.eta || s.lfd) || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}
+                      <td style={{ padding: "8px 14px", fontSize: 11 }}>
+                        <span style={{ color: "#F0F2F5", cursor: "text" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("origin"); setInlineEditValue(s.origin || ""); }}>
+                          {isEditing && inlineEditField === "origin" ? (
+                            <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                              onBlur={() => { handleFieldUpdate(s, "origin", inlineEditValue); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 100 }} onClick={e => e.stopPropagation()} />
+                          ) : (s.origin || "\u2014")}
                         </span>
+                        <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
+                        <span style={{ color: "#F0F2F5", cursor: "text" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("destination"); setInlineEditValue(s.destination || ""); }}>
+                          {isEditing && inlineEditField === "destination" ? (
+                            <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                              onBlur={() => { handleFieldUpdate(s, "destination", inlineEditValue); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 100 }} onClick={e => e.stopPropagation()} />
+                          ) : (s.destination || "\u2014")}
+                        </span>
+                      </td>
+                      {/* ETA/ERD (inline-editable) */}
+                      <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("eta"); setInlineEditValue(""); }}>
+                        {isEditing && inlineEditField === "eta" ? (
+                          <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
+                            onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "/" + v.slice(2); setInlineEditValue(v); }}
+                            onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "eta", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) handleFieldUpdate(s, "eta", parsed); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} onClick={e => e.stopPropagation()} />
+                        ) : (
+                          <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>
+                            {formatDDMM(s.eta || s.lfd) || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}
+                          </span>
+                        )}
                       </td>
                       {/* PU Date + Time (inline-editable, DD-MM + time) */}
                       <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
@@ -930,10 +1038,40 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: "8px 14px", fontSize: 11, color: "#8B95A8", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.driver || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</td>
-                      <td style={{ padding: "8px 14px" }}>
+                      <td style={{ padding: "8px 14px", fontSize: 11, color: "#8B95A8", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("driver"); setInlineEditValue(s.driver || ""); }}>
+                        {isEditing && inlineEditField === "driver" ? (
+                          <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { handleFieldUpdate(s, "driver", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 90 }} onClick={e => e.stopPropagation()} />
+                        ) : (
+                          <span style={{ cursor: "text" }}>{s.driver || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</span>
+                        )}
+                      </td>
+                      {/* Status (inline-editable dropdown) */}
+                      <td style={{ padding: "8px 14px", position: "relative" }}
+                        onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
+                        {isEditing && inlineEditField === "status" ? (
+                          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 9999, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
+                            {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
+                              const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
+                              return (
+                                <button key={st.key} onClick={(e) => { e.stopPropagation(); handleStatusUpdate(s.id, st.key); setInlineEditId(null); }}
+                                  style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", padding: "4px 7px", borderRadius: 4, border: "none",
+                                    background: s.status === st.key ? `${stc.main}18` : "transparent",
+                                    color: s.status === st.key ? stc.main : "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                                  <span style={{ width: 4, height: 4, borderRadius: "50%", background: stc.main, flexShrink: 0 }} />
+                                  {st.label}
+                                </button>
+                              );
+                            })}
+                            <button onClick={(e) => { e.stopPropagation(); setInlineEditId(null); }}
+                              style={{ display: "block", width: "100%", padding: "3px 7px", marginTop: 2, borderRadius: 4, border: "none", background: "rgba(255,255,255,0.03)", color: "#5A6478", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+                          </div>
+                        ) : null}
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 700,
-                          color: sc.main, background: `${sc.main}12`, border: `1px solid ${sc.main}22`, textTransform: "uppercase" }}>
+                          color: sc.main, background: `${sc.main}12`, border: `1px solid ${sc.main}22`, textTransform: "uppercase", cursor: "pointer" }}>
                           <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
                           {STATUSES.find(st => st.key === s.status)?.label || s.status}
                         </span>
@@ -968,7 +1106,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
         </div>
         <div style={{ overflow: "auto", maxHeight: "calc(100vh - 340px)", minHeight: 400 }}>
           {(() => {
-            const repCols = ["Account", "EFJ #", "Container/Load #", "Type", "Carrier", "Origin \u2192 Dest", "ETA/ERD", "PU", "DEL", "Status"];
+            const repCols = ["", "Account", "EFJ #", "Container/Load #", "Type", "Carrier", "Origin \u2192 Dest", "ETA/ERD", "PU", "DEL", "Status"];
             return (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
@@ -987,19 +1125,56 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                   const isEditing = inlineEditId === s.id;
                   const repFtlMarginPct = calcMarginPct(s.customerRate, s.carrierPay);
                   return (
-                    <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`} onClick={() => { if (!isEditing) handleLoadClick(s); }}
-                      style={{ cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : (repFtlMarginPct !== null && repFtlMarginPct < 10 ? "rgba(239,68,68,0.10)" : undefined) }}>
-                      <td style={{ padding: "8px 14px", color: "#F0F2F5", fontSize: 11 }}>{s.account}</td>
-                      <td style={{ padding: "8px 14px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{s.loadNumber}</span>
-                          <DocIndicators docs={docs} />
-                          {s.botAlert && s.botAlert.includes("HOLD") && (
-                            <span title={s.botAlert} style={{ fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: "rgba(239,68,68,0.15)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.35)", letterSpacing: "0.3px", animation: "alert-pulse 1.8s ease-in-out infinite", cursor: "default" }}>HOLD</span>
-                          )}
-                        </div>
+                    <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
+                      style={{ cursor: "default", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : (repFtlMarginPct !== null && repFtlMarginPct < 10 ? "rgba(239,68,68,0.10)" : undefined) }}>
+                      {/* Open slide-over button */}
+                      <td style={{ padding: "5px 4px", width: 24, textAlign: "center" }}>
+                        <button onClick={() => handleLoadClick(s)} title="Open details"
+                          style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
+                          onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
                       </td>
-                      <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}>{s.container}</td>
+                      {/* Account (inline-editable) */}
+                      <td style={{ padding: "8px 14px", color: "#F0F2F5", fontSize: 11 }}
+                        onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("account"); setInlineEditValue(s.account || ""); }}>
+                        {isEditing && inlineEditField === "account" ? (
+                          <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { handleFieldUpdate(s, "account", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 75 }} onClick={e => e.stopPropagation()} />
+                        ) : (
+                          <span style={{ cursor: "text" }}>{s.account || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</span>
+                        )}
+                      </td>
+                      {/* EFJ (inline-editable) */}
+                      <td style={{ padding: "8px 14px" }}
+                        onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("efj"); setInlineEditValue(s.efj || ""); }}>
+                        {isEditing && inlineEditField === "efj" ? (
+                          <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { handleFieldUpdate(s, "efj", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 85, fontWeight: 600, color: "#00D4AA" }} onClick={e => e.stopPropagation()} />
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, cursor: "text" }}>
+                            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{s.loadNumber}</span>
+                            <DocIndicators docs={docs} />
+                            {s.botAlert && s.botAlert.includes("HOLD") && (
+                              <span title={s.botAlert} style={{ fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: "rgba(239,68,68,0.15)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.35)", letterSpacing: "0.3px", animation: "alert-pulse 1.8s ease-in-out infinite", cursor: "default" }}>HOLD</span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      {/* Container (inline-editable) */}
+                      <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}
+                        onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("container"); setInlineEditValue(s.container || ""); }}>
+                        {isEditing && inlineEditField === "container" ? (
+                          <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { handleFieldUpdate(s, "container", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 110 }} onClick={e => e.stopPropagation()} />
+                        ) : (
+                          <span style={{ cursor: "text" }}>{s.container || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</span>
+                        )}
+                      </td>
                       {/* Move Type */}
                       <td style={{ padding: "8px 14px" }}>
                         <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
@@ -1008,18 +1183,57 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                           {s.moveType || "Dray"}
                         </span>
                       </td>
-                      {/* Carrier */}
-                      <td style={{ padding: "8px 14px", fontSize: 11, color: "#F0F2F5", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.carrier || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</td>
-                      <td style={{ padding: "8px 14px", fontSize: 11 }}>
-                        <span style={{ color: "#F0F2F5" }}>{s.origin}</span>
-                        <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
-                        <span style={{ color: "#F0F2F5" }}>{s.destination}</span>
+                      {/* Carrier (inline-editable) */}
+                      <td style={{ padding: "8px 14px", fontSize: 11, color: "#F0F2F5", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("carrier"); setInlineEditValue(s.carrier || ""); }}>
+                        {isEditing && inlineEditField === "carrier" ? (
+                          <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { handleFieldUpdate(s, "carrier", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 100 }} onClick={e => e.stopPropagation()} />
+                        ) : (
+                          <span style={{ cursor: "text" }}>{s.carrier || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</span>
+                        )}
                       </td>
-                      {/* ETA/ERD */}
-                      <td style={{ padding: "8px 14px" }}>
-                        <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>
-                          {formatDDMM(s.eta || s.lfd) || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}
-                        </span>
+                      {/* Origin → Dest (inline-editable, split) */}
+                      <td style={{ padding: "8px 14px", fontSize: 11 }}
+                        onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("origin"); setInlineEditValue(s.origin || ""); }}>
+                        {isEditing && inlineEditField === "origin" ? (
+                          <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { handleFieldUpdate(s, "origin", inlineEditValue); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 80 }} onClick={e => e.stopPropagation()} />
+                        ) : isEditing && inlineEditField === "destination" ? (
+                          <span style={{ cursor: "text" }}>
+                            <span style={{ color: "#F0F2F5" }}>{s.origin}</span>
+                            <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
+                            <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                              onBlur={() => { handleFieldUpdate(s, "destination", inlineEditValue); setInlineEditId(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                              style={{ ...inlineInputStyle, width: 80 }} onClick={e => e.stopPropagation()} />
+                          </span>
+                        ) : (
+                          <span style={{ cursor: "text" }}>
+                            <span style={{ color: "#F0F2F5" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("origin"); setInlineEditValue(s.origin || ""); }}>{s.origin}</span>
+                            <span style={{ color: "#3D4557", margin: "0 4px" }}>{"\u2192"}</span>
+                            <span style={{ color: "#F0F2F5" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("destination"); setInlineEditValue(s.destination || ""); }}>{s.destination}</span>
+                          </span>
+                        )}
+                      </td>
+                      {/* ETA/ERD (inline-editable) */}
+                      <td style={{ padding: "8px 14px" }}
+                        onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("eta"); setInlineEditValue(""); }}>
+                        {isEditing && inlineEditField === "eta" ? (
+                          <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
+                            onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "/" + v.slice(2); setInlineEditValue(v); }}
+                            onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "eta", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) handleFieldUpdate(s, "eta", parsed); setInlineEditId(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                            style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} onClick={e => e.stopPropagation()} />
+                        ) : (
+                          <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>
+                            {formatDDMM(s.eta || s.lfd) || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}
+                          </span>
+                        )}
                       </td>
                       {/* PU Date + Time (inline-editable, DD-MM + time) */}
                       <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
@@ -1069,9 +1283,43 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: "8px 14px" }}>
+                      {/* Status (inline-editable dropdown) */}
+                      <td style={{ padding: "8px 14px", position: "relative" }}
+                        onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
+                        {isEditing && inlineEditField === "status" ? (
+                          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 9999, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
+                            {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
+                              const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
+                              return (
+                                <button key={st.key} onClick={(e) => { e.stopPropagation(); handleStatusUpdate(s.id, st.key); setInlineEditId(null); }}
+                                  style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", padding: "4px 7px", borderRadius: 4, border: "none",
+                                    background: s.status === st.key ? `${stc.main}18` : "transparent",
+                                    color: s.status === st.key ? stc.main : "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                                  <span style={{ width: 4, height: 4, borderRadius: "50%", background: stc.main, flexShrink: 0 }} />
+                                  {st.label}
+                                </button>
+                              );
+                            })}
+                            <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />
+                            <div style={{ fontSize: 8, fontWeight: 700, color: "#5A6478", letterSpacing: "1.5px", padding: "2px 7px", textTransform: "uppercase" }}>Billing</div>
+                            {BILLING_STATUSES.map(st => {
+                              const stc = BILLING_STATUS_COLORS[st.key] || { main: "#94a3b8" };
+                              return (
+                                <button key={st.key} onClick={(e) => { e.stopPropagation(); handleStatusUpdate(s.id, st.key); setInlineEditId(null); }}
+                                  style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", padding: "4px 7px", borderRadius: 4, border: "none",
+                                    background: s.status === st.key ? `${stc.main}18` : "transparent",
+                                    color: s.status === st.key ? stc.main : "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                                  <span style={{ width: 4, height: 4, borderRadius: "50%", background: stc.main, flexShrink: 0 }} />
+                                  {st.label}
+                                </button>
+                              );
+                            })}
+                            <button onClick={(e) => { e.stopPropagation(); setInlineEditId(null); }}
+                              style={{ display: "block", width: "100%", padding: "3px 7px", marginTop: 2, borderRadius: 4, border: "none", background: "rgba(255,255,255,0.03)", color: "#5A6478", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+                          </div>
+                        ) : null}
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 700,
-                          color: sc.main, background: `${sc.main}12`, border: `1px solid ${sc.main}22`, textTransform: "uppercase" }}>
+                          color: sc.main, background: `${sc.main}12`, border: `1px solid ${sc.main}22`, textTransform: "uppercase", cursor: "pointer" }}>
                           <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
                           {STATUSES.find(st => st.key === s.status)?.label || s.status}
                         </span>

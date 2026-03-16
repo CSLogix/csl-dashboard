@@ -493,6 +493,7 @@ export default function DispatchView({
         <table style={{ width: "100%", minWidth: 1600, borderCollapse: "collapse", fontSize: 11 }}>
           <thead>
             <tr>
+              <th style={{ padding: "7px 4px", width: 24, borderBottom: "1px solid rgba(255,255,255,0.08)" }} />
               {DISPATCH_COLS.filter(c => isColVisible(c.key)).map((col, ci) => {
                 const isFilterable = FILTERABLE_KEYS.includes(col.key);
                 const hasColFilter = !!columnFilters[col.key];
@@ -573,8 +574,13 @@ export default function DispatchView({
               const termBg = dispTermInfo?.isReady ? "rgba(34,197,94,0.06)" : dispTermInfo?.hasHolds ? "rgba(239,68,68,0.05)" : null;
               const rowBg = isSelected ? `${sc.main}10` : termBg || zebraBg;
               return (
-                <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`} onClick={() => { if (!isInlineEditing) handleLoadClick(s); }}
-                  style={{ cursor: "pointer", background: highlightedEfj === s.efj ? undefined : rowBg }}>
+                <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
+                  style={{ cursor: "default", background: highlightedEfj === s.efj ? undefined : rowBg }}>
+                  <td style={{ padding: "5px 4px", width: 24, textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                    <button onClick={() => handleLoadClick(s)} title="Open details"
+                      style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
+                      onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
+                  </td>
                   {isColVisible("account") && <td style={{ ...cellStyleFor("account"), color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}
                     onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("account"); setInlineEditValue(s.account || ""); }}>
                     {isInlineEditing && inlineEditField === "account" ? (
