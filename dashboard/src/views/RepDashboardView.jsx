@@ -285,7 +285,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
 
   // ── FTL Dispatch Table (shared by master + ops in FTL view) ──
   const renderFTLTable = (ships) => {
-    const ftlCols = ["", "Account", "Status", "EFJ #", "Container/Load #", "MP Status", "Pickup", "Origin", "Destination", "Delivery", "Truck", "Trailer #", "Driver Phone", "Carrier Email", "Rate", "Notes"];
+    const ftlCols = ["", "EFJ #", "Status", "Container/Load #", "MP Status", "Pickup", "Origin", "Destination", "Delivery", "Truck", "Trailer #", "Driver Phone", "Carrier Email", "Rate", "Notes"];
     const filteredShips = applyColFilters(ships, repColumnFilters, trackingSummary);
     return (
       <div className="dash-panel" style={{ overflow: "hidden" }}>
@@ -321,16 +321,23 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                         style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
                         onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
                     </td>
-                    {/* Account (inline-editable) */}
-                    <td style={{ ...tdBase, color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}
-                      onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("account"); setInlineEditValue(s.account || ""); }}>
-                      {isEditing && inlineEditField === "account" ? (
+                    {/* EFJ # (inline-editable) */}
+                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("efj"); setInlineEditValue(s.efj || ""); }}>
+                      {isEditing && inlineEditField === "efj" ? (
                         <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
-                          onBlur={() => { handleFieldUpdate(s, "account", inlineEditValue); setInlineEditId(null); }}
+                          onBlur={() => { handleFieldUpdate(s, "efj", inlineEditValue); setInlineEditId(null); }}
                           onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                          style={{ ...inlineInputStyle, width: 75, fontWeight: 600 }} onClick={e => e.stopPropagation()} />
+                          style={{ ...inlineInputStyle, width: 85, fontWeight: 600, color: "#00D4AA" }} onClick={e => e.stopPropagation()} />
                       ) : (
-                        <span style={{ cursor: "text" }}>{s.account || "\u2014"}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11, cursor: "text" }}>{s.loadNumber}</span>
+                        <DocIndicators docs={docs} />
+                        {parseTerminalNotes(s.botAlert)?.hasHolds && (
+                          <span title={s.botAlert} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, background: "#EF4444", borderRadius: 3, animation: "alert-pulse 1.8s ease-in-out infinite", flexShrink: 0, cursor: "default" }}>
+                            <svg viewBox="0 0 24 24" fill="white" style={{ width: 9, height: 9 }}><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+                          </span>
+                        )}
+                      </div>
                       )}
                     </td>
                     {/* Status (inline-editable) */}
@@ -373,25 +380,6 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                         <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
                         {resolveStatusLabel(s)}
                       </span>
-                    </td>
-                    {/* EFJ # (inline-editable) */}
-                    <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("efj"); setInlineEditValue(s.efj || ""); }}>
-                      {isEditing && inlineEditField === "efj" ? (
-                        <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
-                          onBlur={() => { handleFieldUpdate(s, "efj", inlineEditValue); setInlineEditId(null); }}
-                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                          style={{ ...inlineInputStyle, width: 85, fontWeight: 600, color: "#00D4AA" }} onClick={e => e.stopPropagation()} />
-                      ) : (
-                      <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11, cursor: "text" }}>{s.loadNumber}</span>
-                        <DocIndicators docs={docs} />
-                        {parseTerminalNotes(s.botAlert)?.hasHolds && (
-                          <span title={s.botAlert} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, background: "#EF4444", borderRadius: 3, animation: "alert-pulse 1.8s ease-in-out infinite", flexShrink: 0, cursor: "default" }}>
-                            <svg viewBox="0 0 24 24" fill="white" style={{ width: 9, height: 9 }}><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
-                          </span>
-                        )}
-                      </div>
-                      )}
                     </td>
                     {/* Container/Load # (inline-editable) */}
                     <td style={{ ...tdBase, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}
@@ -1106,7 +1094,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
         </div>
         <div style={{ overflow: "auto", maxHeight: "calc(100vh - 340px)", minHeight: 400 }}>
           {(() => {
-            const repCols = ["", "Account", "EFJ #", "Container/Load #", "Type", "Carrier", "Origin \u2192 Dest", "ETA/ERD", "PU", "DEL", "Status"];
+            const repCols = ["", "EFJ #", "Container/Load #", "Type", "Carrier", "Origin \u2192 Dest", "ETA/ERD", "PU", "DEL", "Status"];
             return (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
@@ -1132,18 +1120,6 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                         <button onClick={() => handleLoadClick(s)} title="Open details"
                           style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
                           onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
-                      </td>
-                      {/* Account (inline-editable) */}
-                      <td style={{ padding: "8px 14px", color: "#F0F2F5", fontSize: 11 }}
-                        onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("account"); setInlineEditValue(s.account || ""); }}>
-                        {isEditing && inlineEditField === "account" ? (
-                          <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
-                            onBlur={() => { handleFieldUpdate(s, "account", inlineEditValue); setInlineEditId(null); }}
-                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                            style={{ ...inlineInputStyle, width: 75 }} onClick={e => e.stopPropagation()} />
-                        ) : (
-                          <span style={{ cursor: "text" }}>{s.account || <span style={{ color: "#3D4557" }}>{"\u2014"}</span>}</span>
-                        )}
                       </td>
                       {/* EFJ (inline-editable) */}
                       <td style={{ padding: "8px 14px" }}

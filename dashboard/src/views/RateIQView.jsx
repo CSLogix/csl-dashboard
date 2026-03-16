@@ -291,9 +291,16 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
 }
 
 // ── Lane Card (for browse view) ──
+const MOVE_TYPE_STYLES = {
+  dray: { label: "Dray", color: "#60a5fa", bg: "rgba(59,130,246,0.12)", border: "rgba(59,130,246,0.25)" },
+  ftl: { label: "FTL", color: "#FBBF24", bg: "rgba(251,191,36,0.12)", border: "rgba(251,191,36,0.25)" },
+  transload: { label: "Transload", color: "#a78bfa", bg: "rgba(167,139,250,0.12)", border: "rgba(167,139,250,0.25)" },
+};
+
 function LaneCard({ lane, onClick, onQuickQuote }) {
   const [hovered, setHovered] = useState(false);
   const volume = lane.load_count || 0;
+  const mtStyle = MOVE_TYPE_STYLES[(lane.move_type || "dray").toLowerCase()] || MOVE_TYPE_STYLES.dray;
   const volTag = volume >= 20 ? { label: "High Volume", color: "#00D4AA", bg: "rgba(0,212,170,0.15)", border: "rgba(0,212,170,0.35)" }
     : volume >= 5 ? { label: "Active", color: "#3B82F6", bg: "rgba(59,130,246,0.15)", border: "rgba(59,130,246,0.35)" }
     : { label: "Low Volume", color: "#5A6478", bg: "rgba(90,100,120,0.08)", border: "rgba(90,100,120,0.15)" };
@@ -334,11 +341,14 @@ function LaneCard({ lane, onClick, onQuickQuote }) {
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", gap: 6 }}>
+          <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: mtStyle.bg, color: mtStyle.color, border: `1px solid ${mtStyle.border}` }}>
+            {mtStyle.label}
+          </span>
           <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: volTag.bg, color: volTag.color, border: `1px solid ${volTag.border}` }}>
             {volTag.label}
           </span>
           {lane.carrier_count > 0 && (
-            <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: "rgba(59,130,246,0.12)", color: "#60a5fa", border: "1px solid rgba(59,130,246,0.2)" }}>
+            <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: "rgba(255,255,255,0.04)", color: "#8B95A8", border: "1px solid rgba(255,255,255,0.08)" }}>
               {lane.carrier_count} carrier{lane.carrier_count !== 1 ? "s" : ""}
             </span>
           )}
@@ -383,6 +393,7 @@ export default function RateIQView() {
   const [searchDest, setSearchDest] = useState("");
   const [laneResults, setLaneResults] = useState([]);
   const [laneSearching, setLaneSearching] = useState(false);
+  const [moveTypeFilter, setMoveTypeFilter] = useState("all"); // all | dray | ftl | transload
   const [editingLaneRateId, setEditingLaneRateId] = useState(null);
   const [editingLaneField, setEditingLaneField] = useState(null);
   const [editingLaneValue, setEditingLaneValue] = useState("");
@@ -511,15 +522,21 @@ export default function RateIQView() {
     const map = {};
     (Array.isArray(laneResults) ? laneResults : []).forEach(r => {
       const key = `${r.port || ""} → ${r.destination || ""}`;
-      if (!map[key]) map[key] = { port: r.port, destination: r.destination, carriers: [], minRate: Infinity, maxRate: 0, total: 0, count: 0, miles: null, origin_zip: null, dest_zip: null };
+      if (!map[key]) map[key] = { port: r.port, destination: r.destination, carriers: [], minRate: Infinity, maxRate: 0, total: 0, count: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
       map[key].carriers.push(r);
       if (!map[key].miles && r.miles) map[key].miles = r.miles;
       if (!map[key].origin_zip && r.origin_zip) map[key].origin_zip = r.origin_zip;
       if (!map[key].dest_zip && r.dest_zip) map[key].dest_zip = r.dest_zip;
       const rate = parseFloat(r.total || r.dray_rate || 0);
       if (rate > 0) { map[key].minRate = Math.min(map[key].minRate, rate); map[key].maxRate = Math.max(map[key].maxRate, rate); map[key].total += rate; map[key].count++; }
+      const mt = (r.move_type || "dray").toLowerCase();
+      map[key].moveTypes[mt] = (map[key].moveTypes[mt] || 0) + 1;
     });
-    return Object.values(map).sort((a, b) => b.count - a.count);
+    return Object.values(map).map(g => {
+      const mtEntries = Object.entries(g.moveTypes);
+      g.move_type = mtEntries.length > 0 ? mtEntries.sort((a, b) => b[1] - a[1])[0][0] : "dray";
+      return g;
+    }).sort((a, b) => b.count - a.count);
   }, [laneResults]);
 
   // ── API: Carrier update ──
@@ -575,7 +592,7 @@ export default function RateIQView() {
       const laneMap = {};
       allRates.forEach(r => {
         const key = `${r.port || ""}|${r.destination || ""}`;
-        if (!laneMap[key]) laneMap[key] = { port: r.port, destination: r.destination, count: 0, totalRate: 0, carriers: new Set(), recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null };
+        if (!laneMap[key]) laneMap[key] = { port: r.port, destination: r.destination, count: 0, totalRate: 0, carriers: new Set(), recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
         if (!laneMap[key].miles && r.miles) laneMap[key].miles = r.miles;
         if (!laneMap[key].origin_zip && r.origin_zip) laneMap[key].origin_zip = r.origin_zip;
         if (!laneMap[key].dest_zip && r.dest_zip) laneMap[key].dest_zip = r.dest_zip;
@@ -588,6 +605,8 @@ export default function RateIQView() {
           else { laneMap[key].olderTotal += rate; laneMap[key].olderCount++; }
         }
         if (r.carrier_name) laneMap[key].carriers.add(r.carrier_name);
+        const mt = (r.move_type || "dray").toLowerCase();
+        laneMap[key].moveTypes[mt] = (laneMap[key].moveTypes[mt] || 0) + 1;
       });
       const summaries = Object.values(laneMap)
         .filter(l => l.port && l.destination)
@@ -596,7 +615,10 @@ export default function RateIQView() {
           const recentAvg = l.recentCount > 0 ? l.recentTotal / l.recentCount : null;
           const olderAvg = l.olderCount > 0 ? l.olderTotal / l.olderCount : null;
           const trend_pct = (recentAvg && olderAvg && olderAvg > 0) ? ((recentAvg - olderAvg) / olderAvg) * 100 : null;
-          return { port: l.port, destination: l.destination, load_count: l.count, avg_rate, carrier_count: l.carriers.size, trend_pct, miles: l.miles, origin_zip: l.origin_zip, dest_zip: l.dest_zip };
+          // Determine primary move type (most common across rates for this lane)
+          const mtEntries = Object.entries(l.moveTypes);
+          const primary_move_type = mtEntries.length > 0 ? mtEntries.sort((a, b) => b[1] - a[1])[0][0] : "dray";
+          return { port: l.port, destination: l.destination, load_count: l.count, avg_rate, carrier_count: l.carriers.size, trend_pct, miles: l.miles, origin_zip: l.origin_zip, dest_zip: l.dest_zip, move_type: primary_move_type };
         })
         .sort((a, b) => b.load_count - a.load_count);
       setRateLaneSummaries(summaries);
@@ -766,39 +788,63 @@ export default function RateIQView() {
           )}
         </div>
 
+        {/* Move Type Filter */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+          {[
+            { key: "all", label: "All Types" },
+            { key: "dray", label: "Dray", color: "#60a5fa" },
+            { key: "ftl", label: "FTL", color: "#FBBF24" },
+            { key: "transload", label: "Transload", color: "#a78bfa" },
+          ].map(t => {
+            const active = moveTypeFilter === t.key;
+            const c = t.color || "#8B95A8";
+            return (
+              <button key={t.key} onClick={() => setMoveTypeFilter(t.key)}
+                style={{ padding: "5px 16px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: `1px solid ${active ? (t.color ? t.color + "55" : "rgba(0,212,170,0.3)") : "rgba(255,255,255,0.06)"}`, background: active ? (t.color ? t.color + "18" : "rgba(0,212,170,0.08)") : "transparent", color: active ? (t.color || "#00D4AA") : "#5A6478", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+
         {/* Search Results */}
-        {groupedLanes.length > 0 && (
+        {groupedLanes.filter(g => moveTypeFilter === "all" || g.move_type === moveTypeFilter).length > 0 && (
           <div style={{ marginBottom: 24 }}>
+            {(() => { const filtered = groupedLanes.filter(g => moveTypeFilter === "all" || g.move_type === moveTypeFilter); return <>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", marginBottom: 12 }}>
-              SEARCH RESULTS — {groupedLanes.length} lane{groupedLanes.length !== 1 ? "s" : ""}
+              SEARCH RESULTS — {filtered.length} lane{filtered.length !== 1 ? "s" : ""}{moveTypeFilter !== "all" ? ` (${moveTypeFilter.toUpperCase()})` : ""}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
-              {groupedLanes.map((group, gi) => (
+              {filtered.map((group, gi) => (
                 <LaneCard key={gi} lane={{
                   origin_city: group.port, dest_city: group.destination,
                   load_count: group.count, avg_rate: group.count > 0 ? Math.round(group.total / group.count) : 0,
                   carrier_count: group.carriers.length,
                   miles: group.miles, origin_zip: group.origin_zip, dest_zip: group.dest_zip,
+                  move_type: group.move_type,
                 }} onClick={() => openLaneDetail(group.port, group.destination, gi)}
                   onQuickQuote={() => { setSelectedLane({ origin: group.port, destination: group.destination }); setView("quote"); }} />
               ))}
             </div>
+            </>; })()}
           </div>
         )}
 
         {/* Lane Analysis — from actual rate data */}
-        {rateLaneSummaries.length > 0 && groupedLanes.length === 0 && (
+        {rateLaneSummaries.filter(ls => moveTypeFilter === "all" || ls.move_type === moveTypeFilter).length > 0 && groupedLanes.length === 0 && (
           <div>
+            {(() => { const filtered = rateLaneSummaries.filter(ls => moveTypeFilter === "all" || ls.move_type === moveTypeFilter); return <>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
               LANE ANALYSIS
-              <span style={{ fontSize: 11, color: "#5A6478", fontWeight: 500 }}>— {rateLaneSummaries.length} lanes with rate data</span>
+              <span style={{ fontSize: 11, color: "#5A6478", fontWeight: 500 }}>— {filtered.length} lanes with rate data{moveTypeFilter !== "all" ? ` (${moveTypeFilter.toUpperCase()})` : ""}</span>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
-              {rateLaneSummaries.slice(0, 12).map((ls, li) => (
+              {filtered.slice(0, 12).map((ls, li) => (
                 <LaneCard key={li} lane={ls} onClick={() => openLaneDetail(ls.port, ls.destination, 0)}
                   onQuickQuote={() => { setSelectedLane({ origin: ls.port, destination: ls.destination }); setView("quote"); }} />
               ))}
             </div>
+            </>; })()}
           </div>
         )}
 

@@ -55,6 +55,9 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
   const [rateApplied, setRateApplied] = useState(false);
   const [rateDismissed, setRateDismissed] = useState(false);
 
+  // EFJ edit state
+  const [editingEfj, setEditingEfj] = useState(false);
+  const [efjEditVal, setEfjEditVal] = useState("");
   // Macropoint URL edit state
   const [editingMpUrl, setEditingMpUrl] = useState(false);
   const [mpUrlVal, setMpUrlVal] = useState("");
@@ -368,7 +371,15 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
           {/* Header */}
           <div style={{ padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 800, color: "#F0F2F5" }}>{selectedShipment.loadNumber}</div>
+              {editingEfj ? (
+                <input autoFocus value={efjEditVal} onChange={e => setEfjEditVal(e.target.value)}
+                  onBlur={() => { if (efjEditVal.trim() && efjEditVal !== selectedShipment.efj) { handleFieldUpdate(selectedShipment, "efj", efjEditVal, { toast: showSaveToast }); } setEditingEfj(false); }}
+                  onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditingEfj(false); }}
+                  style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 800, color: "#00D4AA", background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 6, padding: "2px 8px", outline: "none", width: "100%" }} />
+              ) : (
+                <div onClick={() => { setEditingEfj(true); setEfjEditVal(selectedShipment.efj || ""); }}
+                  style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 800, color: "#F0F2F5", cursor: "text" }} title="Click to edit EFJ #">{selectedShipment.loadNumber}</div>
+              )}
               <div style={{ fontSize: 11, color: "#8B95A8", marginTop: 2 }}>{selectedShipment.container} | {selectedShipment.moveType}</div>
               {selectedShipment.playbookLaneCode && (
                 <div style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4, padding: "2px 8px", borderRadius: 4, background: "rgba(0,212,170,0.12)", border: "1px solid rgba(0,212,170,0.25)", cursor: "pointer" }} title={`Playbook: ${selectedShipment.playbookLaneCode}`} onClick={() => { /* Could nav to playbook */ }}>
