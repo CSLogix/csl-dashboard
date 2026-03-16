@@ -312,13 +312,17 @@ async def api_v2_update_status(efj: str, request: Request, background_tasks: Bac
 
     account = row["account"]
 
+    # Dashboard-only statuses — never write these to Google Sheet (not in Col M dropdown)
+    _DASHBOARD_ONLY_STATUSES = {"need_pod", "pod_received", "picked_up"}
+    _skip_sheet = new_status.strip().lower().replace(" ", "_") in _DASHBOARD_ONLY_STATUSES
+
     # Write back to Google Sheet for shared accounts
-    if account in _SHARED_SHEET_ACCOUNTS:
+    if not _skip_sheet and account in _SHARED_SHEET_ACCOUNTS:
         try:
             _v2_write_status_to_sheet(efj, new_status, account, row.get("hub"))
         except Exception as e:
             log.warning("Sheet write-back failed for %s: %s (Postgres updated OK)", efj, e)
-    elif account:
+    elif not _skip_sheet and account:
         # Write back to Master Sheet for non-shared accounts (prevents sync overwrite)
         background_tasks.add_task(_write_fields_to_master_sheet, efj, account, {"status": new_status})
 
@@ -462,9 +466,14 @@ async def api_v2_update_field(efj: str, request: Request, background_tasks: Back
                 raise HTTPException(404, f"Shipment {efj} not found")
 
     # Fire-and-forget: write changed fields back to Master Sheet
+    # Skip dashboard-only statuses that aren't in the sheet's Col M dropdown
+    _DASHBOARD_ONLY = {"need_pod", "pod_received", "picked_up"}
     account = row["account"] or ""
     if account and account not in _SHARED_SHEET_ACCOUNTS:
         sheet_fields = {k: v for k, v in body.items() if k in ALLOWED and k != "archived"}
+        # Strip status if it's a dashboard-only value
+        if sheet_fields.get("status", "").strip().lower().replace(" ", "_") in _DASHBOARD_ONLY:
+            sheet_fields.pop("status", None)
         if sheet_fields:
             background_tasks.add_task(_write_fields_to_master_sheet, efj, account, sheet_fields)
 
