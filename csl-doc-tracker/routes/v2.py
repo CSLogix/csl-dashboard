@@ -32,7 +32,7 @@ _DASHBOARD_ONLY_STATUSES = {"need_pod", "pod_received", "picked_up"}
 # Post-delivery statuses — load is "done" for active-count / at-risk purposes
 _POST_DELIVERY_STATUSES = (
     "'delivered','completed','empty returned','empty_return','returned_to_port',"
-    "'need_pod','pod_received','ready_to_close','billed_closed','missing_invoice',"
+    "'need_pod','pod_received','ready_to_close','billed_closed','billed and closed','missing_invoice',"
     "'ppwk_needed','waiting_confirmation','waiting_cx_approval','cx_approved','driver_paid'"
 )
 
