@@ -41,6 +41,69 @@ TAB_COL_OVERRIDES = {
     "Mamata":   {"COL_BOTNOTES": "N", "COL_RETURN": "O"},
 }
 
+# PG snake_case → Google Sheet dropdown display value
+# These must match the Col M data validation dropdown on the Master Tracker
+PG_STATUS_TO_SHEET = {
+    # Dray statuses
+    "at_port":          "At Port",
+    "on_vessel":        "On Vessel",
+    "in_transit":       "In Transit",
+    "out_for_delivery": "Out for Delivery",
+    "delivered":        "Delivered",
+    "empty_return":     "Empty Return",
+    "on_hold":          "On Hold",
+    "scheduled":        "Scheduled",
+    "released":         "Released",
+    "returned_to_port": "Returned to Port",
+    "at_yard":          "At Yard",
+    "rail":             "Rail",
+    "transload":        "Transload",
+    "on_site_loading":  "On Site Loading",
+    "issue":            "Exception",
+    "cancelled":        "Cancelled",
+    "cancelled_tonu":   "Cancelled TONU",
+    # FTL statuses
+    "unassigned":       "Unassigned",
+    "assigned":         "Assigned",
+    "picking_up":       "Picking Up",
+    "on_site":          "On-Site",
+    "at_delivery":      "At Delivery",
+    "need_pod":         "Need POD",
+    "pod_received":     "POD Rc'd",
+    "driver_paid":      "Driver Paid",
+    # Billing statuses
+    "ready_to_close":       "Ready to Close",
+    "missing_invoice":      "Missing Invoice",
+    "billed_closed":        "Billed & Closed",
+    "ppwk_needed":          "PPWK Needed",
+    "waiting_confirmation": "Waiting on Confirmation",
+    "waiting_cx_approval":  "Waiting CX Approval",
+    "cx_approved":          "CX Approved",
+    # Pass-through: already title-case from bot
+    "Vessel":           "Vessel",
+    "Vessel Arrived":   "Vessel Arrived",
+    "Discharged":       "Discharged",
+    "Released":         "Released",
+    "Returned to Port": "Returned to Port",
+    "Delivered":        "Delivered",
+}
+
+def _fmt_status(val):
+    """Convert PG snake_case status to Google Sheet dropdown value.
+    Returns the mapped value, or the original if already in display format."""
+    if not val:
+        return val
+    mapped = PG_STATUS_TO_SHEET.get(val)
+    if mapped:
+        return mapped
+    # Try lowercase lookup (handles mixed case from various sources)
+    mapped = PG_STATUS_TO_SHEET.get(val.lower().replace(" ", "_"))
+    if mapped:
+        return mapped
+    # Already a display value or unknown — pass through as-is
+    return val
+
+
 def _tab_cols(account):
     """Return (COL_BOTNOTES, COL_RETURN) for a given account tab."""
     ov = TAB_COL_OVERRIDES.get(account, {})
@@ -125,11 +188,12 @@ def sheet_update_import(efj, account, eta=None, pickup=None, return_date=None, s
 
         # Status as USER_ENTERED (so dropdown validates)
         if status:
+            sheet_status = _fmt_status(status)
             ws.batch_update(
-                [{"range": f"{COL_STATUS}{row}", "values": [[status]]}],
+                [{"range": f"{COL_STATUS}{row}", "values": [[sheet_status]]}],
                 value_input_option="USER_ENTERED",
             )
-            if status == "Returned to Port":
+            if sheet_status == "Returned to Port":
                 ws.format(f"{COL_STATUS}{row}", {
                     "backgroundColor": {"red": 144/255, "green": 238/255, "blue": 144/255}
                 })
@@ -169,7 +233,7 @@ def sheet_update_export(efj, account, container=None, status=None, bot_notes=Non
 
         if status:
             ws.batch_update(
-                [{"range": f"{COL_STATUS}{row}", "values": [[status]]}],
+                [{"range": f"{COL_STATUS}{row}", "values": [[_fmt_status(status)]]}],
                 value_input_option="USER_ENTERED",
             )
 
@@ -213,7 +277,7 @@ def sheet_update_ftl(efj, account, pickup=None, delivery=None, status=None, driv
 
         if status:
             ws.batch_update(
-                [{"range": f"{COL_STATUS}{row}", "values": [[status]]}],
+                [{"range": f"{COL_STATUS}{row}", "values": [[_fmt_status(status)]]}],
                 value_input_option="USER_ENTERED",
             )
 
@@ -320,7 +384,9 @@ def sheet_update_field(efj, account, updates):
             col = PG_TO_SHEET_COL.get(field)
             if not col:
                 continue  # Field not mapped to a sheet column
-            entry = {"range": f"{col}{row}", "values": [[value or ""]]}
+            # Format status for sheet dropdown
+            display_val = _fmt_status(value) if field == "status" else (value or "")
+            entry = {"range": f"{col}{row}", "values": [[display_val]]}
             if field == "status":
                 status_updates.append(entry)
             else:
@@ -377,6 +443,8 @@ def sheet_add_row(efj, account, data):
         for idx, field in col_map.items():
             if field == "efj":
                 row[idx] = efj
+            elif field == "status":
+                row[idx] = _fmt_status(data.get(field, "") or "")
             else:
                 row[idx] = data.get(field, "") or ""
 
