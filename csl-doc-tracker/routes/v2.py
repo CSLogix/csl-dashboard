@@ -471,7 +471,8 @@ async def api_v2_update_field(efj: str, request: Request, background_tasks: Back
     if account and account not in _SHARED_SHEET_ACCOUNTS:
         sheet_fields = {k: v for k, v in body.items() if k in ALLOWED and k != "archived"}
         # Strip status if it's a dashboard-only value
-        if sheet_fields.get("status", "").strip().lower().replace(" ", "_") in _DASHBOARD_ONLY_STATUSES:
+        _status_val = sheet_fields.get("status") or ""
+        if str(_status_val).strip().lower().replace(" ", "_") in _DASHBOARD_ONLY_STATUSES:
             sheet_fields.pop("status", None)
         if sheet_fields:
             background_tasks.add_task(_write_fields_to_master_sheet, efj, account, sheet_fields)
