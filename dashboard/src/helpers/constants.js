@@ -180,6 +180,16 @@ export const FTL_STATUS_COLORS = {
   ...BILLING_STATUS_COLORS,
 };
 
+// ─── Post-delivery statuses (load is "done" for scheduling/tracking purposes) ───
+export const POST_DELIVERY_STATUSES = new Set([
+  "delivered", "need_pod", "pod_received", "empty_return", "returned_to_port",
+  "ready_to_close", "missing_invoice", "billed_closed", "ppwk_needed",
+  "waiting_confirmation", "waiting_cx_approval", "cx_approved", "driver_paid",
+]);
+export function isPostDelivery(status) {
+  return POST_DELIVERY_STATUSES.has(status);
+}
+
 // ─── Move-type helpers ───
 export function isFTLShipment(s) {
   return s.moveType === "FTL" || s.account === "Boviet" || s.account === "Tolead";

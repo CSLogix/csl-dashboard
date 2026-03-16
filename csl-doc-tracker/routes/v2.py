@@ -26,6 +26,13 @@ router = APIRouter()
 # Shared accounts that still need Google Sheet writes
 _SHARED_SHEET_ACCOUNTS = {"Tolead", "Boviet"}
 
+# Post-delivery statuses — load is "done" for active-count / at-risk purposes
+_POST_DELIVERY_STATUSES = (
+    "'delivered','completed','empty returned','empty_return','returned_to_port',"
+    "'need_pod','pod_received','ready_to_close','billed_closed','missing_invoice',"
+    "'ppwk_needed','waiting_confirmation','waiting_cx_approval','cx_approved','driver_paid'"
+)
+
 
 def _shipment_row_to_dict(row: dict) -> dict:
     """Convert a Postgres shipments row to the same JSON shape as sheet_cache."""
@@ -185,28 +192,28 @@ async def api_v2_stats(request: Request):
 
     with db.get_cursor() as cur:
         # Active count (not archived, not delivered/completed)
-        cur.execute("""
+        cur.execute(f"""
             SELECT COUNT(*) as cnt FROM shipments
             WHERE archived = FALSE
-              AND LOWER(status) NOT IN ('delivered', 'completed', 'empty returned', 'billed_closed')
+              AND LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
         """)
         active = cur.fetchone()["cnt"]
 
         # At risk (LFD is today or tomorrow)
-        cur.execute("""
+        cur.execute(f"""
             SELECT COUNT(*) as cnt FROM shipments
             WHERE archived = FALSE
-              AND LOWER(status) NOT IN ('delivered', 'completed', 'empty returned', 'billed_closed')
+              AND LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
               AND lfd != '' AND lfd IS NOT NULL
               AND LEFT(lfd, 10) <= %s
         """, (tomorrow,))
         at_risk = cur.fetchone()["cnt"]
 
         # Completed today
-        cur.execute("""
+        cur.execute(f"""
             SELECT COUNT(*) as cnt FROM shipments
             WHERE archived = FALSE
-              AND LOWER(status) IN ('delivered', 'completed')
+              AND LOWER(status) IN ({_POST_DELIVERY_STATUSES})
               AND delivery_date LIKE %s
         """, (f"%{today}%",))
         completed_today = cur.fetchone()["cnt"]
@@ -235,14 +242,14 @@ async def api_v2_accounts(request: Request):
     from datetime import datetime as _dt, timedelta as _td
     """Account list with counts from Postgres."""
     with db.get_cursor() as cur:
-        cur.execute("""
+        cur.execute(f"""
         SELECT
             account,
-            COUNT(*) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as active,
-            COUNT(*) FILTER (WHERE LOWER(status) IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as done,
+            COUNT(*) FILTER (WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES}) AND archived = FALSE) as active,
+            COUNT(*) FILTER (WHERE LOWER(status) IN ({_POST_DELIVERY_STATUSES}) AND archived = FALSE) as done,
             COUNT(*) FILTER (
                 WHERE archived = FALSE
-                  AND LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed')
+                  AND LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
                   AND lfd != '' AND lfd IS NOT NULL
                   AND LEFT(lfd, 10) <= %s
             ) as alerts
@@ -261,13 +268,13 @@ async def api_v2_accounts(request: Request):
 async def api_v2_team(request: Request):
     """Team member summaries from Postgres."""
     with db.get_cursor() as cur:
-        cur.execute("""
+        cur.execute(f"""
         SELECT rep,
-               COUNT(*) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as loads,
-               array_agg(DISTINCT account) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as accounts,
+               COUNT(*) FILTER (WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES}) AND archived = FALSE) as loads,
+               array_agg(DISTINCT account) FILTER (WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES}) AND archived = FALSE) as accounts,
                COUNT(*) FILTER (
                    WHERE archived = FALSE
-                     AND LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed')
+                     AND LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
                      AND lfd != '' AND lfd IS NOT NULL
                      AND LEFT(lfd, 10) <= to_char(NOW() + interval '1 day', 'YYYY-MM-DD')
                ) as at_risk
