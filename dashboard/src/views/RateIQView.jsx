@@ -498,12 +498,18 @@ export default function RateIQView() {
   const [intakeMoveType, setIntakeMoveType] = useState("dray");
   const [intakeProcessing, setIntakeProcessing] = useState(false);
   const [intakeResult, setIntakeResult] = useState(null); // { ok, extracted } or { error }
+  const [intakeFile, setIntakeFile] = useState(null);
+  const [intakeDragOver, setIntakeDragOver] = useState(false);
+  const intakeFileRef = useRef(null);
 
   // ── Market rates paste state ──
   const [marketRateOpen, setMarketRateOpen] = useState(false);
   const [marketRateOrigin, setMarketRateOrigin] = useState("");
   const [marketRateDest, setMarketRateDest] = useState("");
   const [marketRateText, setMarketRateText] = useState("");
+  const [marketRateFile, setMarketRateFile] = useState(null);
+  const [marketRateDragOver, setMarketRateDragOver] = useState(false);
+  const marketRateFileRef = useRef(null);
   const [marketRateMoveType, setMarketRateMoveType] = useState("dray");
   const [marketRateProcessing, setMarketRateProcessing] = useState(false);
   const [marketRateResult, setMarketRateResult] = useState(null);
@@ -783,21 +789,32 @@ export default function RateIQView() {
   // Re-search when move type filter changes (if there's an active search)
   useEffect(() => { if (searchOrigin || searchDest) searchLanes(); }, [moveTypeFilter, searchLanes]);
 
-  // ── API: Manual intake — paste email text, AI extracts rate ──
-  const handleManualIntake = useCallback(async () => {
-    if (!intakeText.trim()) return;
+  // ── API: Manual intake — paste email text OR upload file, AI extracts rate ──
+  const handleManualIntake = useCallback(async (file) => {
+    const f = file || intakeFile;
+    if (!intakeText.trim() && !f) return;
     setIntakeProcessing(true);
     setIntakeResult(null);
     try {
-      const res = await apiFetch(`${API_BASE}/api/rate-iq/manual-intake`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: intakeText, move_type: intakeMoveType }),
-      });
+      let res;
+      if (f) {
+        const formData = new FormData();
+        formData.append("file", f);
+        formData.append("move_type", intakeMoveType);
+        if (intakeText.trim()) formData.append("text", intakeText);
+        res = await apiFetch(`${API_BASE}/api/rate-iq/manual-intake`, { method: "POST", body: formData });
+      } else {
+        res = await apiFetch(`${API_BASE}/api/rate-iq/manual-intake`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: intakeText, move_type: intakeMoveType }),
+        });
+      }
       const data = await res.json();
       if (res.ok && data.ok) {
         setIntakeResult({ ok: true, extracted: data.extracted });
         setIntakeText("");
-        fetchData(); // Refresh lane summaries
+        setIntakeFile(null);
+        fetchData();
       } else {
         setIntakeResult({ error: data.error || "Extraction failed", extracted: data.extracted });
       }
@@ -805,22 +822,36 @@ export default function RateIQView() {
       setIntakeResult({ error: e.message });
     }
     setIntakeProcessing(false);
-  }, [intakeText, intakeMoveType, fetchData]);
+  }, [intakeText, intakeFile, intakeMoveType, fetchData]);
 
-  // ── API: Market rates paste — parse LoadMatch tab-separated data ──
-  const handleMarketRatePaste = useCallback(async () => {
-    if (!marketRateText.trim() || !marketRateOrigin.trim() || !marketRateDest.trim()) return;
+  // ── API: Market rates — paste text OR upload screenshot ──
+  const handleMarketRatePaste = useCallback(async (file) => {
+    const f = file || marketRateFile;
+    if (!marketRateText.trim() && !f) return;
+    if (!f && (!marketRateOrigin.trim() || !marketRateDest.trim())) return;
     setMarketRateProcessing(true);
     setMarketRateResult(null);
     try {
-      const res = await apiFetch(`${API_BASE}/api/rate-iq/market-rates`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ origin: marketRateOrigin, destination: marketRateDest, move_type: marketRateMoveType, text: marketRateText }),
-      });
+      let res;
+      if (f) {
+        const formData = new FormData();
+        formData.append("file", f);
+        if (marketRateOrigin.trim()) formData.append("origin", marketRateOrigin);
+        if (marketRateDest.trim()) formData.append("destination", marketRateDest);
+        formData.append("move_type", marketRateMoveType);
+        if (marketRateText.trim()) formData.append("text", marketRateText);
+        res = await apiFetch(`${API_BASE}/api/rate-iq/market-rates`, { method: "POST", body: formData });
+      } else {
+        res = await apiFetch(`${API_BASE}/api/rate-iq/market-rates`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ origin: marketRateOrigin, destination: marketRateDest, move_type: marketRateMoveType, text: marketRateText }),
+        });
+      }
       const data = await res.json();
       if (res.ok && data.ok) {
         setMarketRateResult({ ok: true, inserted: data.inserted, skipped: data.skipped });
         setMarketRateText("");
+        setMarketRateFile(null);
       } else {
         setMarketRateResult({ error: data.error || "Parse failed", errors: data.errors });
       }
@@ -828,7 +859,7 @@ export default function RateIQView() {
       setMarketRateResult({ error: e.message });
     }
     setMarketRateProcessing(false);
-  }, [marketRateOrigin, marketRateDest, marketRateMoveType, marketRateText]);
+  }, [marketRateOrigin, marketRateDest, marketRateMoveType, marketRateText, marketRateFile]);
 
   // ── API: Reclassify lane move type (bulk update all rates in a lane) ──
   const [dragOverType, setDragOverType] = useState(null);
@@ -923,23 +954,41 @@ export default function RateIQView() {
           </div>
         </div>
 
-        {/* Manual Intake Drop Zone */}
-        <div className="glass" style={{ borderRadius: 14, marginBottom: 16, border: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
+        {/* Manual Intake — Drag/Drop + Paste */}
+        <div className="glass" style={{ borderRadius: 14, marginBottom: 16, border: `1px solid ${intakeDragOver ? "rgba(0,212,170,0.4)" : "rgba(255,255,255,0.06)"}`, overflow: "hidden", transition: "border-color 0.2s" }}>
+          <input ref={intakeFileRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.msg,.eml,.html,.htm,.txt" style={{ display: "none" }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) { setIntakeFile(f); setIntakeOpen(true); setIntakeResult(null); } e.target.value = ""; }} />
           <div onClick={() => setIntakeOpen(!intakeOpen)}
             style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
-            onDragOver={e => { e.preventDefault(); if (!intakeOpen) setIntakeOpen(true); }}
-            onDrop={e => { e.preventDefault(); const text = e.dataTransfer.getData("text/plain"); if (text) { setIntakeText(text); setIntakeOpen(true); } }}>
+            onDragOver={e => { e.preventDefault(); e.stopPropagation(); setIntakeDragOver(true); if (!intakeOpen) setIntakeOpen(true); }}
+            onDragLeave={() => setIntakeDragOver(false)}
+            onDrop={e => {
+              e.preventDefault(); e.stopPropagation(); setIntakeDragOver(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file) { setIntakeFile(file); setIntakeOpen(true); setIntakeResult(null); return; }
+              const text = e.dataTransfer.getData("text/plain");
+              if (text) { setIntakeText(text); setIntakeOpen(true); }
+            }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 14 }}>📋</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>PASTE RATE EMAIL</span>
-              <span style={{ fontSize: 11, color: "#5A6478" }}>— drop or paste carrier rate email text</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>CARRIER RATE INTAKE</span>
+              <span style={{ fontSize: 11, color: "#5A6478" }}>— drop .msg / .eml / screenshot / paste email text</span>
             </div>
             <span style={{ fontSize: 12, color: "#5A6478", transform: intakeOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</span>
           </div>
           {intakeOpen && (
-            <div style={{ padding: "0 24px 20px" }}>
-              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                {["dray", "transload"].map(mt => {
+            <div style={{ padding: "0 24px 20px" }}
+              onDragOver={e => { e.preventDefault(); setIntakeDragOver(true); }}
+              onDragLeave={() => setIntakeDragOver(false)}
+              onDrop={e => {
+                e.preventDefault(); setIntakeDragOver(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) { setIntakeFile(file); setIntakeResult(null); return; }
+                const text = e.dataTransfer.getData("text/plain");
+                if (text) setIntakeText(text);
+              }}>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
+                {["dray", "transload", "ftl"].map(mt => {
                   const active = intakeMoveType === mt;
                   const s = MOVE_TYPE_STYLES[mt];
                   return (
@@ -949,26 +998,55 @@ export default function RateIQView() {
                     </button>
                   );
                 })}
+                <div style={{ flex: 1 }} />
+                <button onClick={() => intakeFileRef.current?.click()}
+                  style={{ padding: "4px 14px", fontSize: 11, fontWeight: 600, borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", cursor: "pointer", fontFamily: "inherit" }}>
+                  Browse Files
+                </button>
               </div>
-              <textarea value={intakeText} onChange={e => setIntakeText(e.target.value)}
-                onPaste={e => { const text = e.clipboardData.getData("text/plain"); if (text && !intakeText) { e.preventDefault(); setIntakeText(text); } }}
-                placeholder="Paste carrier rate email here... (Ctrl+V or drag text from email)"
-                style={{ width: "100%", minHeight: 100, maxHeight: 200, padding: 14, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+              {intakeFile && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 8, borderRadius: 8, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.15)" }}>
+                  <span style={{ fontSize: 11, color: "#34d399", fontWeight: 700 }}>File:</span>
+                  <span style={{ fontSize: 11, color: "#C8D0DC", fontFamily: "'JetBrains Mono', monospace" }}>{intakeFile.name}</span>
+                  <span style={{ fontSize: 10, color: "#5A6478" }}>({(intakeFile.size / 1024).toFixed(1)} KB)</span>
+                  <button onClick={() => setIntakeFile(null)} style={{ marginLeft: "auto", fontSize: 10, color: "#f87171", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
+                </div>
+              )}
+              {!intakeFile && (
+                <textarea value={intakeText} onChange={e => setIntakeText(e.target.value)}
+                  onPaste={e => {
+                    const items = e.clipboardData?.items;
+                    if (items) {
+                      for (const item of items) {
+                        if (item.type.startsWith("image/")) {
+                          e.preventDefault();
+                          const file = item.getAsFile();
+                          if (file) { setIntakeFile(file); setIntakeResult(null); }
+                          return;
+                        }
+                      }
+                    }
+                    const text = e.clipboardData.getData("text/plain");
+                    if (text && !intakeText) { e.preventDefault(); setIntakeText(text); }
+                  }}
+                  placeholder="Paste carrier rate email here, or drag & drop a file (.msg, .eml, .pdf, screenshot)..."
+                  style={{ width: "100%", minHeight: 100, maxHeight: 200, padding: 14, borderRadius: 10, border: `1px solid ${intakeDragOver ? "rgba(0,212,170,0.3)" : "rgba(255,255,255,0.08)"}`, background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box", transition: "border-color 0.2s" }} />
+              )}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
                 <div style={{ fontSize: 11, color: "#5A6478" }}>
-                  {intakeText.length > 0 && `${intakeText.length.toLocaleString()} chars`}
+                  {intakeFile ? "Ready to extract from file" : intakeText.length > 0 ? `${intakeText.length.toLocaleString()} chars` : ""}
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   {intakeResult?.ok && (
                     <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399" }}>
-                      ✓ Added: {intakeResult.extracted.carrier_name} — {intakeResult.extracted.origin} → {intakeResult.extracted.destination} @ ${intakeResult.extracted.rate_amount}
+                      ✓ Added: {intakeResult.extracted.carrier_name} — {intakeResult.extracted.origin} → {intakeResult.extracted.destination}{intakeResult.extracted.rate_amount ? ` @ $${intakeResult.extracted.rate_amount}` : ""}
                     </span>
                   )}
                   {intakeResult?.error && (
                     <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {intakeResult.error}</span>
                   )}
-                  {intakeText.trim() && (
-                    <button onClick={handleManualIntake} disabled={intakeProcessing}
+                  {(intakeText.trim() || intakeFile) && (
+                    <button onClick={() => handleManualIntake()} disabled={intakeProcessing}
                       style={{ padding: "6px 20px", borderRadius: 8, border: "none", background: grad, color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: intakeProcessing ? "wait" : "pointer", fontFamily: "inherit", opacity: intakeProcessing ? 0.6 : 1 }}>
                       {intakeProcessing ? "Extracting..." : "Extract & Save"}
                     </button>
@@ -979,21 +1057,41 @@ export default function RateIQView() {
           )}
         </div>
 
-        {/* Paste Market Rates (LoadMatch) */}
-        <div className="glass" style={{ borderRadius: 14, marginBottom: 16, border: "1px solid rgba(251,146,60,0.1)", overflow: "hidden" }}>
+        {/* Market Rates — Drag/Drop Screenshot + Paste */}
+        <div className="glass" style={{ borderRadius: 14, marginBottom: 16, border: `1px solid ${marketRateDragOver ? "rgba(251,146,60,0.4)" : "rgba(251,146,60,0.1)"}`, overflow: "hidden", transition: "border-color 0.2s" }}>
+          <input ref={marketRateFileRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf" style={{ display: "none" }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) { setMarketRateFile(f); setMarketRateOpen(true); setMarketRateResult(null); } e.target.value = ""; }} />
           <div onClick={() => setMarketRateOpen(!marketRateOpen)}
-            style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+            style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
+            onDragOver={e => { e.preventDefault(); e.stopPropagation(); setMarketRateDragOver(true); if (!marketRateOpen) setMarketRateOpen(true); }}
+            onDragLeave={() => setMarketRateDragOver(false)}
+            onDrop={e => {
+              e.preventDefault(); e.stopPropagation(); setMarketRateDragOver(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file) { setMarketRateFile(file); setMarketRateOpen(true); setMarketRateResult(null); return; }
+              const text = e.dataTransfer.getData("text/plain");
+              if (text) { setMarketRateText(text); setMarketRateOpen(true); }
+            }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 14 }}>📊</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>PASTE MARKET RATES</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>MARKET RATES</span>
               <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(251,146,60,0.12)", color: "#fb923c", border: "1px solid rgba(251,146,60,0.25)" }}>LOADMATCH</span>
-              <span style={{ fontSize: 11, color: "#5A6478" }}>— paste tab-separated rate data (no carrier)</span>
+              <span style={{ fontSize: 11, color: "#5A6478" }}>— drop RFQ screenshot or paste tab-separated data</span>
             </div>
             <span style={{ fontSize: 12, color: "#5A6478", transform: marketRateOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</span>
           </div>
           {marketRateOpen && (
-            <div style={{ padding: "0 24px 20px" }}>
-              <div style={{ display: "flex", gap: 12, marginBottom: 10 }}>
+            <div style={{ padding: "0 24px 20px" }}
+              onDragOver={e => { e.preventDefault(); setMarketRateDragOver(true); }}
+              onDragLeave={() => setMarketRateDragOver(false)}
+              onDrop={e => {
+                e.preventDefault(); setMarketRateDragOver(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) { setMarketRateFile(file); setMarketRateResult(null); return; }
+                const text = e.dataTransfer.getData("text/plain");
+                if (text) setMarketRateText(text);
+              }}>
+              <div style={{ display: "flex", gap: 12, marginBottom: 10, alignItems: "flex-end" }}>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>Origin / Port</label>
                   <input value={marketRateOrigin} onChange={e => setMarketRateOrigin(e.target.value)} placeholder="e.g. Long Beach, LA/LB"
@@ -1019,14 +1117,42 @@ export default function RateIQView() {
                     })}
                   </div>
                 </div>
+                <button onClick={() => marketRateFileRef.current?.click()}
+                  style={{ padding: "6px 14px", fontSize: 11, fontWeight: 600, borderRadius: 6, border: "1px solid rgba(251,146,60,0.2)", background: "transparent", color: "#fb923c", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                  Browse Screenshot
+                </button>
               </div>
-              <textarea value={marketRateText} onChange={e => setMarketRateText(e.target.value)}
-                onPaste={e => { const text = e.clipboardData.getData("text/plain"); if (text && !marketRateText) { e.preventDefault(); setMarketRateText(text); } }}
-                placeholder={"Paste LoadMatch data here (tab-separated):\n2026-Mar-14\tLong Beach Container\t$2,600\t0%\t$2,600\n2026-Mar-12\tAPM Los Angeles\t$2,250\t0%\t$2,250"}
-                style={{ width: "100%", minHeight: 100, maxHeight: 200, padding: 14, borderRadius: 10, border: "1px solid rgba(251,146,60,0.12)", background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+              {marketRateFile && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 8, borderRadius: 8, background: "rgba(251,146,60,0.06)", border: "1px solid rgba(251,146,60,0.15)" }}>
+                  <span style={{ fontSize: 11, color: "#fb923c", fontWeight: 700 }}>Screenshot:</span>
+                  <span style={{ fontSize: 11, color: "#C8D0DC", fontFamily: "'JetBrains Mono', monospace" }}>{marketRateFile.name}</span>
+                  <span style={{ fontSize: 10, color: "#5A6478" }}>({(marketRateFile.size / 1024).toFixed(1)} KB)</span>
+                  <button onClick={() => setMarketRateFile(null)} style={{ marginLeft: "auto", fontSize: 10, color: "#f87171", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
+                </div>
+              )}
+              {!marketRateFile && (
+                <textarea value={marketRateText} onChange={e => setMarketRateText(e.target.value)}
+                  onPaste={e => {
+                    const items = e.clipboardData?.items;
+                    if (items) {
+                      for (const item of items) {
+                        if (item.type.startsWith("image/")) {
+                          e.preventDefault();
+                          const file = item.getAsFile();
+                          if (file) { setMarketRateFile(file); setMarketRateResult(null); }
+                          return;
+                        }
+                      }
+                    }
+                    const text = e.clipboardData.getData("text/plain");
+                    if (text && !marketRateText) { e.preventDefault(); setMarketRateText(text); }
+                  }}
+                  placeholder={"Drop a screenshot here, or paste tab-separated LoadMatch data:\n2026-Mar-14\tLong Beach Container\t$2,600\t0%\t$2,600\n2026-Mar-12\tAPM Los Angeles\t$2,250\t0%\t$2,250"}
+                  style={{ width: "100%", minHeight: 100, maxHeight: 200, padding: 14, borderRadius: 10, border: `1px solid ${marketRateDragOver ? "rgba(251,146,60,0.3)" : "rgba(251,146,60,0.12)"}`, background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box", transition: "border-color 0.2s" }} />
+              )}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
                 <div style={{ fontSize: 11, color: "#5A6478" }}>
-                  {marketRateText.length > 0 && `${marketRateText.length.toLocaleString()} chars`}
+                  {marketRateFile ? "Ready to extract rates from screenshot" : marketRateText.length > 0 ? `${marketRateText.length.toLocaleString()} chars` : ""}
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   {marketRateResult?.ok && (
@@ -1037,10 +1163,10 @@ export default function RateIQView() {
                   {marketRateResult?.error && (
                     <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {marketRateResult.error}</span>
                   )}
-                  {marketRateText.trim() && marketRateOrigin.trim() && marketRateDest.trim() && (
-                    <button onClick={handleMarketRatePaste} disabled={marketRateProcessing}
+                  {(marketRateFile || (marketRateText.trim() && marketRateOrigin.trim() && marketRateDest.trim())) && (
+                    <button onClick={() => handleMarketRatePaste()} disabled={marketRateProcessing}
                       style={{ padding: "6px 20px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #fb923c, #f59e0b)", color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: marketRateProcessing ? "wait" : "pointer", fontFamily: "inherit", opacity: marketRateProcessing ? 0.6 : 1 }}>
-                      {marketRateProcessing ? "Parsing..." : "Parse & Save"}
+                      {marketRateProcessing ? (marketRateFile ? "Extracting..." : "Parsing...") : (marketRateFile ? "Extract & Save" : "Parse & Save")}
                     </button>
                   )}
                 </div>
