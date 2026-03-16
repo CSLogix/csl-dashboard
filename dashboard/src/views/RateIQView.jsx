@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { apiFetch, API_BASE } from '../helpers/api';
 import QuoteBuilder from '../QuoteBuilder';
 import OOGQuoteBuilder from '../OOGQuoteBuilder';
@@ -142,6 +142,85 @@ function MarketRateCard({ laneGroup, carrierCapMap }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Market Benchmark Card (LoadMatch data — no carrier) ──
+function MarketBenchmarkCard({ benchmark, carrierAvg }) {
+  if (!benchmark?.stats) return null;
+  const { stats, rates } = benchmark;
+  const [expanded, setExpanded] = useState(false);
+  const delta = carrierAvg > 0 && stats.avg > 0 ? carrierAvg - stats.avg : null;
+  const deltaColor = delta === null ? "#5A6478" : delta < 0 ? "#34d399" : delta > 0 ? "#fb923c" : "#5A6478";
+  const deltaPct = delta !== null && stats.avg > 0 ? ((delta / stats.avg) * 100).toFixed(1) : null;
+  const trendColor = stats.trend_pct > 0 ? "#fb923c" : stats.trend_pct < 0 ? "#34d399" : "#5A6478";
+
+  return (
+    <div className="glass" style={{ borderRadius: 14, overflow: "hidden", border: "1px solid rgba(251,146,60,0.15)" }}>
+      <div style={{ padding: "16px 24px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>MARKET BENCHMARK</span>
+          <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(251,146,60,0.12)", color: "#fb923c", border: "1px solid rgba(251,146,60,0.25)" }}>LOADMATCH</span>
+        </div>
+        <span style={{ fontSize: 11, color: "#5A6478" }}>{stats.count} data point{stats.count !== 1 ? "s" : ""}</span>
+      </div>
+      <div style={{ padding: "0 24px 16px", display: "flex", alignItems: "flex-end", gap: 32 }}>
+        <div>
+          <div style={{ fontSize: 42, fontWeight: 800, color: "#fb923c", fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}>
+            {fmt(stats.avg)}
+          </div>
+          <div style={{ fontSize: 11, color: "#5A6478", marginTop: 6 }}>
+            Range: {fmt(stats.min)} – {fmt(stats.max)}
+          </div>
+          {stats.trend_pct !== null && (
+            <div style={{ fontSize: 11, color: trendColor, marginTop: 2, fontWeight: 600 }}>
+              {stats.trend_pct > 0 ? "↑" : "↓"} {Math.abs(stats.trend_pct)}% trend (recent vs older)
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingBottom: 4 }}>
+          {delta !== null && (
+            <div style={{ fontSize: 12, fontWeight: 700, color: deltaColor }}>
+              {delta > 0 ? "↑" : delta < 0 ? "↓" : "="} Your carrier avg is {fmt(Math.abs(delta))} ({deltaPct}%) {delta > 0 ? "above" : delta < 0 ? "below" : "at"} market
+            </div>
+          )}
+          {stats.latest_date && (
+            <div style={{ fontSize: 11, color: "#5A6478" }}>
+              Data: {stats.oldest_date !== stats.latest_date ? `${stats.oldest_date} → ${stats.latest_date}` : stats.latest_date}
+            </div>
+          )}
+        </div>
+      </div>
+      {rates && rates.length > 0 && (
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+          <div onClick={() => setExpanded(!expanded)}
+            style={{ padding: "8px 24px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#5A6478" }}>{expanded ? "Hide" : "Show"} {rates.length} rate{rates.length !== 1 ? "s" : ""}</span>
+            <span style={{ fontSize: 10, color: "#5A6478", transform: expanded ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</span>
+          </div>
+          {expanded && (
+            <div style={{ padding: "0 24px 12px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 80px 50px 80px", gap: 0, fontSize: 11 }}>
+                <div style={{ color: "#5A6478", fontWeight: 700, padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Date</div>
+                <div style={{ color: "#5A6478", fontWeight: 700, padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Terminal</div>
+                <div style={{ color: "#5A6478", fontWeight: 700, padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.06)", textAlign: "right" }}>Base</div>
+                <div style={{ color: "#5A6478", fontWeight: 700, padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.06)", textAlign: "right" }}>FSC</div>
+                <div style={{ color: "#5A6478", fontWeight: 700, padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.06)", textAlign: "right" }}>Total</div>
+                {rates.map((r, i) => (
+                  <React.Fragment key={i}>
+                    <div style={{ color: "#8B95A8", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>{r.date || "—"}</div>
+                    <div style={{ color: "#C8D0DC", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>{r.terminal || "—"}</div>
+                    <div style={{ color: "#F0F2F5", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.03)", textAlign: "right", fontFamily: "'JetBrains Mono', monospace" }}>{r.base ? fmt(r.base) : "—"}</div>
+                    <div style={{ color: "#8B95A8", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.03)", textAlign: "right" }}>{r.fsc_pct ? `${r.fsc_pct}%` : "0%"}</div>
+                    <div style={{ color: "#fb923c", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.03)", textAlign: "right", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{r.total ? fmt(r.total) : "—"}</div>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -420,6 +499,16 @@ export default function RateIQView() {
   const [intakeProcessing, setIntakeProcessing] = useState(false);
   const [intakeResult, setIntakeResult] = useState(null); // { ok, extracted } or { error }
 
+  // ── Market rates paste state ──
+  const [marketRateOpen, setMarketRateOpen] = useState(false);
+  const [marketRateOrigin, setMarketRateOrigin] = useState("");
+  const [marketRateDest, setMarketRateDest] = useState("");
+  const [marketRateText, setMarketRateText] = useState("");
+  const [marketRateMoveType, setMarketRateMoveType] = useState("dray");
+  const [marketRateProcessing, setMarketRateProcessing] = useState(false);
+  const [marketRateResult, setMarketRateResult] = useState(null);
+  const [marketBenchmark, setMarketBenchmark] = useState(null);
+
   // ── Lane Search state ──
   const [searchOrigin, setSearchOrigin] = useState("");
   const [searchDest, setSearchDest] = useState("");
@@ -661,6 +750,18 @@ export default function RateIQView() {
 
   useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
 
+  // ── Fetch market benchmark for current lane search ──
+  const fetchMarketBenchmark = useCallback(async (o, d) => {
+    if (!o && !d) { setMarketBenchmark(null); return; }
+    try {
+      const params = new URLSearchParams();
+      if (o) params.set("origin", o);
+      if (d) params.set("destination", d);
+      const res = await apiFetch(`${API_BASE}/api/rate-iq/market-rates?${params.toString()}`).then(r => r.json());
+      setMarketBenchmark(res.stats ? { stats: res.stats, rates: res.rates } : null);
+    } catch { setMarketBenchmark(null); }
+  }, []);
+
   // ── Lane search ──
   const searchLanes = useCallback(async (origin, dest) => {
     const o = origin ?? searchOrigin;
@@ -674,9 +775,10 @@ export default function RateIQView() {
       if (moveTypeFilter && moveTypeFilter !== "all") params.set("move_type", moveTypeFilter);
       const res = await apiFetch(`${API_BASE}/api/lane-rates?${params.toString()}`).then(r => r.json());
       setLaneResults(res.lane_rates || (Array.isArray(res) ? res : []));
+      fetchMarketBenchmark(o, d);
     } catch (e) { console.error("Lane search:", e); setLaneResults([]); }
     setLaneSearching(false);
-  }, [searchOrigin, searchDest, moveTypeFilter]);
+  }, [searchOrigin, searchDest, moveTypeFilter, fetchMarketBenchmark]);
 
   // Re-search when move type filter changes (if there's an active search)
   useEffect(() => { if (searchOrigin || searchDest) searchLanes(); }, [moveTypeFilter, searchLanes]);
@@ -704,6 +806,29 @@ export default function RateIQView() {
     }
     setIntakeProcessing(false);
   }, [intakeText, intakeMoveType, fetchData]);
+
+  // ── API: Market rates paste — parse LoadMatch tab-separated data ──
+  const handleMarketRatePaste = useCallback(async () => {
+    if (!marketRateText.trim() || !marketRateOrigin.trim() || !marketRateDest.trim()) return;
+    setMarketRateProcessing(true);
+    setMarketRateResult(null);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/rate-iq/market-rates`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ origin: marketRateOrigin, destination: marketRateDest, move_type: marketRateMoveType, text: marketRateText }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setMarketRateResult({ ok: true, inserted: data.inserted, skipped: data.skipped });
+        setMarketRateText("");
+      } else {
+        setMarketRateResult({ error: data.error || "Parse failed", errors: data.errors });
+      }
+    } catch (e) {
+      setMarketRateResult({ error: e.message });
+    }
+    setMarketRateProcessing(false);
+  }, [marketRateOrigin, marketRateDest, marketRateMoveType, marketRateText]);
 
   // ── API: Reclassify lane move type (bulk update all rates in a lane) ──
   const [dragOverType, setDragOverType] = useState(null);
@@ -758,9 +883,10 @@ export default function RateIQView() {
       if (moveTypeFilter && moveTypeFilter !== "all") params.set("move_type", moveTypeFilter);
       const res = await apiFetch(`${API_BASE}/api/lane-rates?${params.toString()}`).then(r => r.json());
       setLaneResults(res.lane_rates || (Array.isArray(res) ? res : []));
+      fetchMarketBenchmark(origin, destination);
     } catch (e) { console.error("Lane search:", e); setLaneResults([]); }
     setLaneSearching(false);
-  }, [moveTypeFilter]);
+  }, [moveTypeFilter, fetchMarketBenchmark]);
 
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#8B95A8" }}>Loading Rate IQ...</div>;
 
@@ -845,6 +971,76 @@ export default function RateIQView() {
                     <button onClick={handleManualIntake} disabled={intakeProcessing}
                       style={{ padding: "6px 20px", borderRadius: 8, border: "none", background: grad, color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: intakeProcessing ? "wait" : "pointer", fontFamily: "inherit", opacity: intakeProcessing ? 0.6 : 1 }}>
                       {intakeProcessing ? "Extracting..." : "Extract & Save"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Paste Market Rates (LoadMatch) */}
+        <div className="glass" style={{ borderRadius: 14, marginBottom: 16, border: "1px solid rgba(251,146,60,0.1)", overflow: "hidden" }}>
+          <div onClick={() => setMarketRateOpen(!marketRateOpen)}
+            style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 14 }}>📊</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>PASTE MARKET RATES</span>
+              <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(251,146,60,0.12)", color: "#fb923c", border: "1px solid rgba(251,146,60,0.25)" }}>LOADMATCH</span>
+              <span style={{ fontSize: 11, color: "#5A6478" }}>— paste tab-separated rate data (no carrier)</span>
+            </div>
+            <span style={{ fontSize: 12, color: "#5A6478", transform: marketRateOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</span>
+          </div>
+          {marketRateOpen && (
+            <div style={{ padding: "0 24px 20px" }}>
+              <div style={{ display: "flex", gap: 12, marginBottom: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>Origin / Port</label>
+                  <input value={marketRateOrigin} onChange={e => setMarketRateOrigin(e.target.value)} placeholder="e.g. Long Beach, LA/LB"
+                    style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>Destination</label>
+                  <input value={marketRateDest} onChange={e => setMarketRateDest(e.target.value)} placeholder="e.g. Sparks NV"
+                    style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>Type</label>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {["dray", "ftl", "transload"].map(mt => {
+                      const active = marketRateMoveType === mt;
+                      const s = MOVE_TYPE_STYLES[mt];
+                      return (
+                        <button key={mt} onClick={() => setMarketRateMoveType(mt)}
+                          style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, borderRadius: 6, border: `1px solid ${active ? s.color + "55" : "rgba(255,255,255,0.06)"}`, background: active ? s.color + "18" : "transparent", color: active ? s.color : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
+                          {s.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              <textarea value={marketRateText} onChange={e => setMarketRateText(e.target.value)}
+                onPaste={e => { const text = e.clipboardData.getData("text/plain"); if (text && !marketRateText) { e.preventDefault(); setMarketRateText(text); } }}
+                placeholder={"Paste LoadMatch data here (tab-separated):\n2026-Mar-14\tLong Beach Container\t$2,600\t0%\t$2,600\n2026-Mar-12\tAPM Los Angeles\t$2,250\t0%\t$2,250"}
+                style={{ width: "100%", minHeight: 100, maxHeight: 200, padding: 14, borderRadius: 10, border: "1px solid rgba(251,146,60,0.12)", background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+                <div style={{ fontSize: 11, color: "#5A6478" }}>
+                  {marketRateText.length > 0 && `${marketRateText.length.toLocaleString()} chars`}
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  {marketRateResult?.ok && (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399" }}>
+                      ✓ Saved {marketRateResult.inserted} rate{marketRateResult.inserted !== 1 ? "s" : ""}{marketRateResult.skipped > 0 ? ` (${marketRateResult.skipped} skipped)` : ""}
+                    </span>
+                  )}
+                  {marketRateResult?.error && (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {marketRateResult.error}</span>
+                  )}
+                  {marketRateText.trim() && marketRateOrigin.trim() && marketRateDest.trim() && (
+                    <button onClick={handleMarketRatePaste} disabled={marketRateProcessing}
+                      style={{ padding: "6px 20px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #fb923c, #f59e0b)", color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: marketRateProcessing ? "wait" : "pointer", fontFamily: "inherit", opacity: marketRateProcessing ? 0.6 : 1 }}>
+                      {marketRateProcessing ? "Parsing..." : "Parse & Save"}
                     </button>
                   )}
                 </div>
@@ -1079,6 +1275,8 @@ export default function RateIQView() {
             {/* Left column — Market Rate + Carrier Table */}
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <MarketRateCard laneGroup={currentGroup} carrierCapMap={carrierCapMap} />
+
+              {marketBenchmark && <MarketBenchmarkCard benchmark={marketBenchmark} carrierAvg={currentGroup.count > 0 ? Math.round(currentGroup.total / currentGroup.count) : 0} />}
 
               {/* Cost Analysis */}
               <div className="glass" style={{ borderRadius: 14, padding: "18px 24px", border: "1px solid rgba(255,255,255,0.06)" }}>

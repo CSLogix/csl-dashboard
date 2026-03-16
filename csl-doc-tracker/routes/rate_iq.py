@@ -546,3 +546,213 @@ async def api_lane_stats():
             "avg_customer_rate": float(r["avg_customer_rate"]) if r["avg_customer_rate"] else None,
         })
     return {"lanes": lanes}
+
+
+# ── Market Rates (LoadMatch / benchmark data — no carrier) ──────────
+
+@router.post("/api/rate-iq/market-rates")
+async def post_market_rates(request: Request):
+    """Parse pasted tab-separated LoadMatch data and store as market benchmark rates."""
+    import re
+    from datetime import datetime as _dt
+    from decimal import Decimal, InvalidOperation
+
+    body = await request.json()
+    origin = (body.get("origin") or "").strip()
+    destination = (body.get("destination") or "").strip()
+    move_type = (body.get("move_type") or "dray").strip().lower()
+    text = (body.get("text") or "").strip()
+
+    if not origin or not destination:
+        return JSONResponse(status_code=400, content={"error": "origin and destination are required"})
+    if not text:
+        return JSONResponse(status_code=400, content={"error": "text is required"})
+
+    DATE_FORMATS = ["%Y-%b-%d", "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%b %d, %Y"]
+    HEADER_WORDS = {"date", "terminal", "base", "fsc", "total", "linehaul", "rate"}
+
+    def parse_money(s):
+        """Strip $, commas, whitespace and return Decimal or None."""
+        s = s.strip().replace("$", "").replace(",", "")
+        if not s or s == "—" or s == "-":
+            return None
+        return Decimal(s)
+
+    def parse_pct(s):
+        """Parse a percentage string like '29%' to Decimal."""
+        s = s.strip().replace("%", "")
+        if not s or s == "—" or s == "-":
+            return Decimal("0")
+        return Decimal(s)
+
+    def parse_date(s):
+        """Try multiple date formats and return a date or None."""
+        s = s.strip()
+        for f in DATE_FORMATS:
+            try:
+                return _dt.strptime(s, f).date()
+            except ValueError:
+                continue
+        return None
+
+    rows_inserted = 0
+    rows_skipped = 0
+    errors = []
+    insert_params = []
+
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    for i, line in enumerate(lines):
+        # Split by tab or 2+ spaces
+        parts = [p.strip() for p in line.split("\t") if p.strip()]
+        if len(parts) < 3:
+            # Try splitting by 2+ whitespace
+            parts = [p.strip() for p in re.split(r"\s{2,}", line) if p.strip()]
+
+        # Skip header rows
+        if parts and any(w in parts[0].lower() for w in HEADER_WORDS):
+            continue
+
+        # Expect: date, terminal, base, fsc%, total  (5 cols)
+        # Or: date, terminal, base, total  (4 cols, no fsc)
+        # Or: terminal, base, fsc%, total  (4 cols, no date)
+        try:
+            rate_date = None
+            terminal = None
+            base_rate = None
+            fsc = Decimal("0")
+            total = None
+
+            if len(parts) >= 5:
+                rate_date = parse_date(parts[0])
+                terminal = parts[1]
+                base_rate = parse_money(parts[2])
+                fsc = parse_pct(parts[3])
+                total = parse_money(parts[4])
+            elif len(parts) == 4:
+                # Try date first
+                d = parse_date(parts[0])
+                if d:
+                    rate_date = d
+                    terminal = parts[1]
+                    base_rate = parse_money(parts[2])
+                    total = parse_money(parts[3])
+                else:
+                    terminal = parts[0]
+                    base_rate = parse_money(parts[1])
+                    fsc = parse_pct(parts[2])
+                    total = parse_money(parts[3])
+            elif len(parts) == 3:
+                terminal = parts[0]
+                base_rate = parse_money(parts[1])
+                total = parse_money(parts[2])
+            else:
+                rows_skipped += 1
+                continue
+
+            if total is None and base_rate is None:
+                rows_skipped += 1
+                errors.append(f"Line {i + 1}: no rate found")
+                continue
+
+            if total is None and base_rate is not None:
+                total = base_rate * (1 + fsc / 100) if fsc else base_rate
+
+            insert_params.append((rate_date, terminal, origin, destination, base_rate, fsc, total, move_type))
+            rows_inserted += 1
+
+        except (InvalidOperation, ValueError) as e:
+            rows_skipped += 1
+            errors.append(f"Line {i + 1}: {e}")
+
+    if rows_inserted == 0:
+        return JSONResponse(status_code=400, content={"error": "No valid rows parsed", "skipped": rows_skipped, "errors": errors[:10]})
+
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            for p in insert_params:
+                cur.execute("""
+                    INSERT INTO market_rates (rate_date, terminal, origin, destination, base_rate, fsc_pct, total, source, move_type)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'loadmatch', %s)
+                """, p)
+
+    return {"ok": True, "inserted": rows_inserted, "skipped": rows_skipped, "errors": errors[:10]}
+
+
+@router.get("/api/rate-iq/market-rates")
+async def get_market_rates(
+    origin: str = Query(default=""),
+    destination: str = Query(default=""),
+    move_type: str = Query(default=""),
+):
+    """Retrieve market benchmark rates for a lane with aggregate stats."""
+    origin = origin.strip()
+    destination = destination.strip()
+
+    if not origin and not destination:
+        return JSONResponse(status_code=400, content={"error": "origin or destination required"})
+
+    conditions = []
+    params = []
+    if origin:
+        conditions.append("LOWER(origin) LIKE %s")
+        params.append(f"%{origin.lower()}%")
+    if destination:
+        conditions.append("LOWER(destination) LIKE %s")
+        params.append(f"%{destination.lower()}%")
+    if move_type:
+        conditions.append("LOWER(move_type) = %s")
+        params.append(move_type.lower())
+
+    where = " AND ".join(conditions)
+
+    with db.get_cursor() as cur:
+        cur.execute(f"""
+            SELECT id, rate_date, terminal, origin, destination,
+                   base_rate, fsc_pct, total, source, move_type, created_at
+            FROM market_rates
+            WHERE {where}
+            ORDER BY rate_date DESC NULLS LAST
+            LIMIT 100
+        """, params)
+        rows = cur.fetchall()
+
+    rates = []
+    totals = []
+    for r in rows:
+        t = float(r["total"]) if r["total"] else None
+        if t:
+            totals.append(t)
+        rates.append({
+            "id": r["id"],
+            "date": r["rate_date"].isoformat() if r["rate_date"] else None,
+            "terminal": r["terminal"],
+            "origin": r["origin"],
+            "destination": r["destination"],
+            "base": float(r["base_rate"]) if r["base_rate"] else None,
+            "fsc_pct": float(r["fsc_pct"]) if r["fsc_pct"] else None,
+            "total": t,
+            "source": r["source"],
+            "move_type": r["move_type"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        })
+
+    stats = None
+    if totals:
+        mid = len(totals) // 2
+        recent = totals[:mid] if mid > 0 else totals
+        older = totals[mid:] if mid > 0 else []
+        recent_avg = sum(recent) / len(recent) if recent else None
+        older_avg = sum(older) / len(older) if older else None
+        trend_pct = round(((recent_avg - older_avg) / older_avg) * 100, 1) if recent_avg and older_avg and older_avg > 0 else None
+
+        stats = {
+            "avg": round(sum(totals) / len(totals), 2),
+            "min": min(totals),
+            "max": max(totals),
+            "count": len(totals),
+            "latest_date": rates[0]["date"] if rates else None,
+            "oldest_date": rates[-1]["date"] if rates else None,
+            "trend_pct": trend_pct,
+        }
+
+    return {"rates": rates, "stats": stats}
