@@ -53,7 +53,7 @@ function HistoryTabContent({ rateHistory, historyLoading, onLoad }) {
 // ── Market Rate Card (DrayRates-inspired) ──
 function MarketRateCard({ laneGroup, carrierCapMap }) {
   if (!laneGroup) return null;
-  const { carriers, minRate, maxRate, total, count, port, destination, miles, origin_zip, dest_zip } = laneGroup;
+  const { carriers, minRate, maxRate, total, count, port, destination, miles, origin_zip, dest_zip, move_type } = laneGroup;
   const avgRate = count > 0 ? Math.round(total / count) : 0;
   const range = minRate !== Infinity && maxRate > 0 ? `${fmt(minRate)} – ${fmt(maxRate)}` : "—";
 
@@ -61,8 +61,10 @@ function MarketRateCard({ laneGroup, carrierCapMap }) {
   const confidence = count >= 10 ? 99 : count >= 5 ? 85 : count >= 3 ? 70 : count >= 1 ? 50 : 0;
   const confColor = confidence >= 85 ? "#34d399" : confidence >= 60 ? "#FBBF24" : "#fb923c";
 
-  // Rate per mile — use actual miles if available, else rough 250mi estimate
-  const milesForCalc = miles || 250;
+  // Rate per mile — dray is round-trip, FTL/other is one-way
+  const isDray = (move_type || "dray").toLowerCase() === "dray";
+  const effectiveMiles = miles ? (isDray ? miles * 2 : miles) : null;
+  const milesForCalc = effectiveMiles || 250;
   const ratePerMile = avgRate > 0 ? (avgRate / milesForCalc).toFixed(2) : "—";
 
   // Activity level based on carrier count and data freshness
@@ -114,11 +116,11 @@ function MarketRateCard({ laneGroup, carrierCapMap }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px 32px", paddingBottom: 4 }}>
           <div>
             <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Rate Per Mile</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>${ratePerMile}{!miles && <span style={{ fontSize: 11, color: "#5A6478", fontWeight: 500 }}> est</span>}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace" }}>${ratePerMile}{!effectiveMiles && <span style={{ fontSize: 11, color: "#5A6478", fontWeight: 500 }}> est</span>}</div>
           </div>
           <div>
-            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Miles</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: miles ? "#F0F2F5" : "#3D4654", fontFamily: "'JetBrains Mono', monospace" }}>{miles ? miles.toLocaleString() : "—"}</div>
+            <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Miles{isDray ? " (RT)" : ""}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: effectiveMiles ? "#F0F2F5" : "#3D4654", fontFamily: "'JetBrains Mono', monospace" }}>{effectiveMiles ? effectiveMiles.toLocaleString() : "—"}</div>
           </div>
           <div>
             <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginBottom: 2 }}>Activity</div>
@@ -297,17 +299,22 @@ const MOVE_TYPE_STYLES = {
   transload: { label: "Transload", color: "#a78bfa", bg: "rgba(167,139,250,0.12)", border: "rgba(167,139,250,0.25)" },
 };
 
-function LaneCard({ lane, onClick, onQuickQuote }) {
+function LaneCard({ lane, onClick, onQuickQuote, onReclassify, rateIds }) {
   const [hovered, setHovered] = useState(false);
+  const [showMtPicker, setShowMtPicker] = useState(false);
   const volume = lane.load_count || 0;
   const mtStyle = MOVE_TYPE_STYLES[(lane.move_type || "dray").toLowerCase()] || MOVE_TYPE_STYLES.dray;
   const volTag = volume >= 20 ? { label: "High Volume", color: "#00D4AA", bg: "rgba(0,212,170,0.15)", border: "rgba(0,212,170,0.35)" }
     : volume >= 5 ? { label: "Active", color: "#3B82F6", bg: "rgba(59,130,246,0.15)", border: "rgba(59,130,246,0.35)" }
     : { label: "Low Volume", color: "#5A6478", bg: "rgba(90,100,120,0.08)", border: "rgba(90,100,120,0.15)" };
   const avgRate = lane.avg_rate || lane.average || 0;
+  const isDray = (lane.move_type || "dray").toLowerCase() === "dray";
+  const miles = lane.miles ? (isDray ? lane.miles * 2 : lane.miles) : null;
+  const rpm = (avgRate > 0 && miles > 0) ? (avgRate / miles).toFixed(2) : null;
 
   return (
-    <div onClick={onClick} className="glass" style={{ borderRadius: 12, padding: "18px 20px", cursor: "pointer", border: "1px solid rgba(255,255,255,0.06)", transition: "all 0.2s", position: "relative" }}
+    <div onClick={onClick} draggable className="glass" style={{ borderRadius: 12, padding: "18px 20px", cursor: "pointer", border: "1px solid rgba(255,255,255,0.06)", transition: "all 0.2s", position: "relative" }}
+      onDragStart={e => { e.dataTransfer.setData("application/json", JSON.stringify({ port: lane.port || lane.origin_city, destination: lane.destination || lane.dest_city, rateIds: rateIds || [] })); e.dataTransfer.effectAllowed = "move"; }}
       onMouseEnter={e => { setHovered(true); e.currentTarget.style.borderColor = "rgba(0,212,170,0.25)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
       onMouseLeave={e => { setHovered(false); e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)"; e.currentTarget.style.transform = "translateY(0)"; }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
@@ -317,7 +324,8 @@ function LaneCard({ lane, onClick, onQuickQuote }) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
             <span style={{ fontSize: 11, color: "#5A6478" }}>{volume} rate{volume !== 1 ? "s" : ""} on file</span>
-            {lane.miles && <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{lane.miles.toLocaleString()} mi</span>}
+            {miles && <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{miles.toLocaleString()} mi{isDray ? " RT" : ""}</span>}
+            {rpm && <span style={{ fontSize: 11, fontWeight: 700, color: "#60a5fa", fontFamily: "'JetBrains Mono', monospace" }}>${rpm}/mi</span>}
           </div>
           {(lane.origin_zip || lane.dest_zip) && (
             <div style={{ fontSize: 11, color: "#5A6478", marginTop: 2, fontFamily: "'JetBrains Mono', monospace" }}>
@@ -341,8 +349,25 @@ function LaneCard({ lane, onClick, onQuickQuote }) {
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", gap: 6 }}>
-          <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: mtStyle.bg, color: mtStyle.color, border: `1px solid ${mtStyle.border}` }}>
+          <span onClick={e => { e.stopPropagation(); if (onReclassify) setShowMtPicker(!showMtPicker); }}
+            style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: mtStyle.bg, color: mtStyle.color, border: `1px solid ${mtStyle.border}`, cursor: onReclassify ? "pointer" : "default", position: "relative" }}
+            title={onReclassify ? "Click to reclassify move type" : ""}>
             {mtStyle.label}
+            {showMtPicker && onReclassify && (
+              <div onClick={e => e.stopPropagation()} style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 60, background: "#151922", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", overflow: "hidden", minWidth: 100 }}>
+                {["dray", "ftl", "transload"].filter(mt => mt !== (lane.move_type || "dray").toLowerCase()).map(mt => {
+                  const s = MOVE_TYPE_STYLES[mt];
+                  return (
+                    <div key={mt} onClick={() => { onReclassify(mt); setShowMtPicker(false); }}
+                      style={{ padding: "6px 14px", cursor: "pointer", fontSize: 11, fontWeight: 700, color: s.color, transition: "background 0.1s" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.05)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      {s.label}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </span>
           <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: volTag.bg, color: volTag.color, border: `1px solid ${volTag.border}` }}>
             {volTag.label}
@@ -388,12 +413,19 @@ export default function RateIQView() {
   const [rateHistory, setRateHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  // ── Manual intake state ──
+  const [intakeOpen, setIntakeOpen] = useState(false);
+  const [intakeText, setIntakeText] = useState("");
+  const [intakeMoveType, setIntakeMoveType] = useState("dray");
+  const [intakeProcessing, setIntakeProcessing] = useState(false);
+  const [intakeResult, setIntakeResult] = useState(null); // { ok, extracted } or { error }
+
   // ── Lane Search state ──
   const [searchOrigin, setSearchOrigin] = useState("");
   const [searchDest, setSearchDest] = useState("");
   const [laneResults, setLaneResults] = useState([]);
   const [laneSearching, setLaneSearching] = useState(false);
-  const [moveTypeFilter, setMoveTypeFilter] = useState("all"); // all | dray | ftl | transload
+  const [moveTypeFilter, setMoveTypeFilter] = useState("dray"); // all | dray | ftl | transload
   const [editingLaneRateId, setEditingLaneRateId] = useState(null);
   const [editingLaneField, setEditingLaneField] = useState(null);
   const [editingLaneValue, setEditingLaneValue] = useState("");
@@ -539,6 +571,69 @@ export default function RateIQView() {
     }).sort((a, b) => b.count - a.count);
   }, [laneResults]);
 
+  // ── API: Manual intake — paste email text, AI extracts rate ──
+  const handleManualIntake = useCallback(async () => {
+    if (!intakeText.trim()) return;
+    setIntakeProcessing(true);
+    setIntakeResult(null);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/rate-iq/manual-intake`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: intakeText, move_type: intakeMoveType }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setIntakeResult({ ok: true, extracted: data.extracted });
+        setIntakeText("");
+        fetchData(); // Refresh lane summaries
+      } else {
+        setIntakeResult({ error: data.error || "Extraction failed", extracted: data.extracted });
+      }
+    } catch (e) {
+      setIntakeResult({ error: e.message });
+    }
+    setIntakeProcessing(false);
+  }, [intakeText, intakeMoveType, fetchData]);
+
+  // ── API: Reclassify lane move type (bulk update all rates in a lane) ──
+  const [dragOverType, setDragOverType] = useState(null);
+  const handleReclassifyLane = useCallback(async (port, destination, rateIds, newMoveType) => {
+    if (!rateIds?.length && !port) return;
+    // If we have individual rate IDs, update each one
+    if (rateIds?.length) {
+      await Promise.all(rateIds.map(id =>
+        apiFetch(`${API_BASE}/api/lane-rates/${id}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ move_type: newMoveType }),
+        }).catch(e => console.error("Reclassify failed for", id, e))
+      ));
+    } else {
+      // Fallback: search for rates by port+dest and update them
+      const res = await apiFetch(`${API_BASE}/api/lane-rates?port=${encodeURIComponent(port)}&destination=${encodeURIComponent(destination)}`).then(r => r.json());
+      const ids = (res.lane_rates || []).map(r => r.id);
+      await Promise.all(ids.map(id =>
+        apiFetch(`${API_BASE}/api/lane-rates/${id}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ move_type: newMoveType }),
+        }).catch(e => console.error("Reclassify failed for", id, e))
+      ));
+    }
+    // Optimistic update: refresh data
+    fetchData();
+    if (searchOrigin || searchDest) searchLanes();
+  }, [fetchData, searchLanes, searchOrigin, searchDest]);
+
+  const handleMoveTypeDrop = useCallback((e, targetType) => {
+    e.preventDefault();
+    setDragOverType(null);
+    try {
+      const data = JSON.parse(e.dataTransfer.getData("application/json"));
+      if (data.port || data.destination) {
+        handleReclassifyLane(data.port, data.destination, data.rateIds, targetType);
+      }
+    } catch (err) { console.error("Drop parse error:", err); }
+  }, [handleReclassifyLane]);
+
   // ── API: Carrier update ──
   const handleCarrierUpdate = async (carrierId, field, value) => {
     setDirCarriers(prev => prev.map(c => c.id === carrierId ? { ...c, [field]: value } : c));
@@ -577,7 +672,7 @@ export default function RateIQView() {
         apiFetch(`${API_BASE}/api/lane-stats`).then(r => r.json()).catch(() => ({ lanes: [] })),
         apiFetch(`${API_BASE}/api/carriers?include_lanes=true`).then(r => r.json()).catch(() => ({ carriers: [] })),
         apiFetch(`${API_BASE}/api/port-groups`).then(r => r.json()).catch(() => ({ groups: [] })),
-        apiFetch(`${API_BASE}/api/lane-rates`).then(r => r.json()).catch(() => ({ lane_rates: [] })),
+        apiFetch(`${API_BASE}/api/lane-rates${moveTypeFilter && moveTypeFilter !== "all" ? `?move_type=${moveTypeFilter}` : ""}`).then(r => r.json()).catch(() => ({ lane_rates: [] })),
       ]);
       setData(rateRes);
       setScorecardPerf(perfRes.carriers || []);
@@ -624,7 +719,7 @@ export default function RateIQView() {
       setRateLaneSummaries(summaries);
     } catch (e) { console.error("Rate IQ fetch:", e); }
     setLoading(false);
-  }, []);
+  }, [moveTypeFilter]);
 
   useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
 
@@ -638,11 +733,15 @@ export default function RateIQView() {
       const params = new URLSearchParams();
       if (o) params.set("port", o);
       if (d) params.set("destination", d);
+      if (moveTypeFilter && moveTypeFilter !== "all") params.set("move_type", moveTypeFilter);
       const res = await apiFetch(`${API_BASE}/api/lane-rates?${params.toString()}`).then(r => r.json());
       setLaneResults(res.lane_rates || (Array.isArray(res) ? res : []));
     } catch (e) { console.error("Lane search:", e); setLaneResults([]); }
     setLaneSearching(false);
-  }, [searchOrigin, searchDest]);
+  }, [searchOrigin, searchDest, moveTypeFilter]);
+
+  // Re-search when move type filter changes (if there's an active search)
+  useEffect(() => { if (searchOrigin || searchDest) searchLanes(); }, [moveTypeFilter, searchLanes]);
 
   // ── Navigate to lane detail ──
   const openLaneDetail = useCallback(async (origin, destination, idx = 0) => {
@@ -658,11 +757,12 @@ export default function RateIQView() {
       const params = new URLSearchParams();
       if (origin) params.set("port", origin);
       if (destination) params.set("destination", destination);
+      if (moveTypeFilter && moveTypeFilter !== "all") params.set("move_type", moveTypeFilter);
       const res = await apiFetch(`${API_BASE}/api/lane-rates?${params.toString()}`).then(r => r.json());
       setLaneResults(res.lane_rates || (Array.isArray(res) ? res : []));
     } catch (e) { console.error("Lane search:", e); setLaneResults([]); }
     setLaneSearching(false);
-  }, []);
+  }, [moveTypeFilter]);
 
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#8B95A8" }}>Loading Rate IQ...</div>;
 
@@ -697,6 +797,62 @@ export default function RateIQView() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Manual Intake Drop Zone */}
+        <div className="glass" style={{ borderRadius: 14, marginBottom: 16, border: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
+          <div onClick={() => setIntakeOpen(!intakeOpen)}
+            style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
+            onDragOver={e => { e.preventDefault(); if (!intakeOpen) setIntakeOpen(true); }}
+            onDrop={e => { e.preventDefault(); const text = e.dataTransfer.getData("text/plain"); if (text) { setIntakeText(text); setIntakeOpen(true); } }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 14 }}>📋</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>PASTE RATE EMAIL</span>
+              <span style={{ fontSize: 11, color: "#5A6478" }}>— drop or paste carrier rate email text</span>
+            </div>
+            <span style={{ fontSize: 12, color: "#5A6478", transform: intakeOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</span>
+          </div>
+          {intakeOpen && (
+            <div style={{ padding: "0 24px 20px" }}>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                {["dray", "transload"].map(mt => {
+                  const active = intakeMoveType === mt;
+                  const s = MOVE_TYPE_STYLES[mt];
+                  return (
+                    <button key={mt} onClick={() => setIntakeMoveType(mt)}
+                      style={{ padding: "4px 14px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: `1px solid ${active ? s.color + "55" : "rgba(255,255,255,0.06)"}`, background: active ? s.color + "18" : "transparent", color: active ? s.color : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
+                      {s.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <textarea value={intakeText} onChange={e => setIntakeText(e.target.value)}
+                onPaste={e => { const text = e.clipboardData.getData("text/plain"); if (text && !intakeText) { e.preventDefault(); setIntakeText(text); } }}
+                placeholder="Paste carrier rate email here... (Ctrl+V or drag text from email)"
+                style={{ width: "100%", minHeight: 100, maxHeight: 200, padding: 14, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+                <div style={{ fontSize: 11, color: "#5A6478" }}>
+                  {intakeText.length > 0 && `${intakeText.length.toLocaleString()} chars`}
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  {intakeResult?.ok && (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399" }}>
+                      ✓ Added: {intakeResult.extracted.carrier_name} — {intakeResult.extracted.origin} → {intakeResult.extracted.destination} @ ${intakeResult.extracted.rate_amount}
+                    </span>
+                  )}
+                  {intakeResult?.error && (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {intakeResult.error}</span>
+                  )}
+                  {intakeText.trim() && (
+                    <button onClick={handleManualIntake} disabled={intakeProcessing}
+                      style={{ padding: "6px 20px", borderRadius: 8, border: "none", background: grad, color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: intakeProcessing ? "wait" : "pointer", fontFamily: "inherit", opacity: intakeProcessing ? 0.6 : 1 }}>
+                      {intakeProcessing ? "Extracting..." : "Extract & Save"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Search Bar */}
@@ -798,10 +954,18 @@ export default function RateIQView() {
           ].map(t => {
             const active = moveTypeFilter === t.key;
             const c = t.color || "#8B95A8";
+            const isDropTarget = t.key !== "all" && dragOverType === t.key;
             return (
               <button key={t.key} onClick={() => setMoveTypeFilter(t.key)}
-                style={{ padding: "5px 16px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: `1px solid ${active ? (t.color ? t.color + "55" : "rgba(0,212,170,0.3)") : "rgba(255,255,255,0.06)"}`, background: active ? (t.color ? t.color + "18" : "rgba(0,212,170,0.08)") : "transparent", color: active ? (t.color || "#00D4AA") : "#5A6478", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
-                {t.label}
+                onDragOver={t.key !== "all" ? (e => { e.preventDefault(); setDragOverType(t.key); }) : undefined}
+                onDragLeave={t.key !== "all" ? (() => setDragOverType(null)) : undefined}
+                onDrop={t.key !== "all" ? (e => handleMoveTypeDrop(e, t.key)) : undefined}
+                style={{ padding: "5px 16px", fontSize: 11, fontWeight: 700, borderRadius: 8,
+                  border: `1px solid ${isDropTarget ? (t.color || "#00D4AA") : active ? (t.color ? t.color + "55" : "rgba(0,212,170,0.3)") : "rgba(255,255,255,0.06)"}`,
+                  background: isDropTarget ? (t.color ? t.color + "30" : "rgba(0,212,170,0.20)") : active ? (t.color ? t.color + "18" : "rgba(0,212,170,0.08)") : "transparent",
+                  color: active || isDropTarget ? (t.color || "#00D4AA") : "#5A6478", cursor: "pointer", fontFamily: "inherit",
+                  transition: "all 0.15s", transform: isDropTarget ? "scale(1.08)" : "scale(1)" }}>
+                {isDropTarget ? `→ ${t.label}` : t.label}
               </button>
             );
           })}
@@ -817,12 +981,14 @@ export default function RateIQView() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
               {filtered.map((group, gi) => (
                 <LaneCard key={gi} lane={{
-                  origin_city: group.port, dest_city: group.destination,
+                  origin_city: group.port, dest_city: group.destination, port: group.port, destination: group.destination,
                   load_count: group.count, avg_rate: group.count > 0 ? Math.round(group.total / group.count) : 0,
                   carrier_count: group.carriers.length,
                   miles: group.miles, origin_zip: group.origin_zip, dest_zip: group.dest_zip,
                   move_type: group.move_type,
                 }} onClick={() => openLaneDetail(group.port, group.destination, gi)}
+                  rateIds={(group.carriers || []).map(c => c.id).filter(Boolean)}
+                  onReclassify={mt => handleReclassifyLane(group.port, group.destination, (group.carriers || []).map(c => c.id).filter(Boolean), mt)}
                   onQuickQuote={() => { setSelectedLane({ origin: group.port, destination: group.destination }); setView("quote"); }} />
               ))}
             </div>
@@ -841,6 +1007,7 @@ export default function RateIQView() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
               {filtered.slice(0, 12).map((ls, li) => (
                 <LaneCard key={li} lane={ls} onClick={() => openLaneDetail(ls.port, ls.destination, 0)}
+                  onReclassify={mt => handleReclassifyLane(ls.port, ls.destination, [], mt)}
                   onQuickQuote={() => { setSelectedLane({ origin: ls.port, destination: ls.destination }); setView("quote"); }} />
               ))}
             </div>
