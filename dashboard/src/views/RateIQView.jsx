@@ -572,68 +572,6 @@ export default function RateIQView() {
   }, [laneResults]);
 
   // ── API: Manual intake — paste email text, AI extracts rate ──
-  const handleManualIntake = useCallback(async () => {
-    if (!intakeText.trim()) return;
-    setIntakeProcessing(true);
-    setIntakeResult(null);
-    try {
-      const res = await apiFetch(`${API_BASE}/api/rate-iq/manual-intake`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: intakeText, move_type: intakeMoveType }),
-      });
-      const data = await res.json();
-      if (res.ok && data.ok) {
-        setIntakeResult({ ok: true, extracted: data.extracted });
-        setIntakeText("");
-        fetchData(); // Refresh lane summaries
-      } else {
-        setIntakeResult({ error: data.error || "Extraction failed", extracted: data.extracted });
-      }
-    } catch (e) {
-      setIntakeResult({ error: e.message });
-    }
-    setIntakeProcessing(false);
-  }, [intakeText, intakeMoveType, fetchData]);
-
-  // ── API: Reclassify lane move type (bulk update all rates in a lane) ──
-  const [dragOverType, setDragOverType] = useState(null);
-  const handleReclassifyLane = useCallback(async (port, destination, rateIds, newMoveType) => {
-    if (!rateIds?.length && !port) return;
-    // If we have individual rate IDs, update each one
-    if (rateIds?.length) {
-      await Promise.all(rateIds.map(id =>
-        apiFetch(`${API_BASE}/api/lane-rates/${id}`, {
-          method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ move_type: newMoveType }),
-        }).catch(e => console.error("Reclassify failed for", id, e))
-      ));
-    } else {
-      // Fallback: search for rates by port+dest and update them
-      const res = await apiFetch(`${API_BASE}/api/lane-rates?port=${encodeURIComponent(port)}&destination=${encodeURIComponent(destination)}`).then(r => r.json());
-      const ids = (res.lane_rates || []).map(r => r.id);
-      await Promise.all(ids.map(id =>
-        apiFetch(`${API_BASE}/api/lane-rates/${id}`, {
-          method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ move_type: newMoveType }),
-        }).catch(e => console.error("Reclassify failed for", id, e))
-      ));
-    }
-    // Optimistic update: refresh data
-    fetchData();
-    if (searchOrigin || searchDest) searchLanes();
-  }, [fetchData, searchLanes, searchOrigin, searchDest]);
-
-  const handleMoveTypeDrop = useCallback((e, targetType) => {
-    e.preventDefault();
-    setDragOverType(null);
-    try {
-      const data = JSON.parse(e.dataTransfer.getData("application/json"));
-      if (data.port || data.destination) {
-        handleReclassifyLane(data.port, data.destination, data.rateIds, targetType);
-      }
-    } catch (err) { console.error("Drop parse error:", err); }
-  }, [handleReclassifyLane]);
-
   // ── API: Carrier update ──
   const handleCarrierUpdate = async (carrierId, field, value) => {
     setDirCarriers(prev => prev.map(c => c.id === carrierId ? { ...c, [field]: value } : c));
@@ -742,6 +680,66 @@ export default function RateIQView() {
 
   // Re-search when move type filter changes (if there's an active search)
   useEffect(() => { if (searchOrigin || searchDest) searchLanes(); }, [moveTypeFilter, searchLanes]);
+
+  // ── API: Manual intake — paste email text, AI extracts rate ──
+  const handleManualIntake = useCallback(async () => {
+    if (!intakeText.trim()) return;
+    setIntakeProcessing(true);
+    setIntakeResult(null);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/rate-iq/manual-intake`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: intakeText, move_type: intakeMoveType }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setIntakeResult({ ok: true, extracted: data.extracted });
+        setIntakeText("");
+        fetchData(); // Refresh lane summaries
+      } else {
+        setIntakeResult({ error: data.error || "Extraction failed", extracted: data.extracted });
+      }
+    } catch (e) {
+      setIntakeResult({ error: e.message });
+    }
+    setIntakeProcessing(false);
+  }, [intakeText, intakeMoveType, fetchData]);
+
+  // ── API: Reclassify lane move type (bulk update all rates in a lane) ──
+  const [dragOverType, setDragOverType] = useState(null);
+  const handleReclassifyLane = useCallback(async (port, destination, rateIds, newMoveType) => {
+    if (!rateIds?.length && !port) return;
+    if (rateIds?.length) {
+      await Promise.all(rateIds.map(id =>
+        apiFetch(`${API_BASE}/api/lane-rates/${id}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ move_type: newMoveType }),
+        }).catch(e => console.error("Reclassify failed for", id, e))
+      ));
+    } else {
+      const res = await apiFetch(`${API_BASE}/api/lane-rates?port=${encodeURIComponent(port)}&destination=${encodeURIComponent(destination)}`).then(r => r.json());
+      const ids = (res.lane_rates || []).map(r => r.id);
+      await Promise.all(ids.map(id =>
+        apiFetch(`${API_BASE}/api/lane-rates/${id}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ move_type: newMoveType }),
+        }).catch(e => console.error("Reclassify failed for", id, e))
+      ));
+    }
+    fetchData();
+    if (searchOrigin || searchDest) searchLanes();
+  }, [fetchData, searchLanes, searchOrigin, searchDest]);
+
+  const handleMoveTypeDrop = useCallback((e, targetType) => {
+    e.preventDefault();
+    setDragOverType(null);
+    try {
+      const data = JSON.parse(e.dataTransfer.getData("application/json"));
+      if (data.port || data.destination) {
+        handleReclassifyLane(data.port, data.destination, data.rateIds, targetType);
+      }
+    } catch (err) { console.error("Drop parse error:", err); }
+  }, [handleReclassifyLane]);
 
   // ── Navigate to lane detail ──
   const openLaneDetail = useCallback(async (origin, destination, idx = 0) => {
