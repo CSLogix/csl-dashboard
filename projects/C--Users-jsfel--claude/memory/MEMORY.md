@@ -77,6 +77,7 @@ Note: `csl-ftl`, `csl-export`, `csl-webhook` all DISABLED (migrated to cron / ap
 - Dispatch column picker, 11px font floor, LoadSlideOver action consolidation
 - Rate IQ miles/zip/MC/email, Lane Playbooks frontend, Process Booking flow
 - Smart Inbox Auto-Actions, Load Confirmation slide-over, MP real-time sync
+- **Inline editing**: ALL dispatch cells editable (Account, EFJ, Container, Origin, Destination + existing fields). Tab/Shift+Tab/Enter/Escape spreadsheet navigation. Bidirectional sync between loadboard and slide-over
 
 ### Earlier (Mar 5-11) — condensed
 See topic files. Key: Carrier Intelligence Suite, Ask AI (23 tools), Financials+Margin Guard, Mobile layout, Rep Scoreboard, Account Health, Sheet dual-write, Tolead dedup, Live Alerts.
