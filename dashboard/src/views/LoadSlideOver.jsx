@@ -430,17 +430,15 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
           {/* Quick Action Strip — 4 primary + overflow */}
           <div style={{ padding: "8px 20px 10px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", gap: 6, alignItems: "center" }}>
             {[
-              { icon: "\u{1F4CB}", label: copiedEfj ? "Copied!" : "Copy EFJ", color: copiedEfj ? "#34d399" : "rgba(255,255,255,0.5)",
-                onClick: () => { navigator.clipboard.writeText(selectedShipment.efj); setCopiedEfj(true); setTimeout(() => setCopiedEfj(false), 1500); }, enabled: true },
-              { icon: "\u{1F4E7}", label: "Email", color: "#00D4AA",
-                onClick: () => { const email = driverInfo.carrierEmail || driverInfo.driverEmail; if (email) window.open(`mailto:${email}?subject=${encodeURIComponent(`${selectedShipment.loadNumber} - ${selectedShipment.container} Update`)}`); },
-                enabled: !!(driverInfo.carrierEmail || driverInfo.driverEmail) },
-              { icon: "\u{1F4DE}", label: "Call", color: "#10b981",
-                onClick: () => { if (driverInfo.driverPhone) window.open(`tel:${driverInfo.driverPhone.replace(/\D/g, "")}`); },
-                enabled: !!driverInfo.driverPhone },
+              { icon: "\u2726", label: aiSummaryLoading ? "Thinking..." : "AI Summary",
+                color: aiSummaryLoading ? "#fbbf24" : "#00D4AA",
+                onClick: () => { requestAiSummary(); }, enabled: !aiSummaryLoading },
               { icon: "\u{1F4CD}", label: "Tracking", color: "#3B82F6",
                 onClick: () => { const url = trackingData?.macropointUrl || driverInfo.macropointUrl || selectedShipment.macropointUrl; if (url) window.open(url, '_blank'); },
                 enabled: !!(trackingData?.macropointUrl || driverInfo.macropointUrl || selectedShipment.macropointUrl) },
+              { icon: "\u{1F4DE}", label: "Call", color: "#10b981",
+                onClick: () => { if (driverInfo.driverPhone) window.open(`tel:${driverInfo.driverPhone.replace(/\D/g, "")}`); },
+                enabled: !!driverInfo.driverPhone },
             ].map((btn, i) => (
               <button key={i} onClick={btn.enabled ? btn.onClick : undefined}
                 style={{ background: btn.enabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.02)", border: `1px solid ${btn.enabled ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.04)"}`,
@@ -461,12 +459,14 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 <div style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", background: "#1E2536", border: "1px solid rgba(255,255,255,0.10)",
                   borderRadius: 8, padding: 4, minWidth: 170, zIndex: 50, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
                   {[
+                    { icon: "\u{1F4CB}", label: copiedEfj ? "Copied!" : "Copy EFJ", color: copiedEfj ? "#34d399" : "rgba(255,255,255,0.6)",
+                      onClick: () => { navigator.clipboard.writeText(selectedShipment.efj); setCopiedEfj(true); setTimeout(() => setCopiedEfj(false), 1500); setShowOverflow(false); }, enabled: true },
+                    { icon: "\u{1F4E7}", label: "Email", color: "#00D4AA",
+                      onClick: () => { const email = driverInfo.carrierEmail || driverInfo.driverEmail; if (email) { window.open(`mailto:${email}?subject=${encodeURIComponent(`${selectedShipment.loadNumber} - ${selectedShipment.container} Update`)}`); setShowOverflow(false); } },
+                      enabled: !!(driverInfo.carrierEmail || driverInfo.driverEmail) },
                     { icon: "\u{1F4C4}", label: "View BOL", color: "rgba(255,255,255,0.6)",
                       onClick: () => { const bol = loadDocs.find(d => d.doc_type === 'bol'); if (bol) { setPreviewDoc(bol); setShowOverflow(false); } },
                       enabled: loadDocs.some(d => d.doc_type === 'bol') },
-                    { icon: "\u2726", label: aiSummaryLoading ? "Thinking..." : "AI Summary",
-                      color: aiSummaryLoading ? "#fbbf24" : "#00D4AA",
-                      onClick: () => { requestAiSummary(); setShowOverflow(false); }, enabled: !aiSummaryLoading },
                     { icon: "\u{1F517}", label: linkGenerating ? "Generating..." : copiedLink ? "Copied!" : "Share Link",
                       color: copiedLink ? "#34d399" : linkGenerating ? "#fbbf24" : "#a78bfa",
                       onClick: () => { handleShareLink(); }, enabled: !linkGenerating },
