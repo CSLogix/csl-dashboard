@@ -316,7 +316,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
         onDocChange?.();
         // Auto-status advance (e.g., POD upload → pod_received)
         if (rData.auto_status) {
-          handleStatusUpdate(selectedShipment.efj, rData.auto_status);
+          handleStatusUpdate(selectedShipment.id, rData.auto_status);
           setDocUploadMsg(`Uploaded — status → ${rData.auto_status.replace(/_/g, " ")}`);
         }
       } else { setDocUploadMsg(`Upload failed (${r.status})`); }
