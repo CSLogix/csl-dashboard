@@ -607,7 +607,6 @@ export default function RateIQView() {
     { key: "can_reefer", label: "Reefer", color: "#60a5fa" },
     { key: "can_bonded", label: "Bonded", color: "#a78bfa" },
     { key: "can_oog", label: "OOG", color: "#fb923c" },
-    { key: "can_warehousing", label: "WHS", color: "#34d399", sync: "can_transload" },
     { key: "can_transload", label: "Transload", color: "#38bdf8", sync: "can_warehousing" },
   ];
 
