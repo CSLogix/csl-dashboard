@@ -294,6 +294,50 @@ async def api_v2_team(request: Request):
     return {"team": team}
 
 
+@router.get("/api/rep-scoreboard")
+async def api_rep_scoreboard(request: Request):
+    """Per-rep load counts and revenue for the dashboard overview."""
+    with db.get_cursor() as cur:
+        cur.execute(f"""
+        SELECT rep,
+               COUNT(*) FILTER (
+                   WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
+                     AND archived = FALSE
+               ) AS loads_7d,
+               COALESCE(SUM(customer_rate) FILTER (
+                   WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
+                     AND archived = FALSE
+                     AND customer_rate IS NOT NULL AND customer_rate > 0
+               ), 0) AS revenue_7d,
+               COUNT(*) FILTER (
+                   WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
+                     AND archived = FALSE
+                     AND customer_rate IS NOT NULL AND customer_rate > 0
+               ) AS margin_loads,
+               COALESCE(SUM(customer_rate - COALESCE(carrier_pay, 0)) FILTER (
+                   WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
+                     AND archived = FALSE
+                     AND customer_rate IS NOT NULL AND customer_rate > 0
+               ), 0) AS total_margin
+        FROM shipments
+        WHERE archived = FALSE AND rep IS NOT NULL AND rep != ''
+        GROUP BY rep
+        ORDER BY loads_7d DESC
+        """)
+        rows = cur.fetchall()
+    scoreboard = [
+        {
+            "rep": r["rep"],
+            "loads_7d": r["loads_7d"],
+            "revenue_7d": float(r["revenue_7d"]),
+            "margin_loads": r["margin_loads"],
+            "total_margin": float(r["total_margin"]),
+        }
+        for r in rows
+    ]
+    return {"scoreboard": scoreboard}
+
+
 @router.post("/api/v2/load/{efj}/status")
 async def api_v2_update_status(efj: str, request: Request, background_tasks: BackgroundTasks):
     """Update status in Postgres. Write back to Google Sheet if shared account."""
