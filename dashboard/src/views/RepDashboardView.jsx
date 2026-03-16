@@ -197,7 +197,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   const opsActive = opsBase.filter(s => !isPostDelivery(s.status));
   const opsTableShips = !isOps ? [] :
     opsTableFilter === "behind" ? opsBehind :
-    opsTableFilter === "on_schedule" ? opsBase.filter(s => !["delivered", "empty_return"].includes(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))) :
+    opsTableFilter === "on_schedule" ? opsBase.filter(s => !isPostDelivery(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))) :
     opsTableFilter === "in_transit" ? opsBase.filter(s => ["in_transit", "out_for_delivery"].includes(s.status)) :
     opsTableFilter === "pu_today" ? opsPickupsToday :
     opsTableFilter === "pu_tomorrow" ? opsPickupsTomorrow :

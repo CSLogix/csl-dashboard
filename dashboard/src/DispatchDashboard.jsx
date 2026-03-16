@@ -469,8 +469,9 @@ export default function DispatchDashboard() {
       }).then(async r => {
         if (r.ok) {
           const resp = await r.json().catch(() => ({}));
-          setShipments(p => p.map(x => x.efj === shipEfj ? { ...x, synced: true } : x));
-          setSelectedShipment(prev => prev && prev.efj === shipEfj ? { ...prev, synced: true } : prev);
+          const finalStatus = resp.status || newStatus;
+          setShipments(p => p.map(x => x.efj === shipEfj ? { ...x, status: finalStatus, synced: true } : x));
+          setSelectedShipment(prev => prev && prev.efj === shipEfj ? { ...prev, status: finalStatus, synced: true } : prev);
           addSheetLog(`Synced -> Postgres | ${ship.loadNumber}`);
           if (resp.draft_id) {
             setDraftToast({ id: resp.draft_id, efj: shipEfj, loadNumber: ship.loadNumber });
@@ -680,7 +681,7 @@ export default function DispatchDashboard() {
     }
   };
 
-  const activeLoads = useMemo(() => filtered.filter(s => !["delivered", "issue", "cancelled", "cancelled_tonu", "empty_return", "driver_paid"].includes(s.status)).length, [filtered]);
+  const activeLoads = useMemo(() => filtered.filter(s => !isPostDelivery(s.status) && !["issue", "cancelled", "cancelled_tonu"].includes(s.status)).length, [filtered]);
   const inTransit = useMemo(() => filtered.filter(s => s.status === "in_transit").length, [filtered]);
   const deliveredCount = useMemo(() => filtered.filter(s => isPostDelivery(s.status)).length, [filtered]);
   const issueCount = useMemo(() => filtered.filter(s => s.status === "issue").length, [filtered]);
