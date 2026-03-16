@@ -337,99 +337,99 @@ async def api_quote_extract(request: Request):
                 log.error("Claude PDF extraction failed: %s", e)
                 raise HTTPException(500, f"AI extraction failed: {e}")
 
-
-    # .msg (Outlook) - use extract-msg for proper parsing
-    if ext in ('msg',):
-        try:
-            import extract_msg, io as _io
-            msg = extract_msg.openMsg(_io.BytesIO(file_bytes))
-            parts = []
-            if msg.subject:
-                parts.append('Subject: ' + str(msg.subject))
-            if msg.sender:
-                parts.append('From: ' + str(msg.sender))
-            if msg.date:
-                parts.append('Date: ' + str(msg.date))
-            if msg.body:
-                parts.append(msg.body)
-            text_content = chr(10).join(parts)
-            # Extract image attachments for Claude Vision
-            attachment_images = []
-            for att in (msg.attachments or []):
-                att_name = (att.longFilename or att.shortFilename or '').lower()
-                if att_name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
-                    att_data = att.data
-                    if att_data:
-                        import base64 as _b64
-                        ext2 = att_name.rsplit('.', 1)[-1]
-                        mt = dict(png='image/png', jpg='image/jpeg', jpeg='image/jpeg', gif='image/gif', webp='image/webp').get(ext2, 'image/png')
-                        attachment_images.append(dict(type='image', source=dict(type='base64', media_type=mt, data=_b64.b64encode(att_data).decode())))
-                elif att_name.endswith('.pdf') and att.data:
-                    try:
-                        import fitz
-                        pdf_doc = fitz.open(stream=att.data, filetype='pdf')
-                        pdf_text = chr(10).join(page.get_text() for page in pdf_doc)
-                        if pdf_text.strip():
-                            text_content += chr(10)*2 + '--- Attached PDF: ' + att_name + ' ---' + chr(10) + pdf_text[:4000]
-                    except Exception:
-                        pass
-            if not text_content.strip():
-                raise HTTPException(400, 'Could not extract readable text from .msg file')
-            if has_claude:
-                try:
-                    content_msg = [dict(type='text', text=_EXTRACT_PROMPT + chr(10)*2 + text_content[:8000])]
-                    content_msg = attachment_images + content_msg
-                    result = _extract_with_claude(content_msg)
-                    return JSONResponse(result)
-                except Exception as e:
-                    log.warning('Claude .msg extraction failed: %s', e)
-            result = _parse_rate_text(text_content)
-            if not result:
-                raise HTTPException(400, 'Could not extract rate info from .msg file')
-            return JSONResponse(result)
-        except HTTPException:
-            raise
-        except Exception as e:
-            log.error('.msg extraction failed: %s', e)
-            # Fallback: brute-force ASCII extraction
+        # .msg (Outlook) - use extract-msg for proper parsing
+        elif ext in ('msg',):
             try:
-                raw = file_bytes.decode('latin-1', errors='replace')
-                blocks = re.findall(r'[ -~]{20,}', raw)
-                fallback_text = chr(10).join(blocks)
-                if fallback_text.strip() and has_claude:
-                    content_msg = [dict(type='text', text=_EXTRACT_PROMPT + chr(10)*2 + fallback_text[:8000])]
-                    result = _extract_with_claude(content_msg)
-                    return JSONResponse(result)
-            except Exception:
-                pass
-            raise HTTPException(500, f'Failed to process .msg file: {e}')
-
-    # .htm/.html files
-    if ext in ('htm', 'html'):
-        try:
-            raw = file_bytes.decode('utf-8', errors='replace')
-            text_content = re.sub(r'<[^>]+>', ' ', raw)
-            text_content = re.sub(chr(92) + 's+', ' ', text_content).strip()
-            if not text_content:
-                raise HTTPException(400, 'Could not extract text from HTML file')
-            if has_claude:
+                import extract_msg, io as _io
+                msg = extract_msg.openMsg(_io.BytesIO(file_bytes))
+                parts = []
+                if msg.subject:
+                    parts.append('Subject: ' + str(msg.subject))
+                if msg.sender:
+                    parts.append('From: ' + str(msg.sender))
+                if msg.date:
+                    parts.append('Date: ' + str(msg.date))
+                if msg.body:
+                    parts.append(msg.body)
+                text_content = chr(10).join(parts)
+                # Extract image attachments for Claude Vision
+                attachment_images = []
+                for att in (msg.attachments or []):
+                    att_name = (att.longFilename or att.shortFilename or '').lower()
+                    if att_name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+                        att_data = att.data
+                        if att_data:
+                            import base64 as _b64
+                            ext2 = att_name.rsplit('.', 1)[-1]
+                            mt = dict(png='image/png', jpg='image/jpeg', jpeg='image/jpeg', gif='image/gif', webp='image/webp').get(ext2, 'image/png')
+                            attachment_images.append(dict(type='image', source=dict(type='base64', media_type=mt, data=_b64.b64encode(att_data).decode())))
+                    elif att_name.endswith('.pdf') and att.data:
+                        try:
+                            import fitz
+                            pdf_doc = fitz.open(stream=att.data, filetype='pdf')
+                            pdf_text = chr(10).join(page.get_text() for page in pdf_doc)
+                            if pdf_text.strip():
+                                text_content += chr(10)*2 + '--- Attached PDF: ' + att_name + ' ---' + chr(10) + pdf_text[:4000]
+                        except Exception:
+                            pass
+                if not text_content.strip():
+                    raise HTTPException(400, 'Could not extract readable text from .msg file')
+                if has_claude:
+                    try:
+                        content_msg = [dict(type='text', text=_EXTRACT_PROMPT + chr(10)*2 + text_content[:8000])]
+                        content_msg = attachment_images + content_msg
+                        result = _extract_with_claude(content_msg)
+                        return JSONResponse(result)
+                    except Exception as e:
+                        log.warning('Claude .msg extraction failed: %s', e)
+                result = _parse_rate_text(text_content)
+                if not result:
+                    raise HTTPException(400, 'Could not extract rate info from .msg file')
+                return JSONResponse(result)
+            except HTTPException:
+                raise
+            except Exception as e:
+                log.error('.msg extraction failed: %s', e)
+                # Fallback: brute-force ASCII extraction
                 try:
-                    content_msg = [dict(type='text', text=_EXTRACT_PROMPT + chr(10)*2 + text_content[:8000])]
-                    result = _extract_with_claude(content_msg)
-                    return JSONResponse(result)
-                except Exception as e:
-                    log.warning('Claude HTML extraction failed: %s', e)
-            result = _parse_rate_text(text_content)
-            if not result:
-                raise HTTPException(400, 'Could not extract rate info from HTML')
-            return JSONResponse(result)
-        except HTTPException:
-            raise
-        except Exception as e:
-            log.error('HTML extraction failed: %s', e)
-            raise HTTPException(500, f'Failed to process HTML file: {e}')
+                    raw = file_bytes.decode('latin-1', errors='replace')
+                    blocks = re.findall(r'[ -~]{20,}', raw)
+                    fallback_text = chr(10).join(blocks)
+                    if fallback_text.strip() and has_claude:
+                        content_msg = [dict(type='text', text=_EXTRACT_PROMPT + chr(10)*2 + fallback_text[:8000])]
+                        result = _extract_with_claude(content_msg)
+                        return JSONResponse(result)
+                except Exception:
+                    pass
+                raise HTTPException(500, f'Failed to process .msg file: {e}')
 
-        raise HTTPException(400, f"Unsupported file type: .{ext}")
+        # .htm/.html files
+        elif ext in ('htm', 'html'):
+            try:
+                raw = file_bytes.decode('utf-8', errors='replace')
+                text_content = re.sub(r'<[^>]+>', ' ', raw)
+                text_content = re.sub(chr(92) + 's+', ' ', text_content).strip()
+                if not text_content:
+                    raise HTTPException(400, 'Could not extract text from HTML file')
+                if has_claude:
+                    try:
+                        content_msg = [dict(type='text', text=_EXTRACT_PROMPT + chr(10)*2 + text_content[:8000])]
+                        result = _extract_with_claude(content_msg)
+                        return JSONResponse(result)
+                    except Exception as e:
+                        log.warning('Claude HTML extraction failed: %s', e)
+                result = _parse_rate_text(text_content)
+                if not result:
+                    raise HTTPException(400, 'Could not extract rate info from HTML')
+                return JSONResponse(result)
+            except HTTPException:
+                raise
+            except Exception as e:
+                log.error('HTML extraction failed: %s', e)
+                raise HTTPException(500, f'Failed to process HTML file: {e}')
+
+        else:
+            raise HTTPException(400, f"Unsupported file type: .{ext}")
 
     raise HTTPException(400, "No file or text provided")
 

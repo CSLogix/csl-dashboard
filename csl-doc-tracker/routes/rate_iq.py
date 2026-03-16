@@ -478,6 +478,8 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
     lr_where, lr_params = _build_conditions("lr.port", "lr.destination")
     # won quotes use pod/final_delivery
     wq_where, wq_params = _build_conditions("q.pod", "q.final_delivery")
+    # market rates (LoadMatch benchmarks)
+    mr_where, mr_params = _build_conditions("mr.origin", "mr.destination")
 
     with db.get_cursor() as cur:
         # ── Unified UNION: rate_quotes + lane_rates + won quotes ──
@@ -517,10 +519,22 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
                        q.shipment_type AS move_type, q.id, NULL AS miles, 'accepted' AS status
                 FROM quotes q
                 WHERE {wq_where} AND q.status = 'accepted' AND q.carrier_total > 0
+
+                UNION ALL
+
+                -- Market rates (LoadMatch benchmarks)
+                SELECT mr.origin, mr.destination,
+                       mr.origin || ' → ' || mr.destination AS lane,
+                       COALESCE(mr.terminal, mr.source) AS carrier_name, NULL AS carrier_email,
+                       mr.total AS rate_amount, 'flat' AS rate_unit,
+                       mr.rate_date AS quote_date, 'market' AS source,
+                       mr.move_type, mr.id, NULL AS miles, 'benchmark' AS status
+                FROM market_rates mr
+                WHERE {mr_where} AND mr.total IS NOT NULL
             ) combined
             ORDER BY rate_amount ASC NULLS LAST, quote_date DESC NULLS LAST
             LIMIT 100
-        """, rq_params + lr_params + wq_params + rq_params)
+        """, rq_params + lr_params + wq_params + mr_params)
         all_rows = cur.fetchall()
 
         # ── Directory carriers ──
@@ -615,6 +629,7 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
                 "email": sum(1 for m in matches if m["source"] == "email"),
                 "import": sum(1 for m in matches if m["source"] == "import"),
                 "quote": sum(1 for m in matches if m["source"] == "quote"),
+                "market": sum(1 for m in matches if m["source"] == "market"),
             },
         }
 

@@ -477,7 +477,7 @@ function LaneCard({ lane, onClick, onQuickQuote, onReclassify, rateIds }) {
 // ═══════════════════════════════════════════════════════════════
 export default function RateIQView() {
   // ── View state ──
-  const [view, setView] = useState("browse"); // browse | detail | quote | scorecard | directory | history | oog
+  const [view, setView] = useState("browse"); // browse | detail | intake | build-quote | scorecard | directory | history | oog
   const [selectedLane, setSelectedLane] = useState(null); // { origin, destination }
 
   // ── Data state ──
@@ -589,6 +589,14 @@ export default function RateIQView() {
   const [dirPort, setDirPort] = useState("all");
   const [dirExpanded, setDirExpanded] = useState(null);
   const [editingCarrierId, setEditingCarrierId] = useState(null);
+  const [showAddCarrier, setShowAddCarrier] = useState(false);
+  const [newCarrier, setNewCarrier] = useState({ carrier_name: "", mc_number: "", pickup_area: "" });
+  const [addCarrierSaving, setAddCarrierSaving] = useState(false);
+  const [dirScreenshotFile, setDirScreenshotFile] = useState(null);
+  const [dirScreenshotResult, setDirScreenshotResult] = useState(null);
+  const [dirScreenshotProcessing, setDirScreenshotProcessing] = useState(false);
+  const dirScreenshotRef = useRef(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   // ── Detail navigation ──
   const [laneIndex, setLaneIndex] = useState(0); // for prev/next within grouped results
@@ -599,8 +607,8 @@ export default function RateIQView() {
     { key: "can_reefer", label: "Reefer", color: "#60a5fa" },
     { key: "can_bonded", label: "Bonded", color: "#a78bfa" },
     { key: "can_oog", label: "OOG", color: "#fb923c" },
-    { key: "can_warehousing", label: "WHS", color: "#34d399" },
-    { key: "can_transload", label: "Transload", color: "#38bdf8" },
+    { key: "can_warehousing", label: "WHS", color: "#34d399", sync: "can_transload" },
+    { key: "can_transload", label: "Transload", color: "#38bdf8", sync: "can_warehousing" },
   ];
 
   // ── Carrier capability lookup ──
@@ -686,14 +694,72 @@ export default function RateIQView() {
   // ── API: Manual intake — paste email text, AI extracts rate ──
   // ── API: Carrier update ──
   const handleCarrierUpdate = async (carrierId, field, value) => {
-    setDirCarriers(prev => prev.map(c => c.id === carrierId ? { ...c, [field]: value } : c));
+    // Sync WHS/Transload — treat as synonyms
+    const capDef = CAP_OPTIONS.find(c => c.key === field);
+    const updates = { [field]: value };
+    if (capDef?.sync) updates[capDef.sync] = value;
+    setDirCarriers(prev => prev.map(c => c.id === carrierId ? { ...c, ...updates } : c));
     try {
       const r = await apiFetch(`${API_BASE}/api/carriers/${carrierId}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [field]: value }),
+        body: JSON.stringify(updates),
       });
       if (!r.ok) throw new Error(r.status);
     } catch (e) { console.error("Carrier update failed:", e); }
+  };
+
+  // ── API: Add carrier ──
+  const handleAddCarrier = async () => {
+    if (!newCarrier.carrier_name.trim()) return;
+    setAddCarrierSaving(true);
+    try {
+      const r = await apiFetch(`${API_BASE}/api/carriers`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...newCarrier, source: "manual" }),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        setDirCarriers(prev => [data.carrier || data, ...prev]);
+        setNewCarrier({ carrier_name: "", mc_number: "", pickup_area: "" });
+        setShowAddCarrier(false);
+      }
+    } catch (e) { console.error("Add carrier failed:", e); }
+    setAddCarrierSaving(false);
+  };
+
+  // ── API: Delete carrier ──
+  const handleDeleteCarrier = async (carrierId) => {
+    try {
+      const r = await apiFetch(`${API_BASE}/api/carriers/${carrierId}`, { method: "DELETE" });
+      if (r.ok) {
+        setDirCarriers(prev => prev.filter(c => c.id !== carrierId));
+        setDeleteConfirm(null);
+        setEditingCarrierId(null);
+      }
+    } catch (e) { console.error("Delete carrier failed:", e); }
+  };
+
+  // ── API: LoadMatch screenshot import ──
+  const handleDirScreenshot = async () => {
+    if (!dirScreenshotFile) return;
+    setDirScreenshotProcessing(true);
+    setDirScreenshotResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", dirScreenshotFile);
+      const r = await apiFetch(`${API_BASE}/api/carriers/extract`, { method: "POST", body: formData });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      setDirScreenshotResult(data);
+      // If carriers were extracted and saved, refresh directory
+      if (data.carriers?.length > 0 || data.saved?.length > 0) {
+        const res = await apiFetch(`${API_BASE}/api/carriers?exclude_dnu=false`);
+        if (res.ok) { const d = await res.json(); setDirCarriers(d.carriers || d || []); }
+      }
+    } catch (e) {
+      setDirScreenshotResult({ error: e.message || "Screenshot extraction failed" });
+    }
+    setDirScreenshotProcessing(false);
   };
 
   // ── API: Lane rate update ──
@@ -957,7 +1023,7 @@ export default function RateIQView() {
           {/* Secondary nav */}
           <div style={{ display: "flex", gap: 6 }}>
             {[
-              { key: "quote", label: "Quote Builder", icon: "📝" },
+              { key: "intake", label: "Rate Intake", icon: "📥" },
               { key: "oog", label: "OOG IQ", icon: "📦" },
               { key: "directory", label: `Directory (${dirCarriers.length})`, icon: "📖" },
               { key: "scorecard", label: "Scorecard", icon: "🏆" },
@@ -971,227 +1037,6 @@ export default function RateIQView() {
               </button>
             ))}
           </div>
-        </div>
-
-        {/* Manual Intake — Drag/Drop + Paste */}
-        <div className="glass" style={{ borderRadius: 14, marginBottom: 16, border: `1px solid ${intakeDragOver ? "rgba(0,212,170,0.4)" : "rgba(255,255,255,0.06)"}`, overflow: "hidden", transition: "border-color 0.2s" }}>
-          <input ref={intakeFileRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.msg,.eml,.html,.htm,.txt" style={{ display: "none" }}
-            onChange={e => { const f = e.target.files?.[0]; if (f) { setIntakeFile(f); setIntakeOpen(true); setIntakeResult(null); } e.target.value = ""; }} />
-          <div onClick={() => setIntakeOpen(!intakeOpen)}
-            style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
-            onDragOver={e => { e.preventDefault(); e.stopPropagation(); setIntakeDragOver(true); if (!intakeOpen) setIntakeOpen(true); }}
-            onDragLeave={() => setIntakeDragOver(false)}
-            onDrop={e => {
-              e.preventDefault(); e.stopPropagation(); setIntakeDragOver(false);
-              const file = e.dataTransfer.files?.[0];
-              if (file) { setIntakeFile(file); setIntakeOpen(true); setIntakeResult(null); return; }
-              const text = e.dataTransfer.getData("text/plain");
-              if (text) { setIntakeText(text); setIntakeOpen(true); }
-            }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 14 }}>📋</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>CARRIER RATE INTAKE</span>
-              <span style={{ fontSize: 11, color: "#5A6478" }}>— drop .msg / .eml / screenshot / paste email text</span>
-            </div>
-            <span style={{ fontSize: 12, color: "#5A6478", transform: intakeOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</span>
-          </div>
-          {intakeOpen && (
-            <div style={{ padding: "0 24px 20px" }}
-              onDragOver={e => { e.preventDefault(); setIntakeDragOver(true); }}
-              onDragLeave={() => setIntakeDragOver(false)}
-              onDrop={e => {
-                e.preventDefault(); setIntakeDragOver(false);
-                const file = e.dataTransfer.files?.[0];
-                if (file) { setIntakeFile(file); setIntakeResult(null); return; }
-                const text = e.dataTransfer.getData("text/plain");
-                if (text) setIntakeText(text);
-              }}>
-              <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
-                {["dray", "transload", "ftl"].map(mt => {
-                  const active = intakeMoveType === mt;
-                  const s = MOVE_TYPE_STYLES[mt];
-                  return (
-                    <button key={mt} onClick={() => setIntakeMoveType(mt)}
-                      style={{ padding: "4px 14px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: `1px solid ${active ? s.color + "55" : "rgba(255,255,255,0.06)"}`, background: active ? s.color + "18" : "transparent", color: active ? s.color : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
-                      {s.label}
-                    </button>
-                  );
-                })}
-                <div style={{ flex: 1 }} />
-                <button onClick={() => intakeFileRef.current?.click()}
-                  style={{ padding: "4px 14px", fontSize: 11, fontWeight: 600, borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", cursor: "pointer", fontFamily: "inherit" }}>
-                  Browse Files
-                </button>
-              </div>
-              {intakeFile && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 8, borderRadius: 8, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.15)" }}>
-                  <span style={{ fontSize: 11, color: "#34d399", fontWeight: 700 }}>File:</span>
-                  <span style={{ fontSize: 11, color: "#C8D0DC", fontFamily: "'JetBrains Mono', monospace" }}>{intakeFile.name}</span>
-                  <span style={{ fontSize: 10, color: "#5A6478" }}>({(intakeFile.size / 1024).toFixed(1)} KB)</span>
-                  <button onClick={() => setIntakeFile(null)} style={{ marginLeft: "auto", fontSize: 10, color: "#f87171", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
-                </div>
-              )}
-              {!intakeFile && (
-                <textarea value={intakeText} onChange={e => setIntakeText(e.target.value)}
-                  onPaste={e => {
-                    const items = e.clipboardData?.items;
-                    if (items) {
-                      for (const item of items) {
-                        if (item.type.startsWith("image/")) {
-                          e.preventDefault();
-                          const file = item.getAsFile();
-                          if (file) { setIntakeFile(file); setIntakeResult(null); }
-                          return;
-                        }
-                      }
-                    }
-                    const text = e.clipboardData.getData("text/plain");
-                    if (text && !intakeText) { e.preventDefault(); setIntakeText(text); }
-                  }}
-                  placeholder="Paste carrier rate email here, or drag & drop a file (.msg, .eml, .pdf, screenshot)..."
-                  style={{ width: "100%", minHeight: 100, maxHeight: 200, padding: 14, borderRadius: 10, border: `1px solid ${intakeDragOver ? "rgba(0,212,170,0.3)" : "rgba(255,255,255,0.08)"}`, background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box", transition: "border-color 0.2s" }} />
-              )}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-                <div style={{ fontSize: 11, color: "#5A6478" }}>
-                  {intakeFile ? "Ready to extract from file" : intakeText.length > 0 ? `${intakeText.length.toLocaleString()} chars` : ""}
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  {intakeResult?.ok && (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399" }}>
-                      ✓ Added: {intakeResult.extracted.carrier_name} — {intakeResult.extracted.origin} → {intakeResult.extracted.destination}{intakeResult.extracted.rate_amount ? ` @ $${intakeResult.extracted.rate_amount}` : ""}
-                    </span>
-                  )}
-                  {intakeResult?.error && (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {intakeResult.error}</span>
-                  )}
-                  {(intakeText.trim() || intakeFile) && (
-                    <button onClick={() => handleManualIntake()} disabled={intakeProcessing}
-                      style={{ padding: "6px 20px", borderRadius: 8, border: "none", background: grad, color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: intakeProcessing ? "wait" : "pointer", fontFamily: "inherit", opacity: intakeProcessing ? 0.6 : 1 }}>
-                      {intakeProcessing ? "Extracting..." : "Extract & Save"}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Market Rates — Drag/Drop Screenshot + Paste */}
-        <div className="glass" style={{ borderRadius: 14, marginBottom: 16, border: `1px solid ${marketRateDragOver ? "rgba(251,146,60,0.4)" : "rgba(251,146,60,0.1)"}`, overflow: "hidden", transition: "border-color 0.2s" }}>
-          <input ref={marketRateFileRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf" style={{ display: "none" }}
-            onChange={e => { const f = e.target.files?.[0]; if (f) { setMarketRateFile(f); setMarketRateOpen(true); setMarketRateResult(null); } e.target.value = ""; }} />
-          <div onClick={() => setMarketRateOpen(!marketRateOpen)}
-            style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
-            onDragOver={e => { e.preventDefault(); e.stopPropagation(); setMarketRateDragOver(true); if (!marketRateOpen) setMarketRateOpen(true); }}
-            onDragLeave={() => setMarketRateDragOver(false)}
-            onDrop={e => {
-              e.preventDefault(); e.stopPropagation(); setMarketRateDragOver(false);
-              const file = e.dataTransfer.files?.[0];
-              if (file) { setMarketRateFile(file); setMarketRateOpen(true); setMarketRateResult(null); return; }
-              const text = e.dataTransfer.getData("text/plain");
-              if (text) { setMarketRateText(text); setMarketRateOpen(true); }
-            }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 14 }}>📊</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>MARKET RATES</span>
-              <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(251,146,60,0.12)", color: "#fb923c", border: "1px solid rgba(251,146,60,0.25)" }}>LOADMATCH</span>
-              <span style={{ fontSize: 11, color: "#5A6478" }}>— drop RFQ screenshot or paste tab-separated data</span>
-            </div>
-            <span style={{ fontSize: 12, color: "#5A6478", transform: marketRateOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</span>
-          </div>
-          {marketRateOpen && (
-            <div style={{ padding: "0 24px 20px" }}
-              onDragOver={e => { e.preventDefault(); setMarketRateDragOver(true); }}
-              onDragLeave={() => setMarketRateDragOver(false)}
-              onDrop={e => {
-                e.preventDefault(); setMarketRateDragOver(false);
-                const file = e.dataTransfer.files?.[0];
-                if (file) { setMarketRateFile(file); setMarketRateResult(null); return; }
-                const text = e.dataTransfer.getData("text/plain");
-                if (text) setMarketRateText(text);
-              }}>
-              <div style={{ display: "flex", gap: 12, marginBottom: 10, alignItems: "flex-end" }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>Origin / Port</label>
-                  <input value={marketRateOrigin} onChange={e => setMarketRateOrigin(e.target.value)} placeholder="e.g. Long Beach, LA/LB"
-                    style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>Destination</label>
-                  <input value={marketRateDest} onChange={e => setMarketRateDest(e.target.value)} placeholder="e.g. Sparks NV"
-                    style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>Type</label>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    {["dray", "ftl", "transload"].map(mt => {
-                      const active = marketRateMoveType === mt;
-                      const s = MOVE_TYPE_STYLES[mt];
-                      return (
-                        <button key={mt} onClick={() => setMarketRateMoveType(mt)}
-                          style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, borderRadius: 6, border: `1px solid ${active ? s.color + "55" : "rgba(255,255,255,0.06)"}`, background: active ? s.color + "18" : "transparent", color: active ? s.color : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
-                          {s.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <button onClick={() => marketRateFileRef.current?.click()}
-                  style={{ padding: "6px 14px", fontSize: 11, fontWeight: 600, borderRadius: 6, border: "1px solid rgba(251,146,60,0.2)", background: "transparent", color: "#fb923c", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-                  Browse Screenshot
-                </button>
-              </div>
-              {marketRateFile && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 8, borderRadius: 8, background: "rgba(251,146,60,0.06)", border: "1px solid rgba(251,146,60,0.15)" }}>
-                  <span style={{ fontSize: 11, color: "#fb923c", fontWeight: 700 }}>Screenshot:</span>
-                  <span style={{ fontSize: 11, color: "#C8D0DC", fontFamily: "'JetBrains Mono', monospace" }}>{marketRateFile.name}</span>
-                  <span style={{ fontSize: 10, color: "#5A6478" }}>({(marketRateFile.size / 1024).toFixed(1)} KB)</span>
-                  <button onClick={() => setMarketRateFile(null)} style={{ marginLeft: "auto", fontSize: 10, color: "#f87171", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
-                </div>
-              )}
-              {!marketRateFile && (
-                <textarea value={marketRateText} onChange={e => setMarketRateText(e.target.value)}
-                  onPaste={e => {
-                    const items = e.clipboardData?.items;
-                    if (items) {
-                      for (const item of items) {
-                        if (item.type.startsWith("image/")) {
-                          e.preventDefault();
-                          const file = item.getAsFile();
-                          if (file) { setMarketRateFile(file); setMarketRateResult(null); }
-                          return;
-                        }
-                      }
-                    }
-                    const text = e.clipboardData.getData("text/plain");
-                    if (text && !marketRateText) { e.preventDefault(); setMarketRateText(text); }
-                  }}
-                  placeholder={"Drop a screenshot here, or paste tab-separated LoadMatch data:\n2026-Mar-14\tLong Beach Container\t$2,600\t0%\t$2,600\n2026-Mar-12\tAPM Los Angeles\t$2,250\t0%\t$2,250"}
-                  style={{ width: "100%", minHeight: 100, maxHeight: 200, padding: 14, borderRadius: 10, border: `1px solid ${marketRateDragOver ? "rgba(251,146,60,0.3)" : "rgba(251,146,60,0.12)"}`, background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box", transition: "border-color 0.2s" }} />
-              )}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-                <div style={{ fontSize: 11, color: "#5A6478" }}>
-                  {marketRateFile ? "Ready to extract rates from screenshot" : marketRateText.length > 0 ? `${marketRateText.length.toLocaleString()} chars` : ""}
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  {marketRateResult?.ok && (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399" }}>
-                      ✓ Saved {marketRateResult.inserted} rate{marketRateResult.inserted !== 1 ? "s" : ""}{marketRateResult.skipped > 0 ? ` (${marketRateResult.skipped} skipped)` : ""}
-                    </span>
-                  )}
-                  {marketRateResult?.error && (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {marketRateResult.error}</span>
-                  )}
-                  {(marketRateFile || (marketRateText.trim() && marketRateOrigin.trim() && marketRateDest.trim())) && (
-                    <button onClick={() => handleMarketRatePaste()} disabled={marketRateProcessing}
-                      style={{ padding: "6px 20px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #fb923c, #f59e0b)", color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: marketRateProcessing ? "wait" : "pointer", fontFamily: "inherit", opacity: marketRateProcessing ? 0.6 : 1 }}>
-                      {marketRateProcessing ? (marketRateFile ? "Extracting..." : "Parsing...") : (marketRateFile ? "Extract & Save" : "Parse & Save")}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Search Bar */}
@@ -1328,7 +1173,7 @@ export default function RateIQView() {
                 }} onClick={() => openLaneDetail(group.port, group.destination, gi)}
                   rateIds={(group.carriers || []).map(c => c.id).filter(Boolean)}
                   onReclassify={mt => handleReclassifyLane(group.port, group.destination, (group.carriers || []).map(c => c.id).filter(Boolean), mt)}
-                  onQuickQuote={() => { setSelectedLane({ origin: group.port, destination: group.destination }); setView("quote"); }} />
+                  onQuickQuote={() => { setSelectedLane({ origin: group.port, destination: group.destination }); setView("build-quote"); }} />
               ))}
             </div>
             </>; })()}
@@ -1465,9 +1310,9 @@ export default function RateIQView() {
                 </button>
               </div>
             )}
-            <button onClick={() => setView("quote")}
+            <button onClick={() => setView("build-quote")}
               style={{ padding: "8px 20px", borderRadius: 10, border: "none", background: grad, color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
-              📋 Generate Quote
+              Build Quote
             </button>
           </div>
         </div>
@@ -1607,9 +1452,163 @@ export default function RateIQView() {
   }
 
   // ═════════════════════════════════════════════════════════════
-  // QUOTE BUILDER VIEW
+  // RATE INTAKE VIEW (unified carrier rates + market rates)
   // ═════════════════════════════════════════════════════════════
-  if (view === "quote") {
+  if (view === "intake") {
+    return (
+      <div style={{ padding: "0 24px 24px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
+          <button onClick={() => setView("browse")}
+            style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 16, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }}>
+            ←
+          </button>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", margin: 0 }}>Rate Intake</h2>
+          <span style={{ fontSize: 11, color: "#5A6478" }}>Drop carrier rate emails, screenshots, or paste rate data</span>
+        </div>
+
+        {/* Hidden file inputs */}
+        <input ref={intakeFileRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.msg,.eml,.html,.htm,.txt" style={{ display: "none" }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) { setIntakeFile(f); setIntakeResult(null); } e.target.value = ""; }} />
+        <input ref={marketRateFileRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf" style={{ display: "none" }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) { setIntakeFile(f); setIntakeResult(null); } e.target.value = ""; }} />
+
+        {/* Unified Drag-Drop Zone */}
+        <div className="glass" style={{ borderRadius: 14, padding: 32, marginBottom: 20,
+          border: `2px dashed ${intakeDragOver ? "rgba(0,212,170,0.5)" : "rgba(255,255,255,0.1)"}`,
+          background: intakeDragOver ? "rgba(0,212,170,0.04)" : "rgba(255,255,255,0.01)",
+          textAlign: "center", transition: "all 0.2s", cursor: "pointer" }}
+          onClick={() => intakeFileRef.current?.click()}
+          onDragOver={e => { e.preventDefault(); e.stopPropagation(); setIntakeDragOver(true); }}
+          onDragLeave={() => setIntakeDragOver(false)}
+          onDrop={e => {
+            e.preventDefault(); e.stopPropagation(); setIntakeDragOver(false);
+            const file = e.dataTransfer.files?.[0];
+            if (file) { setIntakeFile(file); setIntakeResult(null); setMarketRateResult(null); return; }
+            const text = e.dataTransfer.getData("text/plain");
+            if (text) { setIntakeText(text); }
+          }}>
+          <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.4 }}>&#128206;</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#8B95A8", marginBottom: 4 }}>
+            Drop carrier quote or rate screenshot here
+          </div>
+          <div style={{ fontSize: 11, color: "#5A6478" }}>
+            .msg / .eml emails, screenshots, PDFs, or paste text below
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 12 }}>
+            <button onClick={e => { e.stopPropagation(); intakeFileRef.current?.click(); }}
+              style={{ padding: "6px 16px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid rgba(0,212,170,0.3)", background: "rgba(0,212,170,0.08)", color: "#34d399", cursor: "pointer", fontFamily: "inherit" }}>
+              Browse Files
+            </button>
+          </div>
+        </div>
+
+        {/* File badge */}
+        {intakeFile && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", marginBottom: 12, borderRadius: 10, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.15)" }}>
+            <span style={{ fontSize: 11, color: "#34d399", fontWeight: 700 }}>File:</span>
+            <span style={{ fontSize: 11, color: "#C8D0DC", fontFamily: "'JetBrains Mono', monospace" }}>{intakeFile.name}</span>
+            <span style={{ fontSize: 10, color: "#5A6478" }}>({(intakeFile.size / 1024).toFixed(1)} KB)</span>
+            <button onClick={() => setIntakeFile(null)} style={{ marginLeft: "auto", fontSize: 10, color: "#f87171", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
+          </div>
+        )}
+
+        {/* Text paste area */}
+        {!intakeFile && (
+          <textarea value={intakeText} onChange={e => setIntakeText(e.target.value)}
+            onPaste={e => {
+              const items = e.clipboardData?.items;
+              if (items) {
+                for (const item of items) {
+                  if (item.type.startsWith("image/")) {
+                    e.preventDefault();
+                    const file = item.getAsFile();
+                    if (file) { setIntakeFile(file); setIntakeResult(null); }
+                    return;
+                  }
+                }
+              }
+              const text = e.clipboardData.getData("text/plain");
+              if (text && !intakeText) { e.preventDefault(); setIntakeText(text); }
+            }}
+            placeholder={"Paste carrier rate email, or tab-separated market rate data:\n\n2026-Mar-14\tLong Beach Container\t$2,600\t0%\t$2,600\n2026-Mar-12\tAPM Los Angeles\t$2,250\t0%\t$2,250"}
+            style={{ width: "100%", minHeight: 120, maxHeight: 240, padding: 14, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box", marginBottom: 12 }} />
+        )}
+
+        {/* Controls row */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          {/* Move type */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Type:</span>
+            {["dray", "transload", "ftl"].map(mt => {
+              const active = intakeMoveType === mt;
+              const s = MOVE_TYPE_STYLES[mt];
+              return (
+                <button key={mt} onClick={() => setIntakeMoveType(mt)}
+                  style={{ padding: "4px 12px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: `1px solid ${active ? s.color + "55" : "rgba(255,255,255,0.06)"}`, background: active ? s.color + "18" : "transparent", color: active ? s.color : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Optional origin/dest for market rates */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto" }}>
+            <input value={marketRateOrigin} onChange={e => setMarketRateOrigin(e.target.value)} placeholder="Origin (optional)"
+              style={{ width: 140, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+            <span style={{ color: "#5A6478", fontSize: 11 }}>→</span>
+            <input value={marketRateDest} onChange={e => setMarketRateDest(e.target.value)} placeholder="Destination (optional)"
+              style={{ width: 140, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+          </div>
+        </div>
+
+        {/* Results / Actions */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 14 }}>
+          <div style={{ fontSize: 11, color: "#5A6478" }}>
+            {intakeFile ? "Ready to extract from file" : intakeText.length > 0 ? `${intakeText.length.toLocaleString()} chars` : ""}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {intakeResult?.ok && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399" }}>
+                ✓ {intakeResult.extracted ? `Added: ${intakeResult.extracted.carrier_name} — ${intakeResult.extracted.origin} → ${intakeResult.extracted.destination}${intakeResult.extracted.rate_amount ? ` @ $${intakeResult.extracted.rate_amount}` : ""}` : `Saved ${intakeResult.inserted || 0} rate(s)`}
+              </span>
+            )}
+            {intakeResult?.error && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {intakeResult.error}</span>
+            )}
+            {marketRateResult?.ok && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399" }}>
+                ✓ Saved {marketRateResult.inserted} rate{marketRateResult.inserted !== 1 ? "s" : ""}{marketRateResult.skipped > 0 ? ` (${marketRateResult.skipped} skipped)` : ""}
+              </span>
+            )}
+            {marketRateResult?.error && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {marketRateResult.error}</span>
+            )}
+            {(intakeText.trim() || intakeFile) && (
+              <button onClick={() => {
+                // Auto-detect: if text looks like tab-separated market data and has origin/dest, use market rate handler
+                const isTabSeparated = intakeText && intakeText.includes("\t") && marketRateOrigin.trim() && marketRateDest.trim();
+                if (isTabSeparated && !intakeFile) {
+                  setMarketRateText(intakeText);
+                  setMarketRateMoveType(intakeMoveType);
+                  handleMarketRatePaste();
+                } else {
+                  handleManualIntake();
+                }
+              }} disabled={intakeProcessing || marketRateProcessing}
+                style={{ padding: "8px 24px", borderRadius: 8, border: "none", background: grad, color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: (intakeProcessing || marketRateProcessing) ? "wait" : "pointer", fontFamily: "inherit", opacity: (intakeProcessing || marketRateProcessing) ? 0.6 : 1 }}>
+                {(intakeProcessing || marketRateProcessing) ? "Extracting..." : "Extract & Save"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════
+  // BUILD QUOTE VIEW (from lane detail)
+  // ═════════════════════════════════════════════════════════════
+  if (view === "build-quote") {
     return (
       <div style={{ padding: "0 24px 24px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
@@ -1617,11 +1616,11 @@ export default function RateIQView() {
             style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 16, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }}>
             ←
           </button>
-          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", margin: 0 }}>Quote Builder</h2>
-          {selectedLane && <span style={{ fontSize: 12, color: "#5A6478" }}>Pre-filled: {selectedLane.origin} → {selectedLane.destination}</span>}
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", margin: 0 }}>Build Quote</h2>
+          {selectedLane && <span style={{ fontSize: 12, color: "#5A6478" }}>{selectedLane.origin} → {selectedLane.destination}</span>}
         </div>
         <div style={{ height: "calc(100vh - 180px)" }}>
-          <QuoteBuilder />
+          <QuoteBuilder prefill={selectedLane || undefined} />
         </div>
       </div>
     );
@@ -1733,7 +1732,73 @@ export default function RateIQView() {
             <h2 style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", margin: 0 }}>Carrier Directory</h2>
             <div style={{ fontSize: 11, color: "#5A6478", marginTop: 2 }}>{dirCarriers.length} carriers</div>
           </div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            <button onClick={() => setShowAddCarrier(!showAddCarrier)}
+              style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid rgba(0,212,170,0.3)", background: showAddCarrier ? "rgba(0,212,170,0.1)" : "transparent", color: "#34d399", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              + Add Carrier
+            </button>
+          </div>
         </div>
+
+        {/* LoadMatch Screenshot Import */}
+        <input ref={dirScreenshotRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf" style={{ display: "none" }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) { setDirScreenshotFile(f); setDirScreenshotResult(null); } e.target.value = ""; }} />
+        <div style={{ borderRadius: 10, padding: "12px 16px", marginBottom: 12,
+          border: "1px dashed rgba(251,146,60,0.25)", background: "rgba(251,146,60,0.02)",
+          display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
+          onClick={() => dirScreenshotRef.current?.click()}
+          onDragOver={e => e.preventDefault()}
+          onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) { setDirScreenshotFile(f); setDirScreenshotResult(null); } }}>
+          <span style={{ fontSize: 11, color: "#fb923c", fontWeight: 700 }}>LOADMATCH IMPORT</span>
+          <span style={{ fontSize: 11, color: "#5A6478" }}>— drop screenshot to extract carriers + capabilities</span>
+          {dirScreenshotFile && (
+            <span style={{ fontSize: 11, color: "#C8D0DC", fontFamily: "'JetBrains Mono', monospace", marginLeft: 8 }}>
+              {dirScreenshotFile.name}
+              <button onClick={e => { e.stopPropagation(); setDirScreenshotFile(null); setDirScreenshotResult(null); }} style={{ marginLeft: 6, fontSize: 10, color: "#f87171", background: "none", border: "none", cursor: "pointer" }}>×</button>
+            </span>
+          )}
+          {dirScreenshotFile && !dirScreenshotProcessing && (
+            <button onClick={e => { e.stopPropagation(); handleDirScreenshot(); }}
+              style={{ marginLeft: "auto", padding: "4px 14px", borderRadius: 6, border: "none", background: "linear-gradient(135deg, #fb923c, #f59e0b)", color: "#0A0F1C", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              Extract & Import
+            </button>
+          )}
+          {dirScreenshotProcessing && <span style={{ marginLeft: "auto", fontSize: 11, color: "#fb923c" }}>Extracting...</span>}
+          {dirScreenshotResult?.error && <span style={{ fontSize: 11, color: "#f87171", marginLeft: "auto" }}>✗ {dirScreenshotResult.error}</span>}
+          {dirScreenshotResult?.carriers && <span style={{ fontSize: 11, color: "#34d399", marginLeft: "auto" }}>✓ Imported {dirScreenshotResult.carriers.length} carriers</span>}
+          {dirScreenshotResult?.saved && <span style={{ fontSize: 11, color: "#34d399", marginLeft: "auto" }}>✓ Imported {dirScreenshotResult.saved.length} carriers</span>}
+        </div>
+
+        {/* Add Carrier Form */}
+        {showAddCarrier && (
+          <div className="glass" style={{ borderRadius: 10, padding: 16, marginBottom: 12, border: "1px solid rgba(0,212,170,0.2)" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 180px" }}>
+                <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", display: "block", marginBottom: 3 }}>Carrier Name *</label>
+                <input value={newCarrier.carrier_name} onChange={e => setNewCarrier(p => ({ ...p, carrier_name: e.target.value }))} placeholder="Carrier name"
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ flex: "0 0 120px" }}>
+                <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", display: "block", marginBottom: 3 }}>MC#</label>
+                <input value={newCarrier.mc_number} onChange={e => setNewCarrier(p => ({ ...p, mc_number: e.target.value }))} placeholder="MC number"
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ flex: "1 1 140px" }}>
+                <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", display: "block", marginBottom: 3 }}>City / State</label>
+                <input value={newCarrier.pickup_area} onChange={e => setNewCarrier(p => ({ ...p, pickup_area: e.target.value }))} placeholder="e.g. Los Angeles, CA"
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <button onClick={handleAddCarrier} disabled={addCarrierSaving || !newCarrier.carrier_name.trim()}
+                style={{ padding: "6px 16px", borderRadius: 6, border: "none", background: grad, color: "#0A0F1C", fontSize: 11, fontWeight: 700, cursor: (addCarrierSaving || !newCarrier.carrier_name.trim()) ? "default" : "pointer", fontFamily: "inherit", opacity: (addCarrierSaving || !newCarrier.carrier_name.trim()) ? 0.5 : 1 }}>
+                {addCarrierSaving ? "Saving..." : "Add"}
+              </button>
+              <button onClick={() => setShowAddCarrier(false)}
+                style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Filters */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
@@ -1869,6 +1934,28 @@ export default function RateIQView() {
                         {editInput("Record", "service_record", { placeholder: "Worked with Previously" })}
                         {editInput("Comments", "comments", { color: c.dnu ? "#f87171" : "#C8D0DC", placeholder: "General comments" })}
                       </div>
+                      {isEdit && (
+                        <div style={{ gridColumn: "1 / -1", borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 8, display: "flex", justifyContent: "flex-end" }}>
+                          {deleteConfirm === c.id ? (
+                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                              <span style={{ fontSize: 11, color: "#f87171" }}>Delete this carrier?</span>
+                              <button onClick={e => { e.stopPropagation(); handleDeleteCarrier(c.id); }}
+                                style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.15)", color: "#f87171", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                                Confirm Delete
+                              </button>
+                              <button onClick={e => { e.stopPropagation(); setDeleteConfirm(null); }}
+                                style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button onClick={e => { e.stopPropagation(); setDeleteConfirm(c.id); }}
+                              style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.2)", background: "transparent", color: "#f87171", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: 0.7 }}>
+                              Delete Carrier
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

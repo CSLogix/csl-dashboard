@@ -433,7 +433,7 @@ function HistoryTab({ onLoadQuote, moveTypes = DRAY_MOVE_TYPES }) {
 // ════════════════════════════════════════════════════════════
 // ─── Main QuoteBuilder Component ───
 // ════════════════════════════════════════════════════════════
-export default function QuoteBuilder() {
+export default function QuoteBuilder({ prefill } = {}) {
   const [tab, setTab] = useState("builder"); // builder | history
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -486,6 +486,19 @@ export default function QuoteBuilder() {
       if (data.default_accessorials?.length) setAccessorials(data.default_accessorials);
     }).catch(() => {});
   }, []);
+
+  // ── Pre-fill from lane data when passed from Rate IQ ──
+  const prefillApplied = useRef(false);
+  useEffect(() => {
+    if (!prefill || prefillApplied.current) return;
+    prefillApplied.current = true;
+    setRoute(prev => ({
+      ...prev,
+      pod: prefill.origin || prev.pod,
+      finalDelivery: prefill.destination || prev.finalDelivery,
+    }));
+    if (prefill.carrier) setCarrierName(prefill.carrier);
+  }, [prefill]);
 
   // ── Auto-populate mileage when origin + destination both filled ──
   const mileageTimer = useRef(null);
