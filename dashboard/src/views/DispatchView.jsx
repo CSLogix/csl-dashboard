@@ -585,12 +585,12 @@ export default function DispatchView({
               const rowBg = isSelected ? `${sc.main}10` : termBg || zebraBg;
               return (
                 <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
-                  onClick={() => handleLoadClick(s)}
-                  style={{ cursor: "pointer", background: highlightedEfj === s.efj ? undefined : rowBg }}>
-                  <td style={{ padding: "5px 4px", width: 24, textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                  style={{ cursor: "default", background: highlightedEfj === s.efj ? undefined : rowBg }}>
+                  <td style={{ padding: "5px 4px", width: 30, textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                     <button onClick={() => handleLoadClick(s)} title="Open details"
-                      style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
-                      onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
+                      style={{ background: "rgba(0,184,212,0.06)", border: "1px solid rgba(0,184,212,0.15)", color: "#00b8d4", cursor: "pointer", fontSize: 14, padding: "4px 6px", borderRadius: 6, lineHeight: 1, fontFamily: "inherit", fontWeight: 700, transition: "all 0.15s" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,184,212,0.15)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.4)"; e.currentTarget.style.color = "#00D4AA"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,184,212,0.06)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.15)"; e.currentTarget.style.color = "#00b8d4"; }}>{"\u203A"}</button>
                   </td>
                   {isColVisible("account") && <td style={{ ...cellStyleFor("account"), color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}
                     onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("account"); setInlineEditValue(s.account || ""); }}>
