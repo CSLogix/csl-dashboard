@@ -52,6 +52,16 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
     return () => document.removeEventListener('mousedown', handler);
   }, [repOpenFilterCol]);
 
+  // Close inline status dropdown on outside click
+  useEffect(() => {
+    if (!inlineEditId || inlineEditField !== "status") return;
+    const handler = (e) => {
+      if (!e.target.closest('.inline-status-dd')) setInlineEditId(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [inlineEditId, inlineEditField]);
+
   const isMaster = MASTER_REPS.includes(repName);
   const isBoviet = repName === "Boviet";
   const isTolead = repName === "Tolead";
@@ -345,7 +355,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                     <td style={{ ...tdBase, position: "relative" }}
                       onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                       {isEditing && inlineEditField === "status" ? (
-                        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
+                        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }} className="inline-status-dd">
                           {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                             const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
                             return (
@@ -1042,7 +1052,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                       <td style={{ padding: "8px 14px", position: "relative" }}
                         onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                         {isEditing && inlineEditField === "status" ? (
-                          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 9999, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
+                          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 9999, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }} className="inline-status-dd">
                             {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                               const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
                               return (
@@ -1264,7 +1274,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                       <td style={{ padding: "8px 14px", position: "relative" }}
                         onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                         {isEditing && inlineEditField === "status" ? (
-                          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 9999, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
+                          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 9999, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }} className="inline-status-dd">
                             {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                               const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
                               return (

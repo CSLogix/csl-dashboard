@@ -41,6 +41,19 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
   const [driverEditVal, setDriverEditVal] = useState("");
   const [driverSaving, setDriverSaving] = useState(false);
   const [statusExpanded, setStatusExpanded] = useState(false);
+  const statusSelectorRef = useRef(null);
+
+  // Close status selector on click outside
+  useEffect(() => {
+    if (!statusExpanded) return;
+    const handler = (e) => {
+      if (statusSelectorRef.current && !statusSelectorRef.current.contains(e.target)) {
+        setStatusExpanded(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [statusExpanded]);
   const [emailsCollapsed, setEmailsCollapsed] = useState(false);
   const [aiSummary, setAiSummary] = useState(null);
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
@@ -372,7 +385,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
   return (
     <>
       <div aria-hidden="true" onClick={() => setSelectedShipment(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: Z.panelBackdrop, animation: "fade-in 0.2s ease" }} />
-      <div role="dialog" aria-modal="true" aria-label={`Shipment details — ${selectedShipment.loadNumber}`} className="glass-strong" style={{ position: "fixed", top: 0, right: 0, width: isMobile ? "100vw" : 380, height: "100vh", zIndex: Z.panel, display: "flex", flexDirection: "column", overflow: "hidden", animation: "slide-right 0.3s ease", borderLeft: isMobile ? "none" : "1px solid rgba(255,255,255,0.08)" }}>
+      <div role="dialog" aria-modal="true" aria-label={`Shipment details — ${selectedShipment.loadNumber}`} className="glass-strong" style={{ position: "fixed", top: 0, right: 0, width: isMobile ? "100vw" : 440, height: "100vh", zIndex: Z.panel, display: "flex", flexDirection: "column", overflow: "hidden", animation: "slide-right 0.3s ease", borderLeft: isMobile ? "none" : "1px solid rgba(0,184,212,0.25)", boxShadow: isMobile ? "none" : "-8px 0 40px rgba(0,0,0,0.4), -2px 0 8px rgba(0,184,212,0.08)" }}>
         <div style={{ flex: 1, overflow: "auto" }}>
           {/* Header */}
           <div style={{ padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -629,7 +642,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
             const activeStatus = allStatuses.find(s => s.key === selectedShipment.status);
             const activeColor = (getStatusColors(selectedShipment)[selectedShipment.status] || BILLING_STATUS_COLORS[selectedShipment.status] || { main: "#94a3b8" }).main;
             return (
-              <div style={{ padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              <div ref={statusSelectorRef} style={{ padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                 <div onClick={() => setStatusExpanded(!statusExpanded)}
                   style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", userSelect: "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

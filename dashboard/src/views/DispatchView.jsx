@@ -46,6 +46,16 @@ export default function DispatchView({
   const [inlineEditField, setInlineEditField] = useState(null);
   const [inlineEditValue, setInlineEditValue] = useState("");
 
+  // Close inline status dropdown on click outside
+  useEffect(() => {
+    if (!inlineEditId || inlineEditField !== "status") return;
+    const handler = (e) => {
+      if (!e.target.closest('.inline-status-dd')) setInlineEditId(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [inlineEditId, inlineEditField]);
+
   // Spreadsheet-like Tab/Enter navigation — ordered list of editable columns
   const EDITABLE_COLS = useMemo(() => ["efj", "container", "pickup", "origin", "destination", "delivery", "truckType", "trailer", "driverPhone", "carrierEmail", "customerRate", "notes"], []);
   const sortedRef = useRef([]);
@@ -595,7 +605,7 @@ export default function DispatchView({
                   {isColVisible("status") && <td style={{ ...cellStyleFor("status"), position: "relative" }}
                     onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                     {isInlineEditing && inlineEditField === "status" ? (
-                      <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
+                      <div className="inline-status-dd" style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
                         {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                           const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
                           return (
