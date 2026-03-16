@@ -97,6 +97,13 @@ MILESTONES = {
         "icon": "&#9850;",  # recycle
         "message": "The empty container has been returned to the port/terminal.",
     },
+    "pod_received": {
+        "label": "POD Received",
+        "color": "#0891b2",
+        "gradient": "linear-gradient(135deg, #0891b2, #22d3ee)",
+        "icon": "&#10004;",  # check
+        "message": "Proof of delivery has been received and is on file.",
+    },
 }
 
 

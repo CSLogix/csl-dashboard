@@ -315,6 +315,39 @@ async def api_v2_update_status(efj: str, request: Request, background_tasks: Bac
         # Write back to Master Sheet for non-shared accounts (prevents sync overwrite)
         background_tasks.add_task(_write_fields_to_master_sheet, efj, account, {"status": new_status})
 
+    # Auto-advance dray loads: delivered → need_pod (skip for FTL — FTL uses its own flow)
+    normalized = new_status.strip().lower().replace(" ", "_")
+    if normalized == "delivered":
+        try:
+            with db.get_cursor() as cur:
+                cur.execute("SELECT move_type, account FROM shipments WHERE efj = %s", (efj,))
+                _ship = cur.fetchone()
+            if _ship:
+                _mt = (_ship["move_type"] or "").lower()
+                _acct = (_ship["account"] or "")
+                # Dray loads (not FTL, not Boviet/Tolead shared accounts which use FTL flow)
+                _is_dray = "dray" in _mt or "transload" in _mt
+                _is_ftl_account = _acct in ("Boviet", "Tolead")
+                if _is_dray and not _is_ftl_account:
+                    # Check if POD already uploaded — if so, skip straight to pod_received
+                    with db.get_cursor() as cur:
+                        cur.execute(
+                            "SELECT 1 FROM load_documents WHERE efj = %s AND doc_type = 'pod' LIMIT 1",
+                            (efj,),
+                        )
+                        has_pod = cur.fetchone()
+                    next_status = "pod_received" if has_pod else "need_pod"
+                    with db.get_conn() as conn:
+                        with db.get_cursor(conn) as cur:
+                            cur.execute(
+                                "UPDATE shipments SET status = %s, updated_at = NOW() WHERE efj = %s",
+                                (next_status, efj),
+                            )
+                    log.info("Auto-advanced %s: delivered → %s", efj, next_status)
+                    new_status = next_status  # update for sheet write-back + response
+        except Exception as e:
+            log.warning("Auto-advance check failed for %s: %s", efj, e)
+
     # Billing gate: if closing as billed, check for open unbilled orders
     if new_status.strip().lower() in ("billed_closed", "billed and closed"):
         with db.get_conn() as conn:

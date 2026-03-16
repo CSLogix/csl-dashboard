@@ -294,12 +294,18 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
     try {
       const r = await apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/documents`, { method: "POST", body: fd });
       if (r.ok) {
+        const rData = await r.json();
         setDocUploadMsg("Uploaded");
         // Refresh doc list
         const listRes = await apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/documents`);
         if (listRes.ok) { const data = await listRes.json(); setLoadDocs(data.documents || []); }
         addSheetLog(`Doc uploaded | ${selectedShipment.loadNumber}`);
         onDocChange?.();
+        // Auto-status advance (e.g., POD upload → pod_received)
+        if (rData.auto_status) {
+          handleStatusUpdate(selectedShipment.efj, rData.auto_status);
+          setDocUploadMsg(`Uploaded — status → ${rData.auto_status.replace(/_/g, " ")}`);
+        }
       } else { setDocUploadMsg(`Upload failed (${r.status})`); }
     } catch { setDocUploadMsg("Upload error"); }
     setDocUploading(false);
