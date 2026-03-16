@@ -312,6 +312,33 @@ def startup():
     except Exception as e:
         log.warning("Could not create lane_rates table: %s", e)
 
+    # Create market_rates table (LoadMatch / benchmark data — no carrier)
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS market_rates (
+                        id              SERIAL PRIMARY KEY,
+                        rate_date       DATE,
+                        terminal        VARCHAR(256),
+                        origin          VARCHAR(256) NOT NULL,
+                        destination     VARCHAR(256) NOT NULL,
+                        base_rate       DECIMAL(10,2),
+                        fsc_pct         DECIMAL(5,2) DEFAULT 0,
+                        total           DECIMAL(10,2),
+                        source          VARCHAR(64) DEFAULT 'loadmatch',
+                        move_type       VARCHAR(32) DEFAULT 'dray',
+                        notes           TEXT,
+                        created_at      TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_market_rates_origin ON market_rates(origin)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_market_rates_dest ON market_rates(destination)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_market_rates_date ON market_rates(rate_date)")
+        log.info("market_rates table ready")
+    except Exception as e:
+        log.warning("Could not create market_rates table: %s", e)
+
     # Create email_drafts table
     try:
         with db.get_conn() as conn:
