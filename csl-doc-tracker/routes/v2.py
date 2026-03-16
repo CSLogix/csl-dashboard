@@ -26,9 +26,41 @@ router = APIRouter()
 # Shared accounts that still need Google Sheet writes
 _SHARED_SHEET_ACCOUNTS = {"Tolead", "Boviet"}
 
+# Dashboard-only statuses — never write these to Google Sheet (not in Col M dropdown)
+_DASHBOARD_ONLY_STATUSES = {"need_pod", "pod_received", "picked_up"}
+
+# Post-delivery statuses — load is "done" for active-count / at-risk purposes
+_POST_DELIVERY_STATUSES = (
+    "'delivered','completed','empty returned','empty_return','returned_to_port',"
+    "'need_pod','pod_received','ready_to_close','billed_closed','billed and closed','missing_invoice',"
+    "'ppwk_needed','waiting_confirmation','waiting_cx_approval','cx_approved','driver_paid'"
+)
+
 
 def _shipment_row_to_dict(row: dict) -> dict:
-    """Convert a Postgres shipments row to the same JSON shape as sheet_cache."""
+    """
+    Map a database shipment row to the JSON shape used by sheet_cache.
+    
+    Converts DB column values into a normalized dict:
+    - Uses empty strings for missing text fields.
+    - Sets `rep` to "Unassigned" and `source` to "sheet" when absent.
+    - Converts `updated_at` to an ISO-8601 string when present.
+    - Casts `customer_rate` and `carrier_pay` to float when present.
+    - Preserves `archived` as a boolean defaulting to False.
+    
+    Parameters:
+        row (dict): A mapping representing a shipments row from Postgres with column names
+                    expected by the function (e.g., "efj", "move_type", "updated_at",
+                    "customer_rate", "carrier_pay", etc.).
+    
+    Returns:
+        dict: A normalized shipment dictionary with keys matching sheet_cache, including
+              efj, move_type, container, bol, ssl, carrier, origin, destination, eta,
+              lfd, pickup, delivery, status, notes, bot_alert, return_port,
+              container_url, rep, account, hub, driver, driver_phone, carrier_email,
+              trailer, driver_name, source, archived, updated_at, customer_rate,
+              and carrier_pay.
+    """
     return {
         "efj": row["efj"] or "",
         "move_type": row["move_type"] or "",
@@ -178,35 +210,48 @@ async def api_v2_shipment_detail(efj: str, request: Request):
 
 @router.get("/api/v2/stats")
 async def api_v2_stats(request: Request):
-    """Dashboard stats computed from Postgres."""
+    """
+    Return dashboard metrics aggregated from the shipments table.
+    
+    Calculates counts for active shipments, on-schedule (active minus at-risk, floored at 0), shipments with ETA changes referenced today, shipments at risk (LFD today or tomorrow), and shipments completed today.
+    
+    Returns:
+        dict: {
+            "active": int,           # shipments not archived and not in post-delivery statuses
+            "on_schedule": int,      # max(0, active - at_risk)
+            "eta_changed": int,      # shipments whose bot_notes mention today's date
+            "at_risk": int,          # shipments with LFD on or before tomorrow and not post-delivery
+            "completed_today": int   # shipments in post-delivery statuses with delivery_date matching today
+        }
+    """
     from datetime import datetime as _dt, timedelta as _td
     today = _dt.now().strftime("%Y-%m-%d")
     tomorrow = (_dt.now() + _td(days=1)).strftime("%Y-%m-%d")
 
     with db.get_cursor() as cur:
         # Active count (not archived, not delivered/completed)
-        cur.execute("""
+        cur.execute(f"""
             SELECT COUNT(*) as cnt FROM shipments
             WHERE archived = FALSE
-              AND LOWER(status) NOT IN ('delivered', 'completed', 'empty returned', 'billed_closed')
+              AND LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
         """)
         active = cur.fetchone()["cnt"]
 
         # At risk (LFD is today or tomorrow)
-        cur.execute("""
+        cur.execute(f"""
             SELECT COUNT(*) as cnt FROM shipments
             WHERE archived = FALSE
-              AND LOWER(status) NOT IN ('delivered', 'completed', 'empty returned', 'billed_closed')
+              AND LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
               AND lfd != '' AND lfd IS NOT NULL
               AND LEFT(lfd, 10) <= %s
         """, (tomorrow,))
         at_risk = cur.fetchone()["cnt"]
 
         # Completed today
-        cur.execute("""
+        cur.execute(f"""
             SELECT COUNT(*) as cnt FROM shipments
             WHERE archived = FALSE
-              AND LOWER(status) IN ('delivered', 'completed')
+              AND LOWER(status) IN ({_POST_DELIVERY_STATUSES})
               AND delivery_date LIKE %s
         """, (f"%{today}%",))
         completed_today = cur.fetchone()["cnt"]
@@ -232,17 +277,27 @@ async def api_v2_stats(request: Request):
 
 @router.get("/api/v2/accounts")
 async def api_v2_accounts(request: Request):
+    """
+    Provide per-account counts of active shipments, completed shipments, and shipments requiring attention.
+    
+    Returns:
+        dict: A mapping with key `accounts` to a list of account summary objects. Each object contains:
+            - name (str): Account name.
+            - active (int): Number of non-archived shipments not in post-delivery statuses.
+            - done (int): Number of non-archived shipments in post-delivery statuses.
+            - alerts (int): Number of non-archived, not post-delivery shipments whose latest free day (LFD) is due by tomorrow.
+    """
     from datetime import datetime as _dt, timedelta as _td
     """Account list with counts from Postgres."""
     with db.get_cursor() as cur:
-        cur.execute("""
+        cur.execute(f"""
         SELECT
             account,
-            COUNT(*) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as active,
-            COUNT(*) FILTER (WHERE LOWER(status) IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as done,
+            COUNT(*) FILTER (WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES}) AND archived = FALSE) as active,
+            COUNT(*) FILTER (WHERE LOWER(status) IN ({_POST_DELIVERY_STATUSES}) AND archived = FALSE) as done,
             COUNT(*) FILTER (
                 WHERE archived = FALSE
-                  AND LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed')
+                  AND LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
                   AND lfd != '' AND lfd IS NOT NULL
                   AND LEFT(lfd, 10) <= %s
             ) as alerts
@@ -259,15 +314,25 @@ async def api_v2_accounts(request: Request):
 
 @router.get("/api/v2/team")
 async def api_v2_team(request: Request):
-    """Team member summaries from Postgres."""
+    """
+    Return per-rep summaries of active loads, associated accounts, and at-risk counts.
+    
+    Each rep key maps to an object containing:
+    - loads: count of non-archived loads whose status is not a post-delivery status.
+    - accounts: sorted list of distinct account names for those loads.
+    - at_risk: count of those loads with an LFD on or before tomorrow.
+    
+    Returns:
+    team (dict): Mapping of rep -> {"loads": int, "accounts": list[str], "at_risk": int}, wrapped as {"team": ...}.
+    """
     with db.get_cursor() as cur:
-        cur.execute("""
+        cur.execute(f"""
         SELECT rep,
-               COUNT(*) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as loads,
-               array_agg(DISTINCT account) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as accounts,
+               COUNT(*) FILTER (WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES}) AND archived = FALSE) as loads,
+               array_agg(DISTINCT account) FILTER (WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES}) AND archived = FALSE) as accounts,
                COUNT(*) FILTER (
                    WHERE archived = FALSE
-                     AND LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed')
+                     AND LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
                      AND lfd != '' AND lfd IS NOT NULL
                      AND LEFT(lfd, 10) <= to_char(NOW() + interval '1 day', 'YYYY-MM-DD')
                ) as at_risk
@@ -286,7 +351,28 @@ async def api_v2_team(request: Request):
 
 @router.post("/api/v2/load/{efj}/status")
 async def api_v2_update_status(efj: str, request: Request, background_tasks: BackgroundTasks):
-    """Update status in Postgres. Write back to Google Sheet if shared account."""
+    """
+    Update a shipment's status in the database and trigger related side effects (sheet writes, auto-advances, archival, and milestone email drafts).
+    
+    Updates the shipment row identified by `efj` with the provided status, schedules or performs Google Sheet/Master Sheet write-backs when appropriate, auto-advances delivered dray/transload loads to `pod_received` or `need_pod` depending on POD presence, enforces the billing gate when closing billed loads (archiving when no active unbilled orders exist), and attempts to generate a milestone email draft when the status matches a milestone.
+    
+    Parameters:
+        efj (str): Shipment EFJ identifier.
+        request (Request): FastAPI request containing a JSON body with a "status" field.
+        background_tasks (BackgroundTasks): FastAPI background task manager used for non-blocking sheet updates.
+    
+    Returns:
+        dict: Response object with keys:
+            - "ok" (bool): True on success.
+            - "efj" (str): The shipment EFJ.
+            - "status" (str): The final status written.
+            - "draft_id" (optional, str): ID of a generated email draft when applicable.
+    
+    Raises:
+        HTTPException: 400 if the "status" is missing from the request body.
+        HTTPException: 404 if no shipment exists for the given `efj`.
+        HTTPException: 409 if attempting to close a billed load while an active unbilled order exists.
+    """
     body = await request.json()
     new_status = body.get("status", "").strip()
     if not new_status:
@@ -305,15 +391,50 @@ async def api_v2_update_status(efj: str, request: Request, background_tasks: Bac
 
     account = row["account"]
 
+    _skip_sheet = new_status.strip().lower().replace(" ", "_") in _DASHBOARD_ONLY_STATUSES
+
     # Write back to Google Sheet for shared accounts
-    if account in _SHARED_SHEET_ACCOUNTS:
+    if not _skip_sheet and account in _SHARED_SHEET_ACCOUNTS:
         try:
             _v2_write_status_to_sheet(efj, new_status, account, row.get("hub"))
         except Exception as e:
             log.warning("Sheet write-back failed for %s: %s (Postgres updated OK)", efj, e)
-    elif account:
+    elif not _skip_sheet and account:
         # Write back to Master Sheet for non-shared accounts (prevents sync overwrite)
         background_tasks.add_task(_write_fields_to_master_sheet, efj, account, {"status": new_status})
+
+    # Auto-advance dray loads: delivered → need_pod (skip for FTL — FTL uses its own flow)
+    normalized = new_status.strip().lower().replace(" ", "_")
+    if normalized == "delivered":
+        try:
+            with db.get_cursor() as cur:
+                cur.execute("SELECT move_type, account FROM shipments WHERE efj = %s", (efj,))
+                _ship = cur.fetchone()
+            if _ship:
+                _mt = (_ship["move_type"] or "").lower()
+                _acct = (_ship["account"] or "")
+                # Dray loads (not FTL, not Boviet/Tolead shared accounts which use FTL flow)
+                _is_dray = "dray" in _mt or "transload" in _mt
+                _is_ftl_account = _acct in ("Boviet", "Tolead")
+                if _is_dray and not _is_ftl_account:
+                    # Check if POD already uploaded — if so, skip straight to pod_received
+                    with db.get_cursor() as cur:
+                        cur.execute(
+                            "SELECT 1 FROM load_documents WHERE efj = %s AND doc_type = 'pod' LIMIT 1",
+                            (efj,),
+                        )
+                        has_pod = cur.fetchone()
+                    next_status = "pod_received" if has_pod else "need_pod"
+                    with db.get_conn() as conn:
+                        with db.get_cursor(conn) as cur:
+                            cur.execute(
+                                "UPDATE shipments SET status = %s, updated_at = NOW() WHERE efj = %s",
+                                (next_status, efj),
+                            )
+                    log.info("Auto-advanced %s: delivered → %s", efj, next_status)
+                    new_status = next_status  # update for sheet write-back + response
+        except Exception as e:
+            log.warning("Auto-advance check failed for %s: %s", efj, e)
 
     # Billing gate: if closing as billed, check for open unbilled orders
     if new_status.strip().lower() in ("billed_closed", "billed and closed"):
@@ -392,7 +513,19 @@ def _v2_write_status_to_sheet(efj: str, new_status: str, account: str, hub: str 
 
 @router.post("/api/v2/load/{efj}/update")
 async def api_v2_update_field(efj: str, request: Request, background_tasks: BackgroundTasks):
-    """Update any field(s) on a shipment in Postgres + write back to Master Sheet."""
+    """
+    Update one or more allowed shipment fields in Postgres and queue changed fields to be written to the Master Sheet.
+    
+    Expects a JSON body containing one or more of the allowed fields: move_type, container, bol, vessel, carrier, origin, destination, eta, lfd, pickup_date, delivery_date, status, notes, driver, bot_notes, return_date, rep, customer_ref, equipment_type, container_url, driver_phone, hub, archived, customer_rate, carrier_pay. Fields not in this set are ignored; if no allowed fields are provided a 400 error is raised. After persisting the update, the function schedules a background write of the changed fields to the Master Sheet unless the shipment's account is a shared-sheet account or the only changed field is an archived flag. Dashboard-only status values are not written back to the sheet.
+    
+    Parameters:
+    	efj (str): Shipment identifier to update.
+    	request (Request): HTTP request containing the JSON body with fields to update.
+    	background_tasks (BackgroundTasks): FastAPI background task manager used to schedule sheet writes.
+    
+    Returns:
+    	dict: {"ok": True, "shipment": <shipment dict>} where "shipment" is the updated shipment record formatted by _shipment_row_to_dict.
+    """
     body = await request.json()
 
     # Allowed fields to update
@@ -425,6 +558,9 @@ async def api_v2_update_field(efj: str, request: Request, background_tasks: Back
     account = row["account"] or ""
     if account and account not in _SHARED_SHEET_ACCOUNTS:
         sheet_fields = {k: v for k, v in body.items() if k in ALLOWED and k != "archived"}
+        # Strip status if it's a dashboard-only value
+        if sheet_fields.get("status", "").strip().lower().replace(" ", "_") in _DASHBOARD_ONLY_STATUSES:
+            sheet_fields.pop("status", None)
         if sheet_fields:
             background_tasks.add_task(_write_fields_to_master_sheet, efj, account, sheet_fields)
 

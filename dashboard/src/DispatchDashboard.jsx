@@ -8,7 +8,7 @@ import {
   STATUSES, FTL_STATUSES, BILLING_STATUSES,
   STATUS_COLORS, FTL_STATUS_COLORS, BILLING_STATUS_COLORS,
   ACCOUNT_COLORS, NAV_ITEMS, REP_ACCOUNTS, ALL_REP_NAMES,
-  ALERT_TYPES, Z, ALL_STATUSES_COMBINED,
+  ALERT_TYPES, Z, ALL_STATUSES_COMBINED, isPostDelivery,
 } from "./helpers/constants";
 import {
   normalizeStatus, mapShipment, isFTLShipment,
@@ -38,6 +38,13 @@ import PlaybooksView from "./views/PlaybooksView";
 import UserManagementView from "./views/UserManagementView";
 import AddForm from "./views/AddForm";
 
+/**
+ * Top-level dispatch dashboard component that provides the UI and controls for viewing, filtering, editing, and managing shipments, alerts, drafts, and related workflows.
+ *
+ * Renders the complete dispatch application layout including sidebar navigation, top bar controls (AI, drafts, user menu, clock), main views (overview, dispatch, inbox, billing, analytics, etc.), modals (add load, parse, drafts, change password), and the load details slide-over.
+ *
+ * @returns {JSX.Element} The rendered DispatchDashboard React element.
+ */
 export default function DispatchDashboard() {
   // ── Core state from Zustand store (shared across components) ──
   const {
@@ -378,10 +385,10 @@ export default function DispatchDashboard() {
       if (!repMatch) return false;
     }
     if (dateFilter) {
-      if (dateFilter === "pickup_today" && (!isDateToday(s.pickupDate) || s.status === "delivered")) return false;
-      if (dateFilter === "pickup_tomorrow" && (!isDateTomorrow(s.pickupDate) || s.status === "delivered")) return false;
+      if (dateFilter === "pickup_today" && (!isDateToday(s.pickupDate) || isPostDelivery(s.status))) return false;
+      if (dateFilter === "pickup_tomorrow" && (!isDateTomorrow(s.pickupDate) || isPostDelivery(s.status))) return false;
       if (dateFilter === "delivery_today" && !isDateToday(s.deliveryDate)) return false;
-      if (dateFilter === "delivery_tomorrow" && (!isDateTomorrow(s.deliveryDate) || s.status === "delivered")) return false;
+      if (dateFilter === "delivery_tomorrow" && (!isDateTomorrow(s.deliveryDate) || isPostDelivery(s.status))) return false;
       if (dateFilter === "yesterday" && !isDateYesterday(s.pickupDate) && !isDateYesterday(s.deliveryDate)) return false;
     }
     // Date range filter
@@ -469,17 +476,14 @@ export default function DispatchDashboard() {
       }).then(async r => {
         if (r.ok) {
           const resp = await r.json().catch(() => ({}));
-          setShipments(p => p.map(x => x.efj === shipEfj ? { ...x, synced: true } : x));
-          setSelectedShipment(prev => prev && prev.efj === shipEfj ? { ...prev, synced: true } : prev);
+          const finalStatus = resp.status || newStatus;
+          setShipments(p => p.map(x => x.efj === shipEfj ? { ...x, status: finalStatus, synced: true } : x));
+          setSelectedShipment(prev => prev && prev.efj === shipEfj ? { ...prev, status: finalStatus, synced: true } : prev);
           addSheetLog(`Synced -> Postgres | ${ship.loadNumber}`);
           if (resp.draft_id) {
             setDraftToast({ id: resp.draft_id, efj: shipEfj, loadNumber: ship.loadNumber });
             fetchEmailDrafts();
             setTimeout(() => setDraftToast(null), 8000);
-          }
-          // Delivered → auto-transition to Ready to Close Out
-          if (newStatus === "delivered") {
-            setTimeout(() => handleStatusUpdate(ship.id, "ready_to_close"), 1500);
           }
           // Billed & Closed → remove from active view
           if (newStatus === "billed_closed") {
@@ -684,9 +688,9 @@ export default function DispatchDashboard() {
     }
   };
 
-  const activeLoads = useMemo(() => filtered.filter(s => !["delivered", "issue", "cancelled", "cancelled_tonu", "empty_return", "driver_paid"].includes(s.status)).length, [filtered]);
+  const activeLoads = useMemo(() => filtered.filter(s => !isPostDelivery(s.status) && !["issue", "cancelled", "cancelled_tonu"].includes(s.status)).length, [filtered]);
   const inTransit = useMemo(() => filtered.filter(s => s.status === "in_transit").length, [filtered]);
-  const deliveredCount = useMemo(() => filtered.filter(s => s.status === "delivered").length, [filtered]);
+  const deliveredCount = useMemo(() => filtered.filter(s => isPostDelivery(s.status)).length, [filtered]);
   const issueCount = useMemo(() => filtered.filter(s => s.status === "issue").length, [filtered]);
   const sidebarW = sidebarCollapsed ? 56 : 72;
 

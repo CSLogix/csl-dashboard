@@ -41,8 +41,86 @@ TAB_COL_OVERRIDES = {
     "Mamata":   {"COL_BOTNOTES": "N", "COL_RETURN": "O"},
 }
 
+# PG snake_case → Google Sheet dropdown display value
+# These must match the Col M data validation dropdown on the Master Tracker
+PG_STATUS_TO_SHEET = {
+    # Dray statuses
+    "at_port":          "At Port",
+    "on_vessel":        "On Vessel",
+    "in_transit":       "In Transit",
+    "out_for_delivery": "Out for Delivery",
+    "delivered":        "Delivered",
+    "empty_return":     "Empty Return",
+    "on_hold":          "On Hold",
+    "scheduled":        "Scheduled",
+    "released":         "Released",
+    "returned_to_port": "Returned to Port",
+    "at_yard":          "At Yard",
+    "rail":             "Rail",
+    "transload":        "Transload",
+    "on_site_loading":  "On Site Loading",
+    "issue":            "Exception",
+    "cancelled":        "Cancelled",
+    "cancelled_tonu":   "Cancelled TONU",
+    # FTL statuses
+    "unassigned":       "Unassigned",
+    "assigned":         "Assigned",
+    "picking_up":       "Picking Up",
+    "on_site":          "On-Site",
+    "at_delivery":      "At Delivery",
+    "need_pod":         "Need POD",
+    "pod_received":     "POD Rc'd",
+    "driver_paid":      "Driver Paid",
+    # Billing statuses
+    "ready_to_close":       "Ready to Close",
+    "missing_invoice":      "Missing Invoice",
+    "billed_closed":        "Billed & Closed",
+    "ppwk_needed":          "PPWK Needed",
+    "waiting_confirmation": "Waiting on Confirmation",
+    "waiting_cx_approval":  "Waiting CX Approval",
+    "cx_approved":          "CX Approved",
+    # Pass-through: already title-case from bot
+    "Vessel":           "Vessel",
+    "Vessel Arrived":   "Vessel Arrived",
+    "Discharged":       "Discharged",
+    "Released":         "Released",
+    "Returned to Port": "Returned to Port",
+    "Delivered":        "Delivered",
+}
+
+def _fmt_status(val):
+    """
+    Map an internal snake_case status identifier to the Google Sheet dropdown display value.
+    
+    Parameters:
+        val (str | None): Status identifier (e.g., "returned_to_port"), a mixed-case/status-like string, or an already-formatted display value.
+    
+    Returns:
+        str | None: The mapped Google Sheet display value if a mapping exists; otherwise returns the original `val` (including None).
+    """
+    if not val:
+        return val
+    mapped = PG_STATUS_TO_SHEET.get(val)
+    if mapped:
+        return mapped
+    # Try lowercase lookup (handles mixed case from various sources)
+    mapped = PG_STATUS_TO_SHEET.get(val.lower().replace(" ", "_"))
+    if mapped:
+        return mapped
+    # Already a display value or unknown — pass through as-is
+    return val
+
+
 def _tab_cols(account):
-    """Return (COL_BOTNOTES, COL_RETURN) for a given account tab."""
+    """
+    Get the column letters for the BOTNOTES and RETURN fields for the specified account tab.
+    
+    Parameters:
+        account (str): Account tab name used to look up per-tab column overrides.
+    
+    Returns:
+        tuple: (COL_BOTNOTES, COL_RETURN) — column letters to use for BOTNOTES and RETURN for the given account.
+    """
     ov = TAB_COL_OVERRIDES.get(account, {})
     return (
         ov.get("COL_BOTNOTES", COL_BOTNOTES),
@@ -93,8 +171,17 @@ def _find_row_by_efj(ws, efj):
 
 def sheet_update_import(efj, account, eta=None, pickup=None, return_date=None, status=None):
     """
-    Write Dray Import tracking results back to the Master Sheet.
-    Mirrors the old write_tracking_results() logic.
+    Write Dray Import tracking fields for an EFJ into the Master Sheet account tab.
+    
+    Updates ETA, pickup, return date, a timestamped bot notes entry, and optionally the status dropdown for the given EFJ row on the specified account tab. The status value is converted to the sheet display value before writing and is written using USER_ENTERED so the sheet's dropdown validation applies; if the formatted status equals "Returned to Port" the status cell receives a greenish background. This function performs best-effort writes: errors are logged and not raised.
+    
+    Parameters:
+        efj (str): EFJ identifier to locate the row in column A.
+        account (str): Name of the worksheet/tab for the account in the Master Sheet.
+        eta (str | None): ISO date or datetime string to write to the ETA column (formatted to MM/DD when possible).
+        pickup (str | None): Pickup value to write to the pickup column.
+        return_date (str | None): Return value to write to the return column (per-tab column overrides applied).
+        status (str | None): Internal status key or display value to convert and write to the status dropdown.
     """
     try:
         gc = _get_gc()
@@ -125,11 +212,12 @@ def sheet_update_import(efj, account, eta=None, pickup=None, return_date=None, s
 
         # Status as USER_ENTERED (so dropdown validates)
         if status:
+            sheet_status = _fmt_status(status)
             ws.batch_update(
-                [{"range": f"{COL_STATUS}{row}", "values": [[status]]}],
+                [{"range": f"{COL_STATUS}{row}", "values": [[sheet_status]]}],
                 value_input_option="USER_ENTERED",
             )
-            if status == "Returned to Port":
+            if sheet_status == "Returned to Port":
                 ws.format(f"{COL_STATUS}{row}", {
                     "backgroundColor": {"red": 144/255, "green": 238/255, "blue": 144/255}
                 })
@@ -143,8 +231,16 @@ def sheet_update_import(efj, account, eta=None, pickup=None, return_date=None, s
 
 def sheet_update_export(efj, account, container=None, status=None, bot_notes=None):
     """
-    Write Dray Export updates back to the Master Sheet.
-    Primarily used for container discovery and status changes.
+    Update container, status, and bot notes for a Dray Export row in the master sheet tab for an account.
+    
+    Performs a best-effort write to the Master Sheet: locates the row by EFJ, updates provided fields, logs outcomes, and does not raise exceptions on failure (errors are logged).
+    
+    Parameters:
+        efj (str): EFJ identifier used to find the row in the account tab.
+        account (str): Name of the worksheet tab corresponding to the account.
+        container (str, optional): Container identifier to write into the container column.
+        status (str, optional): Internal status value; it will be converted to the sheet's display value before writing.
+        bot_notes (str, optional): Text to write into the bot notes column.
     """
     try:
         gc = _get_gc()
@@ -169,7 +265,7 @@ def sheet_update_export(efj, account, container=None, status=None, bot_notes=Non
 
         if status:
             ws.batch_update(
-                [{"range": f"{COL_STATUS}{row}", "values": [[status]]}],
+                [{"range": f"{COL_STATUS}{row}", "values": [[_fmt_status(status)]]}],
                 value_input_option="USER_ENTERED",
             )
 
@@ -182,8 +278,17 @@ def sheet_update_export(efj, account, container=None, status=None, bot_notes=Non
 
 def sheet_update_ftl(efj, account, pickup=None, delivery=None, status=None, driver=None):
     """
-    Write FTL updates back to the Master Sheet.
-    FTL loads are in the same Master Sheet under their account tab.
+    Write Full Truck Load (FTL) updates for a load row on the account tab of the Master Sheet.
+    
+    Updates pickup, delivery, driver, and bot notes for the row matching the given EFJ; if a status is provided it is converted to the sheet's display value before writing. This is a best-effort write: errors are logged and not propagated.
+    
+    Parameters:
+        efj (str): EFJ identifier used to locate the row in the account worksheet.
+        account (str): Name of the account worksheet/tab in the Master Sheet.
+        pickup (str | None): Value to write into the Pickup column (e.g., date/time or text); no update if None.
+        delivery (str | None): Value to write into the Delivery column; no update if None.
+        status (str | None): Internal or display status value to set for the load; no update if None. The value will be mapped to the sheet's dropdown display value when applicable.
+        driver (str | None): Driver name to write into the Driver column; no update if None.
     """
     try:
         gc = _get_gc()
@@ -213,7 +318,7 @@ def sheet_update_ftl(efj, account, pickup=None, delivery=None, status=None, driv
 
         if status:
             ws.batch_update(
-                [{"range": f"{COL_STATUS}{row}", "values": [[status]]}],
+                [{"range": f"{COL_STATUS}{row}", "values": [[_fmt_status(status)]]}],
                 value_input_option="USER_ENTERED",
             )
 
@@ -287,15 +392,14 @@ PG_TO_SHEET_COL = {
 
 def sheet_update_field(efj, account, updates):
     """
-    Generic field write-back to Master Sheet.
-
-    Args:
-        efj: The EFJ number (e.g., "EFJ107416")
-        account: The account tab name (e.g., "Allround", "DHL")
-        updates: Dict of PG field names to values,
-                 e.g. {"carrier": "ABC Trucking", "eta": "2026-03-15"}
-
-    Fire-and-forget: logs errors but never raises.
+    Write mapped fields from the dashboard back to the Master Sheet row for a given EFJ.
+    
+    This performs a best-effort update: non-status fields are written using RAW value input and the `status` field (if present) is formatted to the sheet's dropdown display value and written with USER_ENTERED. All errors are logged and not propagated.
+    
+    Parameters:
+        efj (str): EFJ identifier (e.g., "EFJ107416") used to locate the row in column A.
+        account (str): Name of the account tab in the Master Sheet (e.g., "Allround", "DHL").
+        updates (dict): Mapping of PostgreSQL/dashboard field names to values. Only keys present in PG_TO_SHEET_COL are written. The `"status"` key, if provided, is converted to the sheet display value before writing.
     """
     try:
         gc = _get_gc()
@@ -320,7 +424,9 @@ def sheet_update_field(efj, account, updates):
             col = PG_TO_SHEET_COL.get(field)
             if not col:
                 continue  # Field not mapped to a sheet column
-            entry = {"range": f"{col}{row}", "values": [[value or ""]]}
+            # Format status for sheet dropdown
+            display_val = _fmt_status(value) if field == "status" else (value or "")
+            entry = {"range": f"{col}{row}", "values": [[display_val]]}
             if field == "status":
                 status_updates.append(entry)
             else:
@@ -340,14 +446,14 @@ def sheet_update_field(efj, account, updates):
 
 def sheet_add_row(efj, account, data):
     """
-    Append a new load row to the Master Sheet account tab.
-
-    Args:
-        efj: The EFJ number
-        account: The account tab name
-        data: Dict with PG field names and values
-
-    Fire-and-forget: logs errors but never raises.
+    Append a new load row for an EFJ to the specified account tab in the Master Sheet.
+    
+    If a row with the same EFJ already exists, the function does nothing. Errors are logged and not raised.
+    
+    Parameters:
+        efj (str): EFJ identifier to insert into column A.
+        account (str): Name of the account worksheet/tab in the Master Sheet.
+        data (dict): Mapping of PG field names to values used to populate columns A–P; the `status` value will be converted to the sheet display value before writing.
     """
     try:
         gc = _get_gc()
@@ -377,6 +483,8 @@ def sheet_add_row(efj, account, data):
         for idx, field in col_map.items():
             if field == "efj":
                 row[idx] = efj
+            elif field == "status":
+                row[idx] = _fmt_status(data.get(field, "") or "")
             else:
                 row[idx] = data.get(field, "") or ""
 

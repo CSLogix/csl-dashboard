@@ -14,6 +14,30 @@ import TerminalBadge from "../components/TerminalBadge";
 import DocIndicators from "../components/DocIndicators";
 import TrackingBadge from "../components/TrackingBadge";
 
+/**
+ * Render a slide-over panel that displays detailed information, tracking, documents, emails, notes,
+ * driver contact, and financial tools for a selected shipment, with inline editing and action handlers.
+ *
+ * @param {Object|null} selectedShipment - The currently selected shipment object (or null to close the panel).
+ * @param {Function} setSelectedShipment - Setter to update or clear the selected shipment.
+ * @param {Array<Object>} shipments - Array of all shipments used for lookups and live values.
+ * @param {Function} setShipments - Setter to update the shipments array (e.g., for local edits).
+ * @param {Function} handleStatusUpdate - Callback(id, newStatus) to change the shipment's status.
+ * @param {string|null} editField - Identifier of the field currently being edited in the slide-over.
+ * @param {Function} setEditField - Setter to change which inline field is in edit mode.
+ * @param {string} editValue - Current edit buffer value for the inline editor.
+ * @param {Function} setEditValue - Setter for the inline edit buffer.
+ * @param {Function} handleFieldEdit - Callback(id, field, value) for non-API inline field edits.
+ * @param {Function} addSheetLog - Function(message) to append a change log entry for the sheet/dashboard.
+ * @param {Array<Object>} carrierDirectory - Optional carrier directory used to display MC#/carrier lookups.
+ * @param {Function} onDocChange - Optional callback invoked after documents are added/removed/reclassified.
+ * @param {boolean} isMobile - True when rendering for a mobile viewport (adjusts layout/width).
+ * @param {boolean} expandEmailsOnOpen - If true, auto-expands and scrolls the emails section when the panel opens.
+ * @param {Function} onConsumeExpandEmails - Optional callback invoked after auto-expanding emails to clear the trigger.
+ * @param {Function} handleFieldUpdate - Callback(shipment, field, value, opts) for server-backed field updates.
+ * @param {Function} handleMetadataUpdate - Callback(shipment, key, value, opts) to persist metadata like rates/notes.
+ * @param {Function} handleApplyRate - Callback(rateQuote, opts) to apply a suggested rate quote to the shipment.
+ */
 export default function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setShipments, handleStatusUpdate, editField, setEditField, editValue, setEditValue, handleFieldEdit, addSheetLog, carrierDirectory, onDocChange, isMobile, expandEmailsOnOpen, onConsumeExpandEmails, handleFieldUpdate, handleMetadataUpdate, handleApplyRate }) {
   const docInputRef = useRef(null);
   const emailsSectionRef = useRef(null);
@@ -41,6 +65,19 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
   const [driverEditVal, setDriverEditVal] = useState("");
   const [driverSaving, setDriverSaving] = useState(false);
   const [statusExpanded, setStatusExpanded] = useState(false);
+  const statusSelectorRef = useRef(null);
+
+  // Close status selector on click outside
+  useEffect(() => {
+    if (!statusExpanded) return;
+    const handler = (e) => {
+      if (statusSelectorRef.current && !statusSelectorRef.current.contains(e.target)) {
+        setStatusExpanded(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [statusExpanded]);
   const [emailsCollapsed, setEmailsCollapsed] = useState(false);
   const [aiSummary, setAiSummary] = useState(null);
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
@@ -294,12 +331,18 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
     try {
       const r = await apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/documents`, { method: "POST", body: fd });
       if (r.ok) {
+        const rData = await r.json();
         setDocUploadMsg("Uploaded");
         // Refresh doc list
         const listRes = await apiFetch(`${API_BASE}/api/load/${selectedShipment.efj}/documents`);
         if (listRes.ok) { const data = await listRes.json(); setLoadDocs(data.documents || []); }
         addSheetLog(`Doc uploaded | ${selectedShipment.loadNumber}`);
         onDocChange?.();
+        // Auto-status advance (e.g., POD upload → pod_received)
+        if (rData.auto_status) {
+          handleStatusUpdate(selectedShipment.id, rData.auto_status);
+          setDocUploadMsg(`Uploaded — status → ${rData.auto_status.replace(/_/g, " ")}`);
+        }
       } else { setDocUploadMsg(`Upload failed (${r.status})`); }
     } catch { setDocUploadMsg("Upload error"); }
     setDocUploading(false);
@@ -366,7 +409,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
   return (
     <>
       <div aria-hidden="true" onClick={() => setSelectedShipment(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: Z.panelBackdrop, animation: "fade-in 0.2s ease" }} />
-      <div role="dialog" aria-modal="true" aria-label={`Shipment details — ${selectedShipment.loadNumber}`} className="glass-strong" style={{ position: "fixed", top: 0, right: 0, width: isMobile ? "100vw" : 380, height: "100vh", zIndex: Z.panel, display: "flex", flexDirection: "column", overflow: "hidden", animation: "slide-right 0.3s ease", borderLeft: isMobile ? "none" : "1px solid rgba(255,255,255,0.08)" }}>
+      <div role="dialog" aria-modal="true" aria-label={`Shipment details — ${selectedShipment.loadNumber}`} className="glass-strong" style={{ position: "fixed", top: 0, right: 0, width: isMobile ? "100vw" : 440, height: "100vh", zIndex: Z.panel, display: "flex", flexDirection: "column", overflow: "hidden", animation: "slide-right 0.3s ease", borderLeft: isMobile ? "none" : "1px solid rgba(0,184,212,0.25)", boxShadow: isMobile ? "none" : "-8px 0 40px rgba(0,0,0,0.4), -2px 0 8px rgba(0,184,212,0.08)" }}>
         <div style={{ flex: 1, overflow: "auto" }}>
           {/* Header */}
           <div style={{ padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -623,7 +666,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
             const activeStatus = allStatuses.find(s => s.key === selectedShipment.status);
             const activeColor = (getStatusColors(selectedShipment)[selectedShipment.status] || BILLING_STATUS_COLORS[selectedShipment.status] || { main: "#94a3b8" }).main;
             return (
-              <div style={{ padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              <div ref={statusSelectorRef} style={{ padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                 <div onClick={() => setStatusExpanded(!statusExpanded)}
                   style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", userSelect: "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1148,7 +1191,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
               Drop files here {"\u2014"} PDF, images, Excel, Word, email
             </div>
             {docUploadMsg && (
-              <div style={{ marginTop: 6, fontSize: 11, fontWeight: 600, color: docUploadMsg === "Uploaded" ? "#34d399" : "#f87171", textAlign: "center" }}>
+              <div style={{ marginTop: 6, fontSize: 11, fontWeight: 600, color: docUploadMsg?.startsWith("Uploaded") ? "#34d399" : "#f87171", textAlign: "center" }}>
                 {docUploadMsg}
               </div>
             )}

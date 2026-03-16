@@ -17,6 +17,65 @@ import TerminalBadge from "../components/TerminalBadge";
 import DocIndicators from "../components/DocIndicators";
 import TrackingBadge from "../components/TrackingBadge";
 
+/**
+ * Render the dispatch (loadboard) interface including filtering, status cards, inline editable table, CSV export, and POD/document actions.
+ *
+ * Renders a full-featured loadboard with move-type and status controls, search and date filters, column visibility and filtering, zebra striping, metrics, mobile card view, and a desktop table that supports spreadsheet-like inline editing, navigation (Tab/Enter), per-column sorting, CSV export, and POD upload handling.
+ *
+ * @param {Object} props - Component properties.
+ * @param {boolean} props.loaded - Whether initial data has finished loading (used for entrance animation).
+ * @param {Array<Object>} props.shipments - All shipments available to the view.
+ * @param {Array<Object>} props.filtered - Shipments after applying global filters.
+ * @param {Array<string>} [props.accounts] - Account options for the account filter; defaults to ["All Accounts"].
+ * @param {string} props.activeStatus - Currently selected status filter key.
+ * @param {(k: string) => void} props.setActiveStatus - Setter for activeStatus.
+ * @param {string} props.activeAccount - Currently selected account filter.
+ * @param {(a: string) => void} props.setActiveAccount - Setter for activeAccount.
+ * @param {string} props.activeRep - Currently selected rep filter.
+ * @param {(r: string) => void} props.setActiveRep - Setter for activeRep.
+ * @param {string} props.searchQuery - Current search input value.
+ * @param {(q: string) => void} props.setSearchQuery - Setter for searchQuery.
+ * @param {Array<Object>} props.statusCounts - Status card definitions and counts.
+ * @param {Object|null} props.selectedShipment - Currently selected shipment (detail slide-over target).
+ * @param {(s: Object|null) => void} props.setSelectedShipment - Setter for selectedShipment.
+ * @param {string|null} props.editField - Currently focused edit field (external).
+ * @param {(f: string|null) => void} props.setEditField - Setter for editField.
+ * @param {string|null} props.editValue - Current external edit value.
+ * @param {(v: string|null) => void} props.setEditValue - Setter for editValue.
+ * @param {Array<Object>} props.sheetLog - Activity/log entries shown for shipments.
+ * @param {(id: string, status: string) => void} props.handleStatusUpdate - Update handler for changing a shipment's status.
+ * @param {(id: string, field: string, value: any) => void} props.handleFieldEdit - Generic field edit handler (external).
+ * @param {(shipment: Object) => void} props.handleLoadClick - Handler invoked when a load row/card is opened.
+ * @param {number} props.activeLoads - Metric: number of active loads.
+ * @param {number} props.inTransit - Metric: number of loads in transit.
+ * @param {number} props.deliveredCount - Metric: delivered count.
+ * @param {number} props.issueCount - Metric: exception/issue count.
+ * @param {() => void} props.onAddLoad - Handler to create a new load.
+ * @param {(msg: string) => void} props.addSheetLog - Append a message to the sheet log (used after uploads).
+ * @param {(s: Array<Object>) => void} props.setShipments - Setter to replace the shipments list.
+ * @param {boolean} props.podUploading - POD upload in-progress flag.
+ * @param {(b: boolean) => void} props.setPodUploading - Setter for podUploading.
+ * @param {string|null} props.podUploadMsg - Message describing last POD upload result.
+ * @param {(m: string|null) => void} props.setPodUploadMsg - Setter for podUploadMsg.
+ * @param {Object} props.trackingSummary - External tracking data keyed by EFJ/container (optional).
+ * @param {Object} props.docSummary - External document summary keyed by EFJ (optional).
+ * @param {string|null} props.dateFilter - Predefined date filter key (e.g., pickup_today).
+ * @param {(k: string|null) => void} props.setDateFilter - Setter for dateFilter.
+ * @param {string} props.moveTypeFilter - Current move-type filter ('all'|'dray'|'ftl').
+ * @param {(t: string) => void} props.setMoveTypeFilter - Setter for moveTypeFilter.
+ * @param {string|null} props.dateRangeField - Which date field is used for custom range ('pickup'|'delivery').
+ * @param {(f: string|null) => void} props.setDateRangeField - Setter for dateRangeField.
+ * @param {string} props.dateRangeStart - Start date for custom range (YYYY-MM-DD).
+ * @param {(d: string) => void} props.setDateRangeStart - Setter for dateRangeStart.
+ * @param {string} props.dateRangeEnd - End date for custom range (YYYY-MM-DD).
+ * @param {(d: string) => void} props.setDateRangeEnd - Setter for dateRangeEnd.
+ * @param {(shipment: Object, field: string, value: any) => void} props.handleFieldUpdate - Commit handler for inline field edits.
+ * @param {(shipment: Object, key: string, value: any) => void} props.handleMetadataUpdate - Handler for metadata updates (truck type, rate, notes).
+ * @param {(shipment: Object, key: string, value: any) => void} props.handleDriverFieldUpdate - Handler for driver/trailer/contact field updates.
+ * @param {() => void} [props.onBack] - Optional back navigation handler (renders "Overview" back button when provided).
+ *
+ * @returns {JSX.Element} The rendered DispatchView component.
+ */
 export default function DispatchView({
   loaded, shipments, filtered, accounts,
   activeStatus, setActiveStatus, activeAccount, setActiveAccount,
@@ -45,6 +104,16 @@ export default function DispatchView({
   const [inlineEditId, setInlineEditId] = useState(null);
   const [inlineEditField, setInlineEditField] = useState(null);
   const [inlineEditValue, setInlineEditValue] = useState("");
+
+  // Close inline status dropdown on click outside
+  useEffect(() => {
+    if (!inlineEditId || inlineEditField !== "status") return;
+    const handler = (e) => {
+      if (!e.target.closest('.inline-status-dd')) setInlineEditId(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [inlineEditId, inlineEditField]);
 
   // Spreadsheet-like Tab/Enter navigation — ordered list of editable columns
   const EDITABLE_COLS = useMemo(() => ["efj", "container", "pickup", "origin", "destination", "delivery", "truckType", "trailer", "driverPhone", "carrierEmail", "customerRate", "notes"], []);
@@ -576,10 +645,15 @@ export default function DispatchView({
               return (
                 <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
                   style={{ cursor: "default", background: highlightedEfj === s.efj ? undefined : rowBg }}>
-                  <td style={{ padding: "5px 4px", width: 24, textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                  <td style={{ padding: "5px 4px", width: 30, textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                     <button onClick={() => handleLoadClick(s)} title="Open details"
-                      style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
-                      onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
+                      style={{ background: "rgba(0,184,212,0.06)", border: "1px solid rgba(0,184,212,0.12)", color: "#00b8d4", cursor: "pointer", padding: "3px 5px", borderRadius: 6, lineHeight: 1, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,184,212,0.18)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.4)"; e.currentTarget.style.transform = "scale(1.1)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,184,212,0.06)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.12)"; e.currentTarget.style.transform = "scale(1)"; }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M14 9l3 3-3 3" />
+                      </svg>
+                    </button>
                   </td>
                   {isColVisible("account") && <td style={{ ...cellStyleFor("account"), color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}
                     onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("account"); setInlineEditValue(s.account || ""); }}>
@@ -595,7 +669,7 @@ export default function DispatchView({
                   {isColVisible("status") && <td style={{ ...cellStyleFor("status"), position: "relative" }}
                     onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                     {isInlineEditing && inlineEditField === "status" ? (
-                      <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
+                      <div className="inline-status-dd" style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
                         {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                           const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
                           return (

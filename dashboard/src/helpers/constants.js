@@ -29,6 +29,7 @@ export const STATUS_MAP = {
   "rail": "rail",
   "transload": "transload",
   "on site loading": "on_site_loading", "on-site loading": "on_site_loading", "on_site_loading": "on_site_loading",
+  "picked up": "picked_up", "picked_up": "picked_up",
   // FTL statuses
   "unassigned": "unassigned",
   "assigned": "assigned",
@@ -83,7 +84,10 @@ export const STATUSES = [
   { key: "at_yard", label: "At Yard", icon: "\u25C6", grad: "linear-gradient(135deg, #4F46E5, #6366F1)" },
   { key: "rail", label: "Rail", icon: "\u25C8", grad: "linear-gradient(135deg, #475569, #64748B)" },
   { key: "transload", label: "Transload", icon: "\u21C4", grad: "linear-gradient(135deg, #7C3AED, #8B5CF6)" },
+  { key: "picked_up", label: "Picked Up", icon: "\uD83D\uDE9B", grad: "linear-gradient(135deg, #7C3AED, #A78BFA)" },
   { key: "on_site_loading", label: "On Site Loading", icon: "\u25B2", grad: "linear-gradient(135deg, #B45309, #D97706)" },
+  { key: "need_pod", label: "Need POD", icon: "\uD83D\uDCCB", grad: "linear-gradient(135deg, #EAB308, #FACC15)" },
+  { key: "pod_received", label: "POD Rc'd", icon: "\u2713", grad: "linear-gradient(135deg, #06B6D4, #22D3EE)" },
   { key: "issue", label: "Exception", icon: "\u26A0", grad: "linear-gradient(135deg, #EF4444, #F87171)" },
   { key: "cancelled", label: "Cancelled", icon: "\u2715", grad: "linear-gradient(135deg, #6B7280, #9CA3AF)" },
   { key: "cancelled_tonu", label: "TONU", icon: "\u26A0", grad: "linear-gradient(135deg, #EF4444, #F87171)" },
@@ -133,7 +137,10 @@ export const STATUS_COLORS = {
   at_yard: { main: "#4F46E5", glow: "#4F46E533" },
   rail: { main: "#475569", glow: "#47556933" },
   transload: { main: "#7C3AED", glow: "#7C3AED33" },
+  picked_up: { main: "#7C3AED", glow: "#7C3AED33" },
   on_site_loading: { main: "#B45309", glow: "#B4530933" },
+  need_pod: { main: "#EAB308", glow: "#EAB30833" },
+  pod_received: { main: "#06B6D4", glow: "#06B6D433" },
   issue: { main: "#F87171", glow: "#EF444433" },
   cancelled: { main: "#6B7280", glow: "#6B728033" },
   cancelled_tonu: { main: "#EF4444", glow: "#EF444433" },
@@ -173,7 +180,26 @@ export const FTL_STATUS_COLORS = {
   ...BILLING_STATUS_COLORS,
 };
 
-// ─── Move-type helpers ───
+// ─── Post-delivery statuses (load is "done" for scheduling/tracking purposes) ───
+export const POST_DELIVERY_STATUSES = new Set([
+  "delivered", "need_pod", "pod_received", "empty_return", "returned_to_port",
+  "ready_to_close", "missing_invoice", "billed_closed", "ppwk_needed",
+  "waiting_confirmation", "waiting_cx_approval", "cx_approved", "driver_paid",
+]);
+/**
+ * Check whether a status is considered post-delivery.
+ * @param {string} status - Status key to test.
+ * @returns {boolean} `true` if the status is in the post-delivery set, `false` otherwise.
+ */
+export function isPostDelivery(status) {
+  return POST_DELIVERY_STATUSES.has(status);
+}
+
+/**
+ * Determine whether a shipment should be treated as FTL.
+ * @param {Object} s - Shipment-like object with `moveType` and `account` fields.
+ * @returns {boolean} `true` if `moveType` is `"FTL"` or `account` is `"Boviet"` or `"Tolead"`, `false` otherwise.
+ */
 export function isFTLShipment(s) {
   return s.moveType === "FTL" || s.account === "Boviet" || s.account === "Tolead";
 }
@@ -270,7 +296,7 @@ export const ALERT_TYPE_CONFIG = {
 export const CMD_STATUS_COLORS = {
   at_port: "#F97316", on_vessel: "#2563EB", in_transit: "#3B82F6", out_for_delivery: "#A855F7",
   delivered: "#22C55E", empty_return: "#06B6D4", pending: "#6B7280", on_hold: "#D97706",
-  scheduled: "#8B5CF6", released: "#059669", at_yard: "#4F46E5", unassigned: "#6B7280",
+  scheduled: "#8B5CF6", released: "#059669", at_yard: "#4F46E5", picked_up: "#7C3AED", unassigned: "#6B7280",
   assigned: "#F59E0B", picking_up: "#A855F7", on_site: "#F97316", need_pod: "#EAB308",
   pod_received: "#06B6D4", driver_paid: "#10B981", cancelled: "#6B7280", cancelled_tonu: "#EF4444",
   ...Object.fromEntries(Object.entries(BILLING_STATUS_COLORS).map(([k, v]) => [k, v.main])),

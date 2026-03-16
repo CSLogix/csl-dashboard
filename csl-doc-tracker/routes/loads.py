@@ -361,7 +361,30 @@ async def get_load_documents(efj: str):
 
 @router.post("/api/load/{efj}/documents")
 async def upload_load_document(efj: str, file: UploadFile = File(...), doc_type: str = Form("other")):
-    """Upload a document for a load."""
+    """
+    Handle uploading a document for a load and persist it to storage and the database.
+    
+    Parameters:
+        efj (str): Load identifier used to group and locate uploaded files.
+        file (UploadFile): Uploaded file to save.
+        doc_type (str): Classification of the document (e.g., "pod", "bol", "other").
+    
+    Returns:
+        JSONResponse: JSON object with keys:
+            - ok (bool): True on successful upload.
+            - id (int): Database id of the inserted document row.
+            - original_name (str): Original filename provided by the uploader.
+            - auto_status (str, optional): If the uploaded document is a POD and the shipment
+              status was "delivered" or "need_pod", this will be "pod_received" indicating the
+              shipment status was auto-updated.
+    
+    Notes:
+        - If a file with the same SHA-256 hash already exists for the same efj, the function
+          returns a 409 response with an error message and does not save a duplicate.
+        - When doc_type is "pod", the function may update the shipments table to set
+          status = "pod_received" (and updated_at = NOW()) for the efj; failures during this
+          auto-advance are logged but do not prevent the upload.
+    """
     import uuid
     upload_dir = f"/root/csl-bot/csl-doc-tracker/uploads/{efj}"
     os.makedirs(upload_dir, exist_ok=True)
@@ -386,7 +409,32 @@ async def upload_load_document(efj: str, file: UploadFile = File(...), doc_type:
                 (efj, doc_type, safe_name, file.filename, len(contents), file_hash)
             )
             doc_id = cur.fetchone()["id"]
-    return JSONResponse({"ok": True, "id": doc_id, "original_name": file.filename})
+
+    # Auto-advance status when POD is uploaded and load is awaiting POD
+    auto_status = None
+    if doc_type == "pod":
+        try:
+            with db.get_cursor() as cur:
+                cur.execute("SELECT status, move_type FROM shipments WHERE efj = %s", (efj,))
+                ship = cur.fetchone()
+            if ship:
+                cur_status = (ship["status"] or "").lower().replace(" ", "_")
+                if cur_status in ("delivered", "need_pod"):
+                    with db.get_conn() as conn:
+                        with db.get_cursor(conn) as cur:
+                            cur.execute(
+                                "UPDATE shipments SET status = 'pod_received', updated_at = NOW() WHERE efj = %s",
+                                (efj,),
+                            )
+                    auto_status = "pod_received"
+                    log.info("Auto-advanced %s → pod_received on POD upload", efj)
+        except Exception as e:
+            log.warning("POD auto-status failed for %s: %s", efj, e)
+
+    resp = {"ok": True, "id": doc_id, "original_name": file.filename}
+    if auto_status:
+        resp["auto_status"] = auto_status
+    return JSONResponse(resp)
 
 
 @router.delete("/api/load/{efj}/documents/{doc_id}")
