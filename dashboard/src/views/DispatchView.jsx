@@ -45,6 +45,10 @@ export default function DispatchView({
   const [inlineEditId, setInlineEditId] = useState(null);
   const [inlineEditField, setInlineEditField] = useState(null);
   const [inlineEditValue, setInlineEditValue] = useState("");
+
+  // Spreadsheet-like Tab/Enter navigation — ordered list of editable columns
+  const EDITABLE_COLS = useMemo(() => ["efj", "container", "pickup", "origin", "destination", "delivery", "truckType", "trailer", "driverPhone", "carrierEmail", "customerRate", "notes"], []);
+  const sortedRef = useRef([]);
   const [showDatePopover, setShowDatePopover] = useState(false);
   const [zebraStripe, setZebraStripe] = useState(true);
   const [columnFilters, setColumnFilters] = useState({});
@@ -149,6 +153,54 @@ export default function DispatchView({
       return sortDir === "asc" ? result : -result;
     });
   }, [columnFiltered, sortCol, sortDir]);
+  sortedRef.current = sorted;
+
+  // Navigate to adjacent cell (Tab/Shift+Tab/Enter)
+  const getShipValue = (ship, field) => {
+    const map = { efj: ship.efj, account: ship.account, container: ship.container, origin: ship.origin, destination: ship.destination, trailer: ship.trailerNumber, driverPhone: ship.driverPhone, carrierEmail: ship.carrierEmail, customerRate: ship.customerRate, notes: ship.notes, truckType: ship.truckType };
+    return map[field] || "";
+  };
+  const navigateCell = (currentField, shipmentId, direction) => {
+    const visibleEditable = EDITABLE_COLS.filter(k => !hiddenCols.includes(k));
+    const colIdx = visibleEditable.indexOf(currentField);
+    if (direction === "right" || direction === "left") {
+      const nextIdx = direction === "right" ? colIdx + 1 : colIdx - 1;
+      if (nextIdx >= 0 && nextIdx < visibleEditable.length) {
+        const nextField = visibleEditable[nextIdx];
+        setInlineEditField(nextField);
+        const ship = sortedRef.current.find(s => s.id === shipmentId);
+        if (ship) setInlineEditValue(getShipValue(ship, nextField));
+        return true;
+      }
+    }
+    if (direction === "down") {
+      const rows = sortedRef.current;
+      const rowIdx = rows.findIndex(s => s.id === shipmentId);
+      if (rowIdx >= 0 && rowIdx < rows.length - 1) {
+        const nextShip = rows[rowIdx + 1];
+        setInlineEditId(nextShip.id);
+        setInlineEditField(currentField);
+        setInlineEditValue(getShipValue(nextShip, currentField));
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Shared keyDown handler for spreadsheet navigation
+  const inlineKeyDown = (e, field, shipId, onCommit) => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      onCommit();
+      navigateCell(field, shipId, e.shiftKey ? "left" : "right");
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      onCommit();
+      if (!navigateCell(field, shipId, "down")) setInlineEditId(null);
+    } else if (e.key === "Escape") {
+      setInlineEditId(null);
+    }
+  };
 
   const hasActiveFilters = activeStatus !== "all" || activeAccount !== "All Accounts" || activeRep !== "All Reps" || searchQuery !== "" || !!dateFilter || moveTypeFilter !== "all" || !!dateRangeField || Object.keys(columnFilters).length > 0;
 
@@ -523,7 +575,17 @@ export default function DispatchView({
               return (
                 <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`} onClick={() => { if (!isInlineEditing) handleLoadClick(s); }}
                   style={{ cursor: "pointer", background: highlightedEfj === s.efj ? undefined : rowBg }}>
-                  {isColVisible("account") && <td style={{ ...cellStyleFor("account"), color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}>{s.account}</td>}
+                  {isColVisible("account") && <td style={{ ...cellStyleFor("account"), color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}
+                    onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("account"); setInlineEditValue(s.account || ""); }}>
+                    {isInlineEditing && inlineEditField === "account" ? (
+                      <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                        onBlur={() => { handleFieldUpdate(s, "account", inlineEditValue); setInlineEditId(null); }}
+                        onKeyDown={e => inlineKeyDown(e, "account", s.id, () => handleFieldUpdate(s, "account", inlineEditValue))}
+                        style={{ ...inlineInputStyle, width: 75, fontWeight: 600 }} onClick={e => e.stopPropagation()} />
+                    ) : (
+                      <span style={{ cursor: "text" }}>{s.account || "\u2014"}</span>
+                    )}
+                  </td>}
                   {isColVisible("status") && <td style={{ ...cellStyleFor("status"), position: "relative" }}
                     onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                     {isInlineEditing && inlineEditField === "status" ? (
@@ -564,9 +626,16 @@ export default function DispatchView({
                       {resolveStatusLabel(s)}
                     </span>
                   </td>}
-                  {isColVisible("efj") && <td style={cellStyleFor("efj")}>
+                  {isColVisible("efj") && <td style={cellStyleFor("efj")}
+                    onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("efj"); setInlineEditValue(s.efj || ""); }}>
+                    {isInlineEditing && inlineEditField === "efj" ? (
+                      <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                        onBlur={() => { handleFieldUpdate(s, "efj", inlineEditValue); setInlineEditId(null); }}
+                        onKeyDown={e => inlineKeyDown(e, "efj", s.id, () => handleFieldUpdate(s, "efj", inlineEditValue))}
+                        style={{ ...inlineInputStyle, width: 85, fontWeight: 600, color: "#00D4AA" }} onClick={e => e.stopPropagation()} />
+                    ) : (
                     <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11 }}>{s.loadNumber}</span>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: "#00D4AA", fontSize: 11, cursor: "text" }}>{s.loadNumber}</span>
                       {s.playbookLaneCode && <span title={`Playbook: ${s.playbookLaneCode}`} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: 3, background: "rgba(0,212,170,0.15)", flexShrink: 0, cursor: "default" }}><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#00D4AA" strokeWidth="2.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>}
                       {!s.synced && <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#fbbf24", display: "inline-block", animation: "pulse-glow 1s ease infinite" }} />}
                       <DocIndicators docs={docs} />
@@ -585,8 +654,19 @@ export default function DispatchView({
                         </span>
                       )}
                     </div>
+                    )}
                   </td>}
-                  {isColVisible("container") && <td style={{ ...cellStyleFor("container"), fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}>{s.container}</td>}
+                  {isColVisible("container") && <td style={{ ...cellStyleFor("container"), fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#F0F2F5" }}
+                    onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("container"); setInlineEditValue(s.container || ""); }}>
+                    {isInlineEditing && inlineEditField === "container" ? (
+                      <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                        onBlur={() => { handleFieldUpdate(s, "container", inlineEditValue); setInlineEditId(null); }}
+                        onKeyDown={e => inlineKeyDown(e, "container", s.id, () => handleFieldUpdate(s, "container", inlineEditValue))}
+                        style={{ ...inlineInputStyle, width: 110 }} onClick={e => e.stopPropagation()} />
+                    ) : (
+                      <span style={{ cursor: "text" }}>{s.container || "\u2014"}</span>
+                    )}
+                  </td>}
                   {hasFTL && isColVisible("mpStatus") && <td style={cellStyleFor("mpStatus")}>
                     {(isFTL || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} mpLastUpdated={s.mpLastUpdated} /> : <span style={{ color: "#5A6478", fontSize: 11, fontStyle: "italic" }}>No MP</span>}
                   </td>}
@@ -596,7 +676,7 @@ export default function DispatchView({
                         <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
                           onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "/" + v.slice(2); setInlineEditValue(v); }}
                           onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (pu.time ? " " + pu.time : ""); handleFieldUpdate(s, "pickup", v); } setInlineEditId(null); }}
-                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          onKeyDown={e => inlineKeyDown(e, "pickup", s.id, () => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", ""); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (pu.time ? " " + pu.time : ""); handleFieldUpdate(s, "pickup", v); } })}
                           style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                       </div>
                     ) : isInlineEditing && inlineEditField === "pickupTime" ? (
@@ -613,15 +693,35 @@ export default function DispatchView({
                       </span>
                     )}
                   </td>}
-                  {isColVisible("origin") && <td style={{ ...cellStyleFor("origin"), fontSize: 11, color: "#F0F2F5", fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.origin}>{s.origin || "\u2014"}</td>}
-                  {isColVisible("destination") && <td style={{ ...cellStyleFor("destination"), fontSize: 11, color: "#F0F2F5", fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.destination}>{s.destination || "\u2014"}</td>}
+                  {isColVisible("origin") && <td style={{ ...cellStyleFor("origin"), fontSize: 11, color: "#F0F2F5", fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.origin}
+                    onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("origin"); setInlineEditValue(s.origin || ""); }}>
+                    {isInlineEditing && inlineEditField === "origin" ? (
+                      <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                        onBlur={() => { handleFieldUpdate(s, "origin", inlineEditValue); setInlineEditId(null); }}
+                        onKeyDown={e => inlineKeyDown(e, "origin", s.id, () => handleFieldUpdate(s, "origin", inlineEditValue))}
+                        style={{ ...inlineInputStyle, width: 110 }} onClick={e => e.stopPropagation()} />
+                    ) : (
+                      <span style={{ cursor: "text" }}>{s.origin || "\u2014"}</span>
+                    )}
+                  </td>}
+                  {isColVisible("destination") && <td style={{ ...cellStyleFor("destination"), fontSize: 11, color: "#F0F2F5", fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.destination}
+                    onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("destination"); setInlineEditValue(s.destination || ""); }}>
+                    {isInlineEditing && inlineEditField === "destination" ? (
+                      <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                        onBlur={() => { handleFieldUpdate(s, "destination", inlineEditValue); setInlineEditId(null); }}
+                        onKeyDown={e => inlineKeyDown(e, "destination", s.id, () => handleFieldUpdate(s, "destination", inlineEditValue))}
+                        style={{ ...inlineInputStyle, width: 110 }} onClick={e => e.stopPropagation()} />
+                    ) : (
+                      <span style={{ cursor: "text" }}>{s.destination || "\u2014"}</span>
+                    )}
+                  </td>}
                   {isColVisible("delivery") && <td style={cellStyleFor("delivery")} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("delivery"); setInlineEditValue(""); }}>
                     {isInlineEditing && inlineEditField === "delivery" ? (
                       <div onClick={e => e.stopPropagation()}>
                         <input autoFocus placeholder="MMDD" maxLength={5} value={inlineEditValue}
                           onChange={e => { let v = e.target.value.replace(/[^\d]/g, ""); if (v.length > 2) v = v.slice(0,2) + "/" + v.slice(2); setInlineEditValue(v); }}
                           onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", ""); setInlineEditId(null); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (del.time ? " " + del.time : ""); handleFieldUpdate(s, "delivery", v); } setInlineEditId(null); }}
-                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                          onKeyDown={e => inlineKeyDown(e, "delivery", s.id, () => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", ""); return; } const parsed = parseDDMM(inlineEditValue); if (parsed) { const v = parsed + (del.time ? " " + del.time : ""); handleFieldUpdate(s, "delivery", v); } })}
                           style={{ ...inlineInputStyle, width: 52, textAlign: "center", letterSpacing: 1 }} />
                       </div>
                     ) : isInlineEditing && inlineEditField === "deliveryTime" ? (
@@ -656,7 +756,7 @@ export default function DispatchView({
                     {isInlineEditing && inlineEditField === "trailer" ? (
                       <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
                         onBlur={() => { handleDriverFieldUpdate(s, "trailer", inlineEditValue); setInlineEditId(null); }}
-                        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                        onKeyDown={e => inlineKeyDown(e, "trailer", s.id, () => handleDriverFieldUpdate(s, "trailer", inlineEditValue))}
                         style={{ ...inlineInputStyle, width: 70 }} onClick={e => e.stopPropagation()} placeholder="Trailer" />
                     ) : (
                       <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text" }}>{s.trailerNumber || tracking?.trailer || "\u2014"}</span>
@@ -666,7 +766,7 @@ export default function DispatchView({
                     {isInlineEditing && inlineEditField === "driverPhone" ? (
                       <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
                         onBlur={() => { handleDriverFieldUpdate(s, "driverPhone", inlineEditValue); setInlineEditId(null); }}
-                        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                        onKeyDown={e => inlineKeyDown(e, "driverPhone", s.id, () => handleDriverFieldUpdate(s, "driverPhone", inlineEditValue))}
                         style={{ ...inlineInputStyle, width: 100 }} onClick={e => e.stopPropagation()} placeholder="Phone" />
                     ) : (
                       <span style={{ fontSize: 11, color: (s.driverPhone || tracking?.driverPhone) ? "#F0F2F5" : "#3D4557", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>{s.driverPhone || tracking?.driverPhone || "\u2014"}</span>
@@ -676,7 +776,7 @@ export default function DispatchView({
                     {isInlineEditing && inlineEditField === "carrierEmail" ? (
                       <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
                         onBlur={() => { handleDriverFieldUpdate(s, "carrierEmail", inlineEditValue); setInlineEditId(null); }}
-                        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                        onKeyDown={e => inlineKeyDown(e, "carrierEmail", s.id, () => handleDriverFieldUpdate(s, "carrierEmail", inlineEditValue))}
                         style={{ ...inlineInputStyle, width: 140 }} onClick={e => e.stopPropagation()} placeholder="email@carrier.com" />
                     ) : (
                       <span style={{ fontSize: 11, color: s.carrierEmail ? "#8B95A8" : "#3D4557", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.carrierEmail || ""}>{s.carrierEmail || "\u2014"}</span>
@@ -686,7 +786,7 @@ export default function DispatchView({
                     {isInlineEditing && inlineEditField === "customerRate" ? (
                       <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
                         onBlur={() => { handleMetadataUpdate(s, "customerRate", inlineEditValue); setInlineEditId(null); }}
-                        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                        onKeyDown={e => inlineKeyDown(e, "customerRate", s.id, () => handleMetadataUpdate(s, "customerRate", inlineEditValue))}
                         style={{ ...inlineInputStyle, width: 65 }} onClick={e => e.stopPropagation()} placeholder="$0.00" />
                     ) : (
                       <span style={{ fontSize: 11, color: s.customerRate ? "#22C55E" : "#3D4557", fontFamily: "'JetBrains Mono', monospace", cursor: "text", fontWeight: s.customerRate ? 600 : 400 }}>{s.customerRate || "\u2014"}</span>
@@ -699,7 +799,7 @@ export default function DispatchView({
                     {isInlineEditing && inlineEditField === "notes" ? (
                       <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
                         onBlur={() => { handleMetadataUpdate(s, "notes", inlineEditValue); setInlineEditId(null); }}
-                        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
+                        onKeyDown={e => inlineKeyDown(e, "notes", s.id, () => handleMetadataUpdate(s, "notes", inlineEditValue))}
                         style={{ ...inlineInputStyle, width: 140 }} onClick={e => e.stopPropagation()} placeholder="Add note..." />
                     ) : parseTerminalNotes(s.botAlert) ? (
                       <TerminalBadge notes={s.notes} />

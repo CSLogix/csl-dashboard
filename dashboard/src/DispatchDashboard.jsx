@@ -514,11 +514,12 @@ export default function DispatchDashboard() {
   };
 
   // Inline field update — writes to Postgres via POST /api/v2/load/{efj}/update
-  const FIELD_TO_PG = { pickup: "pickup_date", delivery: "delivery_date", eta: "eta", lfd: "lfd", carrier: "carrier", driver: "driver", origin: "origin", destination: "destination", status: "status", vessel: "vessel", bol: "bol", return_date: "return_date", ssl: "vessel", container: "container" };
+  const FIELD_TO_PG = { pickup: "pickup_date", delivery: "delivery_date", eta: "eta", lfd: "lfd", carrier: "carrier", driver: "driver", origin: "origin", destination: "destination", status: "status", vessel: "vessel", bol: "bol", return_date: "return_date", ssl: "vessel", container: "container", efj: "efj", account: "account" };
   const handleFieldUpdate = async (shipment, field, value, { toast } = {}) => {
     const stateKey = field === "pickup" ? "pickupDate" : field === "delivery" ? "deliveryDate" : field;
-    setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, [stateKey]: value, synced: false } : s));
-    setSelectedShipment(prev => prev && prev.id === shipment.id ? { ...prev, [stateKey]: value, synced: false } : prev);
+    const extraState = field === "efj" ? { loadNumber: value.startsWith("EFJ") ? value : `EFJ ${value}` } : {};
+    setShipments(prev => prev.map(s => s.id === shipment.id ? { ...s, [stateKey]: value, ...extraState, synced: false } : s));
+    setSelectedShipment(prev => prev && prev.id === shipment.id ? { ...prev, [stateKey]: value, ...extraState, synced: false } : prev);
     if (shipment.efj) {
       const pgField = FIELD_TO_PG[field] || field;
       try {
