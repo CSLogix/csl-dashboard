@@ -485,6 +485,7 @@ export default function RateIQView() {
   const [loading, setLoading] = useState(true);
   const [laneStats, setLaneStats] = useState([]);
   const [rateLaneSummaries, setRateLaneSummaries] = useState([]); // from lane-rates (actual rate data)
+  const [expandedOrigins, setExpandedOrigins] = useState({}); // { "Chicago": true, ... }
   const [scorecardPerf, setScorecardPerf] = useState([]);
   const [expandedCarrier, setExpandedCarrier] = useState(null);
   const [dirCarriers, setDirCarriers] = useState([]);
@@ -665,6 +666,22 @@ export default function RateIQView() {
       return g;
     }).sort((a, b) => b.count - a.count);
   }, [laneResults]);
+
+  // ── Group rateLaneSummaries by origin city for collapsible browse view ──
+  const originGroups = useMemo(() => {
+    const filtered = rateLaneSummaries.filter(ls => moveTypeFilter === "all" || ls.move_type === moveTypeFilter);
+    const map = {};
+    filtered.forEach(ls => {
+      const origin = ls.port || ls.origin_city || "Unknown";
+      if (!map[origin]) map[origin] = { origin, lanes: [], totalRate: 0, rateCount: 0, totalLoads: 0 };
+      map[origin].lanes.push(ls);
+      map[origin].totalLoads += (ls.load_count || 0);
+      if (ls.avg_rate > 0) { map[origin].totalRate += ls.avg_rate * (ls.load_count || 1); map[origin].rateCount += (ls.load_count || 1); }
+    });
+    return Object.values(map)
+      .map(g => ({ ...g, avgRate: g.rateCount > 0 ? Math.round(g.totalRate / g.rateCount) : 0 }))
+      .sort((a, b) => b.totalLoads - a.totalLoads);
+  }, [rateLaneSummaries, moveTypeFilter]);
 
   // ── API: Manual intake — paste email text, AI extracts rate ──
   // ── API: Carrier update ──
@@ -852,6 +869,8 @@ export default function RateIQView() {
         setMarketRateResult({ ok: true, inserted: data.inserted, skipped: data.skipped });
         setMarketRateText("");
         setMarketRateFile(null);
+        // Auto-refresh benchmark if we have an active lane search
+        if (searchOrigin || searchDest) fetchMarketBenchmark(searchOrigin, searchDest);
       } else {
         setMarketRateResult({ error: data.error || "Parse failed", errors: data.errors });
       }
@@ -859,7 +878,7 @@ export default function RateIQView() {
       setMarketRateResult({ error: e.message });
     }
     setMarketRateProcessing(false);
-  }, [marketRateOrigin, marketRateDest, marketRateMoveType, marketRateText, marketRateFile]);
+  }, [marketRateOrigin, marketRateDest, marketRateMoveType, marketRateText, marketRateFile, searchOrigin, searchDest, fetchMarketBenchmark]);
 
   // ── API: Reclassify lane move type (bulk update all rates in a lane) ──
   const [dragOverType, setDragOverType] = useState(null);
@@ -1316,22 +1335,81 @@ export default function RateIQView() {
           </div>
         )}
 
-        {/* Lane Analysis — from actual rate data */}
-        {rateLaneSummaries.filter(ls => moveTypeFilter === "all" || ls.move_type === moveTypeFilter).length > 0 && groupedLanes.length === 0 && (
+        {/* Lane Analysis — grouped by origin, collapsible */}
+        {originGroups.length > 0 && groupedLanes.length === 0 && (
           <div>
-            {(() => { const filtered = rateLaneSummaries.filter(ls => moveTypeFilter === "all" || ls.move_type === moveTypeFilter); return <>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
               LANE ANALYSIS
-              <span style={{ fontSize: 11, color: "#5A6478", fontWeight: 500 }}>— {filtered.length} lanes with rate data{moveTypeFilter !== "all" ? ` (${moveTypeFilter.toUpperCase()})` : ""}</span>
+              <span style={{ fontSize: 11, color: "#5A6478", fontWeight: 500 }}>— {originGroups.length} origin{originGroups.length !== 1 ? "s" : ""}, {originGroups.reduce((s, g) => s + g.lanes.length, 0)} lanes{moveTypeFilter !== "all" ? ` (${moveTypeFilter.toUpperCase()})` : ""}</span>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
-              {filtered.slice(0, 12).map((ls, li) => (
-                <LaneCard key={li} lane={ls} onClick={() => openLaneDetail(ls.port, ls.destination, 0)}
-                  onReclassify={mt => handleReclassifyLane(ls.port, ls.destination, [], mt)}
-                  onQuickQuote={() => { setSelectedLane({ origin: ls.port, destination: ls.destination }); setView("quote"); }} />
-              ))}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {originGroups.map(group => {
+                const isOpen = !!expandedOrigins[group.origin];
+                return (
+                  <div key={group.origin} className="glass" style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                    {/* Origin header row */}
+                    <div onClick={() => setExpandedOrigins(prev => ({ ...prev, [group.origin]: !prev[group.origin] }))}
+                      style={{ padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", transition: "background 0.15s" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <span style={{ fontSize: 12, color: "#5A6478", transform: isOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s", display: "inline-block" }}>▼</span>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5" }}>{group.origin}</div>
+                          <div style={{ fontSize: 11, color: "#5A6478", marginTop: 1 }}>
+                            {group.lanes.length} lane{group.lanes.length !== 1 ? "s" : ""} · {group.totalLoads} rate{group.totalLoads !== 1 ? "s" : ""} on file
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                        {group.avgRate > 0 && (
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: 18, fontWeight: 800, color: "#34d399", fontFamily: "'JetBrains Mono', monospace" }}>{fmt(group.avgRate)}</div>
+                            <div style={{ fontSize: 10, color: "#5A6478", fontWeight: 600 }}>avg rate</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {/* Expanded lanes */}
+                    {isOpen && (
+                      <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                        {group.lanes
+                          .sort((a, b) => (b.load_count || 0) - (a.load_count || 0))
+                          .map((ls, li) => {
+                            const avgRate = ls.avg_rate || ls.average || 0;
+                            const mtStyle = MOVE_TYPE_STYLES[(ls.move_type || "dray").toLowerCase()] || MOVE_TYPE_STYLES.dray;
+                            return (
+                              <div key={li} onClick={() => openLaneDetail(ls.port, ls.destination, 0)}
+                                style={{ padding: "12px 20px 12px 44px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.03)", transition: "background 0.1s" }}
+                                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
+                                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                  <span style={{ fontSize: 13, color: "#C8D0DC", fontWeight: 600 }}>→ {ls.destination || ls.dest_city || "—"}</span>
+                                  <span style={{ padding: "1px 8px", borderRadius: 10, fontSize: 10, fontWeight: 700, background: mtStyle.bg, color: mtStyle.color, border: `1px solid ${mtStyle.border}` }}>{mtStyle.label}</span>
+                                  <span style={{ fontSize: 11, color: "#5A6478" }}>{ls.load_count || 0} rate{(ls.load_count || 0) !== 1 ? "s" : ""}</span>
+                                  {ls.carrier_count > 0 && <span style={{ fontSize: 11, color: "#5A6478" }}>{ls.carrier_count} carrier{ls.carrier_count !== 1 ? "s" : ""}</span>}
+                                  {ls.miles > 0 && <span style={{ fontSize: 11, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{(ls.miles * ((ls.move_type || "dray") === "dray" ? 2 : 1)).toLocaleString()} mi</span>}
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                  {ls.trend_pct != null && Math.abs(ls.trend_pct) > 2 && (
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: ls.trend_pct > 0 ? "#f87171" : "#34d399" }}>
+                                      {ls.trend_pct > 0 ? "↑" : "↓"} {Math.abs(ls.trend_pct).toFixed(1)}%
+                                    </span>
+                                  )}
+                                  {avgRate > 0 && (
+                                    <span style={{ fontSize: 15, fontWeight: 800, color: "#34d399", fontFamily: "'JetBrains Mono', monospace" }}>{fmt(avgRate)}</span>
+                                  )}
+                                  <span style={{ fontSize: 11, color: "#5A6478" }}>→</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-            </>; })()}
           </div>
         )}
 

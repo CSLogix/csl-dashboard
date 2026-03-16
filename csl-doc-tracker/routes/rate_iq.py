@@ -760,16 +760,17 @@ async def post_manual_intake(request: Request):
     extracted["destination"] = destination
 
     # Save to rate_quotes
+    from datetime import date as _date
     try:
         with db.get_conn() as conn:
             with db.get_cursor(conn) as cur:
                 cur.execute(
                     "INSERT INTO rate_quotes "
                     "(origin, destination, lane, carrier_name, rate_amount, rate_unit, "
-                    " move_type, status, source) "
-                    "VALUES (%s,%s,%s,%s,%s,'flat',%s,'quoted','manual') "
+                    " move_type, quote_date, status, source) "
+                    "VALUES (%s,%s,%s,%s,%s,'flat',%s,%s,'quoted','manual') "
                     "ON CONFLICT DO NOTHING",
-                    (origin, destination, lane, carrier_name, rate_amount, shipment_type)
+                    (origin, destination, lane, carrier_name, rate_amount, shipment_type, _date.today())
                 )
     except Exception as e:
         log.warning("rate_quotes insert failed: %s", e)
@@ -1075,3 +1076,14 @@ async def get_market_rates(
         }
 
     return {"rates": rates, "stats": stats}
+
+
+@router.delete("/api/rate-iq/market-rates/{rate_id}")
+async def delete_market_rate(rate_id: int):
+    """Delete a single market rate entry."""
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute("DELETE FROM market_rates WHERE id = %s", (rate_id,))
+            if cur.rowcount == 0:
+                return JSONResponse(status_code=404, content={"error": "Rate not found"})
+    return {"ok": True}
