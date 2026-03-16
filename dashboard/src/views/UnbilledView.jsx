@@ -70,6 +70,8 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
   };
 
   const ageColor = (days) => days > 60 ? "#ef4444" : days > 30 ? "#f97316" : days > 14 ? "#fbbf24" : "#94a3b8";
+  const fmtCurrency = (v) => v != null ? "$" + Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : null;
+  const totalRevenue = unbilledOrders.reduce((sum, o) => sum + (o.revenue || 0), 0);
 
   const customerGroups = {};
   unbilledOrders.forEach(o => {
@@ -166,6 +168,12 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
               <div style={{ fontSize: 28, fontWeight: 800, color: "#34d399", fontFamily: "'JetBrains Mono', monospace" }}>{unbilledOrders.filter(o => o.shipment_delivered).length}</div>
               <div style={{ fontSize: 11, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>Delivered</div>
             </div>
+            {totalRevenue > 0 && (
+              <div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#3b82f6", fontFamily: "'JetBrains Mono', monospace" }}>{fmtCurrency(totalRevenue)}</div>
+                <div style={{ fontSize: 11, color: "#8B95A8", fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>Revenue</div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -231,7 +239,7 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
-                  {["Order #", "Container", "Customer", "Rep", "Entered", "Age", "Tracking", "Billing"].map(h => (
+                  {["Order #", "Container", "Customer", "Rep", "Entered", "Age", "Revenue", "Tracking", "Billing"].map(h => (
                     <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#8B95A8", letterSpacing: "1.5px", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.04)", background: "#0D1119", position: "sticky", top: 0, zIndex: Z.table }}>{h}</th>
                   ))}
                   <th style={{ padding: "10px 14px", width: 40, background: "#0D1119", position: "sticky", top: 0, zIndex: Z.table, borderBottom: "1px solid rgba(255,255,255,0.04)" }} />
@@ -247,6 +255,9 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
                     <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#8B95A8" }}>{o.entered_date || o.entered}</td>
                     <td style={{ padding: "8px 14px" }}>
                       <span style={{ fontSize: 11, fontWeight: 700, color: ageColor(o.age_days || 0), fontFamily: "'JetBrains Mono', monospace" }}>{o.age_days || 0}d</span>
+                    </td>
+                    <td style={{ padding: "8px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: o.revenue ? "#3b82f6" : "#3D4557" }}>
+                      {fmtCurrency(o.revenue) || "\u2014"}
                     </td>
                     <td style={{ padding: "8px 14px" }}>
                       {o.shipment_delivered ? (
@@ -310,7 +321,12 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
                     <span style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5" }}>{customer}</span>
                     <span style={{ fontSize: 11, color: "#8B95A8", background: "rgba(255,255,255,0.04)", padding: "2px 8px", borderRadius: 10 }}>{orders.length} orders</span>
                   </div>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: ageColor(maxAge), fontFamily: "'JetBrains Mono', monospace" }}>oldest: {maxAge}d</span>
+                  <span style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                    {orders.reduce((s, o) => s + (o.revenue || 0), 0) > 0 && (
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#3b82f6", fontFamily: "'JetBrains Mono', monospace" }}>{fmtCurrency(orders.reduce((s, o) => s + (o.revenue || 0), 0))}</span>
+                    )}
+                    <span style={{ fontSize: 11, fontWeight: 700, color: ageColor(maxAge), fontFamily: "'JetBrains Mono', monospace" }}>oldest: {maxAge}d</span>
+                  </span>
                 </div>
                 {!isCollapsed && (
                   <div style={{ overflow: "auto" }}>
@@ -323,6 +339,9 @@ export default function UnbilledView({ loaded, unbilledOrders, setUnbilledOrders
                             <td style={{ padding: "6px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#8B95A8" }}>{o.entered_date}</td>
                             <td style={{ padding: "6px 14px" }}>
                               <span style={{ fontSize: 11, fontWeight: 700, color: ageColor(o.age_days || 0), fontFamily: "'JetBrains Mono', monospace" }}>{o.age_days || 0}d</span>
+                            </td>
+                            <td style={{ padding: "6px 14px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, color: o.revenue ? "#3b82f6" : "#3D4557" }}>
+                              {fmtCurrency(o.revenue) || "\u2014"}
                             </td>
                             <td style={{ padding: "6px 14px" }}>
                               {(() => {
