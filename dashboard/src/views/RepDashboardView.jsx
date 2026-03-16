@@ -7,7 +7,7 @@ import {
   isFTLShipment, getStatusesForShipment, getStatusColors, resolveStatusLabel,
 } from "../helpers/constants";
 import {
-  isDateToday, isDateTomorrow, isDatePast, getRepShipments, splitDateTime,
+  isDateToday, isDateTomorrow, isDatePast, getRepShipments, splitDateTime, parseDate,
   calcMarginPct, formatDDMM, parseDDMM, parseTerminalNotes,
   COL_FILTER_KEY_MAP, applyColFilters, buildColFilterOptions,
 } from "../helpers/utils";
@@ -15,11 +15,11 @@ import DocIndicators from "../components/DocIndicators";
 import TrackingBadge from "../components/TrackingBadge";
 import TerminalBadge from "../components/TerminalBadge";
 
-export default function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, repProfiles, onProfileUpdate, trackingSummary, docSummary, inboxThreads, onNavigateInbox }) {
+export default function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, repProfiles, onProfileUpdate, trackingSummary, docSummary, inboxThreads, onNavigateInbox, onAddLoad, onRefresh }) {
   const highlightedEfj = useAppStore(s => s.highlightedEfj);
   const [expandedAccount, setExpandedAccount] = useState(null);
-  const [bovietTab, setBovietTab] = useState("Piedra");
-  const [toleadHub, setToleadHub] = useState("ORD");
+  const [bovietTab, setBovietTab] = useState("All");
+  const [toleadHub, setToleadHub] = useState("All");
   const [opsTableFilter, setOpsTableFilter] = useState("all");
   const [masterTableFilter, setMasterTableFilter] = useState("all");
   const [repViewMode, setRepViewMode] = useState("dray"); // "dray" | "ftl"
@@ -31,6 +31,17 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
   const [sortOldestFirst, setSortOldestFirst] = useState(false);
   const [needsReplyOpen, setNeedsReplyOpen] = useState(false);
+  const [puDateFilter, setPuDateFilter] = useState("");
+  const [delDateFilter, setDelDateFilter] = useState("");
+
+  // Auto-default to FTL view for Boviet/Tolead
+  useEffect(() => {
+    if (repName === "Boviet" || repName === "Tolead") {
+      setRepViewMode("ftl");
+    } else {
+      setRepViewMode("dray");
+    }
+  }, [repName]);
 
   // Close column filter dropdown on outside click
   useEffect(() => {
@@ -68,16 +79,17 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
     };
   }) : [];
 
-  // For Boviet: filter by project
-  const bovietShips = isBoviet ? repShipments.filter(s => {
-    if (!s.project) return bovietTab === "Piedra"; // default to Piedra if no project
-    return s.project.toLowerCase().includes(bovietTab.toLowerCase());
-  }) : [];
+  // For Boviet: filter by hub (sheet tab name = Piedra/Hanson/Other)
+  const bovietShips = isBoviet ? (bovietTab === "All" ? repShipments : repShipments.filter(s => {
+    const hub = (s.hub || "").toLowerCase();
+    if (bovietTab === "Other") return !hub || (hub !== "piedra" && hub !== "hanson");
+    return hub === bovietTab.toLowerCase();
+  })) : [];
 
   // For Tolead: filter by hub field from backend
-  const toleadShips = isTolead ? repShipments.filter(s => {
+  const toleadShips = isTolead ? (toleadHub === "All" ? repShipments : repShipments.filter(s => {
     return (s.hub || "ORD") === toleadHub;
-  }) : [];
+  })) : [];
 
   // Which shipments to show in the table
   const displayShipsBase = isMaster
@@ -103,8 +115,23 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
     return true;
   }) : displayShipsBase;
 
+  // Apply date picker filters — compare parsed dates since pickupDate can be "03/15", "3/15 0800", etc.
+  const displayShipsDateFiltered = displayShipsFiltered.filter(s => {
+    if (puDateFilter) {
+      const pu = parseDate(s.pickupDate);
+      const target = new Date(puDateFilter + "T00:00:00");
+      if (!pu || pu.getFullYear() !== target.getFullYear() || pu.getMonth() !== target.getMonth() || pu.getDate() !== target.getDate()) return false;
+    }
+    if (delDateFilter) {
+      const del = parseDate(s.deliveryDate);
+      const target = new Date(delDateFilter + "T00:00:00");
+      if (!del || del.getFullYear() !== target.getFullYear() || del.getMonth() !== target.getMonth() || del.getDate() !== target.getDate()) return false;
+    }
+    return true;
+  });
+
   // Both views show the same data — only the grid layout changes
-  const displayShips = displayShipsFiltered;
+  const displayShips = displayShipsDateFiltered;
 
   // Action summary data (shared across all rep views)
   const isOps = isBoviet || isTolead;
@@ -169,6 +196,20 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
     opsTableFilter === "awaiting_pod" ? awaitingPod :
     [...STATUSES, ...FTL_STATUSES].some(st => st.key === opsTableFilter && st.key !== "all") ? opsBase.filter(s => s.status === opsTableFilter) :
     opsActive;
+  // Apply date picker filters to ops table
+  const opsTableShipsDateFiltered = opsTableShips.filter(s => {
+    if (puDateFilter) {
+      const pu = parseDate(s.pickupDate);
+      const target = new Date(puDateFilter + "T00:00:00");
+      if (!pu || pu.getFullYear() !== target.getFullYear() || pu.getMonth() !== target.getMonth() || pu.getDate() !== target.getDate()) return false;
+    }
+    if (delDateFilter) {
+      const del = parseDate(s.deliveryDate);
+      const target = new Date(delDateFilter + "T00:00:00");
+      if (!del || del.getFullYear() !== target.getFullYear() || del.getMonth() !== target.getMonth() || del.getDate() !== target.getDate()) return false;
+    }
+    return true;
+  });
 
   // Inline edit styles (reuse dispatch pattern)
   const inlineInputStyle = { background: "rgba(0,212,170,0.1)", border: "1px solid #00D4AA44", borderRadius: 4, color: "#F0F2F5", padding: "2px 5px", fontSize: 11, width: 90, outline: "none", fontFamily: "'JetBrains Mono', monospace" };
@@ -187,7 +228,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
       return da.localeCompare(db);
     });
   };
-  const opsDataFiltered = useMemo(() => _applyOldestSort(applyColFilters(opsTableShips, repColumnFilters, trackingSummary)), [opsTableShips, repColumnFilters, trackingSummary, sortOldestFirst]);
+  const opsDataFiltered = useMemo(() => _applyOldestSort(applyColFilters(opsTableShipsDateFiltered, repColumnFilters, trackingSummary)), [opsTableShipsDateFiltered, repColumnFilters, trackingSummary, sortOldestFirst]);
   const displayDataFiltered = useMemo(() => _applyOldestSort(applyColFilters(displayShips, repColumnFilters, trackingSummary)), [displayShips, repColumnFilters, trackingSummary, sortOldestFirst]);
 
   // Render a filterable <th> with column dropdown
@@ -517,11 +558,25 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#8B95A8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
             </div>
           </div>
-          <div>
+          <div style={{ flex: 1 }}>
             <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>{repName}</h2>
             <div style={{ fontSize: 11, color: "#8B95A8" }}>
               {isMaster ? `Track/Tracing Master \u2014 ${(REP_ACCOUNTS[repName] || []).length} accounts` : isBoviet ? "Boviet Solar Projects" : "Tolead Operations"}
             </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto" }}>
+            {onRefresh && (
+              <button onClick={onRefresh} title="Refresh data"
+                style={{ background: "none", border: "1px solid rgba(255,255,255,0.06)", color: "#8B95A8", padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+              </button>
+            )}
+            {onAddLoad && (
+              <button onClick={onAddLoad} className="btn-primary"
+                style={{ border: "none", borderRadius: 10, padding: "9px 20px", fontSize: 12, fontWeight: 700, cursor: "pointer", color: "#fff", display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+                <span style={{ fontSize: 16, lineHeight: 1 }}>+</span> New Load
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -636,6 +691,20 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M7 12h10M11 18h2"/></svg>
           {sortOldestFirst ? "Oldest First" : "Sort"}
         </button>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginLeft: 8 }}>
+          <label style={{ fontSize: 11, color: "#5A6478", fontWeight: 600 }}>PU:</label>
+          <input type="date" value={puDateFilter} onChange={e => setPuDateFilter(e.target.value)}
+            style={{ padding: "5px 8px", background: puDateFilter ? "rgba(245,158,11,0.08)" : "rgba(255,255,255,0.03)", border: `1px solid ${puDateFilter ? "rgba(245,158,11,0.25)" : "rgba(255,255,255,0.06)"}`, borderRadius: 6, color: puDateFilter ? "#F59E0B" : "#8B95A8", fontSize: 11, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", cursor: "pointer", colorScheme: "dark" }} />
+          <label style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, marginLeft: 4 }}>DEL:</label>
+          <input type="date" value={delDateFilter} onChange={e => setDelDateFilter(e.target.value)}
+            style={{ padding: "5px 8px", background: delDateFilter ? "rgba(34,197,94,0.08)" : "rgba(255,255,255,0.03)", border: `1px solid ${delDateFilter ? "rgba(34,197,94,0.25)" : "rgba(255,255,255,0.06)"}`, borderRadius: 6, color: delDateFilter ? "#22C55E" : "#8B95A8", fontSize: 11, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", cursor: "pointer", colorScheme: "dark" }} />
+          {(puDateFilter || delDateFilter) && (
+            <button onClick={() => { setPuDateFilter(""); setDelDateFilter(""); }}
+              style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid rgba(239,68,68,0.15)", background: "rgba(239,68,68,0.08)", color: "#f87171", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              Clear dates
+            </button>
+          )}
+        </div>
         <span style={{ marginLeft: "auto", fontSize: 11, color: "#8B95A8", fontWeight: 600 }}>
           {(isOps ? opsDataFiltered : displayDataFiltered).length} {(isOps ? opsDataFiltered : displayDataFiltered).length === 1 ? "load" : "loads"}
         </span>
@@ -644,7 +713,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
       {/* Boviet project tabs */}
       {isBoviet && (
         <div style={{ display: "flex", gap: 2, marginBottom: 14, background: "rgba(0,0,0,0.2)", borderRadius: 8, padding: 3, width: "fit-content" }}>
-          {["Piedra", "Hanson"].map(t => (
+          {["All", "Piedra", "Hanson", "Other"].map(t => (
             <button key={t} onClick={() => setBovietTab(t)}
               style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
                 background: bovietTab === t ? "rgba(139,92,246,0.15)" : "transparent",
@@ -657,13 +726,14 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
 
       {/* Boviet Project Cards — summary stats per project */}
       {isBoviet && (() => {
-        const projects = ["Piedra", "Hanson"];
+        const projects = ["Piedra", "Hanson", "Other"];
         return (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 10, marginBottom: 14 }}>
             {projects.map(proj => {
               const projShips = repShipments.filter(s => {
-                if (!s.project) return proj === "Piedra";
-                return s.project.toLowerCase().includes(proj.toLowerCase());
+                const hub = (s.hub || "").toLowerCase();
+                if (proj === "Other") return !hub || (hub !== "piedra" && hub !== "hanson");
+                return hub === proj.toLowerCase();
               });
               const active = projShips.filter(s => !["delivered", "empty_return", "billed_closed", "cancelled"].includes(s.status)).length;
               const delivered = projShips.filter(s => s.status === "delivered" || s.status === "empty_return").length;
@@ -703,8 +773,8 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
       {/* Tolead hub tabs */}
       {isTolead && (
         <div style={{ display: "flex", gap: 2, marginBottom: 14, background: "rgba(0,0,0,0.2)", borderRadius: 8, padding: 3, width: "fit-content" }}>
-          {["ORD", "JFK", "LAX", "DFW"].map(h => {
-            const hubCount = repShipments.filter(s => (s.hub || "ORD") === h).length;
+          {["All", "ORD", "JFK", "LAX", "DFW"].map(h => {
+            const hubCount = h === "All" ? repShipments.length : repShipments.filter(s => (s.hub || "ORD") === h).length;
             return (
               <button key={h} onClick={() => setToleadHub(h)}
                 style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
@@ -746,14 +816,14 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
       )}
 
       {/* ── FTL View: full dispatch table ── */}
-      {repViewMode === "ftl" && renderFTLTable(isOps ? opsTableShips : displayShips)}
+      {repViewMode === "ftl" && renderFTLTable(isOps ? opsTableShipsDateFiltered : displayShips)}
 
       {/* ── Dray View: Operations Dashboard — Boviet/Tolead ── */}
       {repViewMode === "dray" && isOps && (<>
         <div className="dash-panel" style={{ overflow: "hidden" }}>
           <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span className="dash-panel-title">
-              {isBoviet ? bovietTab : `${toleadHub} Hub`} {"\u2014"} {opsDataFiltered.length} {opsDataFiltered.length === 1 ? "Load" : "Loads"}
+              {isBoviet ? (bovietTab === "All" ? "All Projects" : bovietTab) : (toleadHub === "All" ? "All Hubs" : `${toleadHub} Hub`)} {"\u2014"} {opsDataFiltered.length} {opsDataFiltered.length === 1 ? "Load" : "Loads"}
             </span>
             {opsTableFilter !== "all" && (
               <button onClick={() => setOpsTableFilter("all")}
@@ -873,7 +943,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 })}
               </tbody>
             </table>
-            {opsTableShips.length === 0 && (
+            {opsTableShipsDateFiltered.length === 0 && (
               <div style={{ textAlign: "center", padding: 40, color: "#3D4557" }}>
                 <div style={{ fontSize: 11, fontWeight: 600 }}>No loads found</div>
               </div>

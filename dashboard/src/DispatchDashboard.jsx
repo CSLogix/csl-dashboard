@@ -631,7 +631,7 @@ export default function DispatchDashboard() {
   };
 
   const handleAddShipment = async (data) => {
-    const { pendingDocs, ...loadData } = data;
+    const { pendingDocs, _bulkMode, ...loadData } = data;
     try {
       const res = await apiFetch(`${API_BASE}/api/v2/load/add`, {
         method: "POST",
@@ -664,10 +664,13 @@ export default function DispatchDashboard() {
         }
       }
 
-      setShowAddForm(false);
-      fetchData();
+      if (!_bulkMode) {
+        setShowAddForm(false);
+        fetchData();
+      }
     } catch (err) {
       addSheetLog(`Add error: ${err.message}`);
+      if (_bulkMode) throw err; // re-throw so bulk handler can track errors
     }
   };
 
@@ -935,6 +938,8 @@ export default function DispatchDashboard() {
               repProfiles={repProfiles} onProfileUpdate={fetchProfiles}
               trackingSummary={trackingSummary} docSummary={docSummary}
               inboxThreads={inboxThreads}
+              onAddLoad={() => setShowAddForm(true)}
+              onRefresh={fetchData}
               onNavigateInbox={(tab, search, rep) => { useAppStore.getState().setInboxInitialTab(tab || null); useAppStore.getState().setInboxInitialSearch(search || null); useAppStore.getState().setInboxInitialRep(rep || null); setActiveView("inbox"); }} />
           )}
           {activeView === "dispatch" && (
@@ -997,9 +1002,9 @@ export default function DispatchDashboard() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal, animation: "fade-in 0.2s ease" }}
           onClick={() => setShowAddForm(false)}>
           <div role="dialog" aria-modal="true" aria-labelledby="add-form-title"
-            onClick={e => e.stopPropagation()} className="glass-strong" style={{ borderRadius: 20, padding: 28, width: 460, maxHeight: "85vh", overflow: "auto", animation: "slide-up 0.3s ease", border: "1px solid rgba(255,255,255,0.08)" }}>
+            onClick={e => e.stopPropagation()} className="glass-strong" style={{ borderRadius: 20, padding: 28, width: "min(90vw, 680px)", maxHeight: "85vh", overflow: "auto", animation: "slide-up 0.3s ease", border: "1px solid rgba(255,255,255,0.08)" }}>
             <div id="add-form-title" style={{ fontSize: 18, fontWeight: 800, color: "#F0F2F5", marginBottom: 4 }}>New Load</div>
-            <div style={{ fontSize: 11, color: "#8B95A8", marginBottom: 20 }}>Create a new shipment</div>
+            <div style={{ fontSize: 11, color: "#8B95A8", marginBottom: 20 }}>Create a new shipment — or use Bulk Create for multiple loads</div>
             <AddForm onSubmit={handleAddShipment} onCancel={() => setShowAddForm(false)} accounts={accounts} />
           </div>
         </div>

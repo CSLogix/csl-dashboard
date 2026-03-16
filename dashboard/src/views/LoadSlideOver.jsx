@@ -61,6 +61,9 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
   // Overflow menu state
   const [showOverflow, setShowOverflow] = useState(false);
   const overflowRef = useRef(null);
+  // Delete confirmation state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Save feedback toast
   const [saveToast, setSaveToast] = useState(null); // { message, type: "success"|"error" }
@@ -203,6 +206,22 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
       }
     } catch (e) { /* ignore */ }
     setNoteSubmitting(false);
+  };
+
+  const handleDeleteLoad = async () => {
+    setDeleting(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/v2/load/${selectedShipment.efj}`, { method: "DELETE" });
+      if (!res.ok) { const txt = await res.text(); throw new Error(txt); }
+      addSheetLog(`Deleted load | ${selectedShipment.efj}`);
+      // Remove from local state
+      setShipments(prev => prev.filter(s => s.efj !== selectedShipment.efj));
+      setSelectedShipment(null);
+      setShowDeleteConfirm(false);
+    } catch (err) {
+      showSaveToast(`Delete failed: ${err.message}`, "error");
+    }
+    setDeleting(false);
   };
 
   const handleShareLink = async () => {
@@ -453,6 +472,9 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                       onClick: () => { handleShareLink(); }, enabled: !linkGenerating },
                     { icon: "\u270F\uFE0F", label: editingMpUrl ? "Cancel Edit URL" : "Edit MP URL", color: "#8B5CF6",
                       onClick: () => { if (editingMpUrl) { setEditingMpUrl(false); } else { setMpUrlVal(driverInfo.macropointUrl || selectedShipment.macropointUrl || ""); setEditingMpUrl(true); } setShowOverflow(false); },
+                      enabled: true },
+                    { icon: "\u{1F5D1}\uFE0F", label: "Delete Load", color: "#EF4444",
+                      onClick: () => { setShowDeleteConfirm(true); setShowOverflow(false); },
                       enabled: true },
                   ].map((item, i) => (
                     <button key={i} onClick={item.enabled ? item.onClick : undefined}
@@ -1212,6 +1234,32 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
           <span style={{ fontSize: 16 }}>{saveToast.type === "error" ? "\u26A0" : "\u2713"}</span>
           {saveToast.message}
         </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {showDeleteConfirm && (
+        <>
+          <div aria-hidden="true" onClick={() => setShowDeleteConfirm(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: Z.panel + 10 }} />
+          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", zIndex: Z.panel + 11, background: "#1A2236", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 12, padding: "24px 28px", width: 360, boxShadow: "0 12px 40px rgba(0,0,0,0.5)" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5", marginBottom: 8 }}>Delete Load?</div>
+            <div style={{ fontSize: 12, color: "#8B95A8", lineHeight: 1.5, marginBottom: 6 }}>
+              Are you sure you want to delete <span style={{ color: "#F0F2F5", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{selectedShipment.efj}</span> from the dashboard?
+            </div>
+            <div style={{ fontSize: 11, color: "#EF4444", marginBottom: 18, padding: "6px 10px", background: "rgba(239,68,68,0.08)", borderRadius: 6, border: "1px solid rgba(239,68,68,0.15)" }}>
+              This will permanently remove the load, all documents, emails, and rate quotes associated with it.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setShowDeleteConfirm(false)} disabled={deleting}
+                style={{ flex: 1, padding: "10px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, color: "#8B95A8", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                Cancel
+              </button>
+              <button onClick={handleDeleteLoad} disabled={deleting}
+                style={{ flex: 1, padding: "10px", background: deleting ? "#7f1d1d" : "#DC2626", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 700, cursor: deleting ? "wait" : "pointer", opacity: deleting ? 0.7 : 1, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                {deleting ? "Deleting..." : "Yes, Delete Load"}
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </>
   );
