@@ -26,6 +26,16 @@ router = APIRouter()
 # Shared accounts that still need Google Sheet writes
 _SHARED_SHEET_ACCOUNTS = {"Tolead", "Boviet"}
 
+# Dashboard-only statuses — never write these to Google Sheet (not in Col M dropdown)
+_DASHBOARD_ONLY_STATUSES = {"need_pod", "pod_received", "picked_up"}
+
+# Post-delivery statuses — load is "done" for active-count / at-risk purposes
+_POST_DELIVERY_STATUSES = (
+    "'delivered','completed','empty returned','empty_return','returned_to_port',"
+    "'need_pod','pod_received','ready_to_close','billed_closed','billed and closed','missing_invoice',"
+    "'ppwk_needed','waiting_confirmation','waiting_cx_approval','cx_approved','driver_paid'"
+)
+
 
 def _shipment_row_to_dict(row: dict) -> dict:
     """Convert a Postgres shipments row to the same JSON shape as sheet_cache."""
@@ -185,28 +195,28 @@ async def api_v2_stats(request: Request):
 
     with db.get_cursor() as cur:
         # Active count (not archived, not delivered/completed)
-        cur.execute("""
+        cur.execute(f"""
             SELECT COUNT(*) as cnt FROM shipments
             WHERE archived = FALSE
-              AND LOWER(status) NOT IN ('delivered', 'completed', 'empty returned', 'billed_closed')
+              AND LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
         """)
         active = cur.fetchone()["cnt"]
 
         # At risk (LFD is today or tomorrow)
-        cur.execute("""
+        cur.execute(f"""
             SELECT COUNT(*) as cnt FROM shipments
             WHERE archived = FALSE
-              AND LOWER(status) NOT IN ('delivered', 'completed', 'empty returned', 'billed_closed')
+              AND LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
               AND lfd != '' AND lfd IS NOT NULL
               AND LEFT(lfd, 10) <= %s
         """, (tomorrow,))
         at_risk = cur.fetchone()["cnt"]
 
         # Completed today
-        cur.execute("""
+        cur.execute(f"""
             SELECT COUNT(*) as cnt FROM shipments
             WHERE archived = FALSE
-              AND LOWER(status) IN ('delivered', 'completed')
+              AND LOWER(status) IN ({_POST_DELIVERY_STATUSES})
               AND delivery_date LIKE %s
         """, (f"%{today}%",))
         completed_today = cur.fetchone()["cnt"]
@@ -235,14 +245,14 @@ async def api_v2_accounts(request: Request):
     from datetime import datetime as _dt, timedelta as _td
     """Account list with counts from Postgres."""
     with db.get_cursor() as cur:
-        cur.execute("""
+        cur.execute(f"""
         SELECT
             account,
-            COUNT(*) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as active,
-            COUNT(*) FILTER (WHERE LOWER(status) IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as done,
+            COUNT(*) FILTER (WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES}) AND archived = FALSE) as active,
+            COUNT(*) FILTER (WHERE LOWER(status) IN ({_POST_DELIVERY_STATUSES}) AND archived = FALSE) as done,
             COUNT(*) FILTER (
                 WHERE archived = FALSE
-                  AND LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed')
+                  AND LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
                   AND lfd != '' AND lfd IS NOT NULL
                   AND LEFT(lfd, 10) <= %s
             ) as alerts
@@ -261,13 +271,13 @@ async def api_v2_accounts(request: Request):
 async def api_v2_team(request: Request):
     """Team member summaries from Postgres."""
     with db.get_cursor() as cur:
-        cur.execute("""
+        cur.execute(f"""
         SELECT rep,
-               COUNT(*) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as loads,
-               array_agg(DISTINCT account) FILTER (WHERE LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed') AND archived = FALSE) as accounts,
+               COUNT(*) FILTER (WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES}) AND archived = FALSE) as loads,
+               array_agg(DISTINCT account) FILTER (WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES}) AND archived = FALSE) as accounts,
                COUNT(*) FILTER (
                    WHERE archived = FALSE
-                     AND LOWER(status) NOT IN ('delivered','completed','empty returned','billed_closed')
+                     AND LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
                      AND lfd != '' AND lfd IS NOT NULL
                      AND LEFT(lfd, 10) <= to_char(NOW() + interval '1 day', 'YYYY-MM-DD')
                ) as at_risk
@@ -305,15 +315,50 @@ async def api_v2_update_status(efj: str, request: Request, background_tasks: Bac
 
     account = row["account"]
 
+    _skip_sheet = new_status.strip().lower().replace(" ", "_") in _DASHBOARD_ONLY_STATUSES
+
     # Write back to Google Sheet for shared accounts
-    if account in _SHARED_SHEET_ACCOUNTS:
+    if not _skip_sheet and account in _SHARED_SHEET_ACCOUNTS:
         try:
             _v2_write_status_to_sheet(efj, new_status, account, row.get("hub"))
         except Exception as e:
             log.warning("Sheet write-back failed for %s: %s (Postgres updated OK)", efj, e)
-    elif account:
+    elif not _skip_sheet and account:
         # Write back to Master Sheet for non-shared accounts (prevents sync overwrite)
         background_tasks.add_task(_write_fields_to_master_sheet, efj, account, {"status": new_status})
+
+    # Auto-advance dray loads: delivered → need_pod (skip for FTL — FTL uses its own flow)
+    normalized = new_status.strip().lower().replace(" ", "_")
+    if normalized == "delivered":
+        try:
+            with db.get_cursor() as cur:
+                cur.execute("SELECT move_type, account FROM shipments WHERE efj = %s", (efj,))
+                _ship = cur.fetchone()
+            if _ship:
+                _mt = (_ship["move_type"] or "").lower()
+                _acct = (_ship["account"] or "")
+                # Dray loads (not FTL, not Boviet/Tolead shared accounts which use FTL flow)
+                _is_dray = "dray" in _mt or "transload" in _mt
+                _is_ftl_account = _acct in ("Boviet", "Tolead")
+                if _is_dray and not _is_ftl_account:
+                    # Check if POD already uploaded — if so, skip straight to pod_received
+                    with db.get_cursor() as cur:
+                        cur.execute(
+                            "SELECT 1 FROM load_documents WHERE efj = %s AND doc_type = 'pod' LIMIT 1",
+                            (efj,),
+                        )
+                        has_pod = cur.fetchone()
+                    next_status = "pod_received" if has_pod else "need_pod"
+                    with db.get_conn() as conn:
+                        with db.get_cursor(conn) as cur:
+                            cur.execute(
+                                "UPDATE shipments SET status = %s, updated_at = NOW() WHERE efj = %s",
+                                (next_status, efj),
+                            )
+                    log.info("Auto-advanced %s: delivered → %s", efj, next_status)
+                    new_status = next_status  # update for sheet write-back + response
+        except Exception as e:
+            log.warning("Auto-advance check failed for %s: %s", efj, e)
 
     # Billing gate: if closing as billed, check for open unbilled orders
     if new_status.strip().lower() in ("billed_closed", "billed and closed"):
@@ -425,6 +470,10 @@ async def api_v2_update_field(efj: str, request: Request, background_tasks: Back
     account = row["account"] or ""
     if account and account not in _SHARED_SHEET_ACCOUNTS:
         sheet_fields = {k: v for k, v in body.items() if k in ALLOWED and k != "archived"}
+        # Strip status if it's a dashboard-only value
+        _status_val = sheet_fields.get("status") or ""
+        if str(_status_val).strip().lower().replace(" ", "_") in _DASHBOARD_ONLY_STATUSES:
+            sheet_fields.pop("status", None)
         if sheet_fields:
             background_tasks.add_task(_write_fields_to_master_sheet, efj, account, sheet_fields)
 

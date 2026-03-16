@@ -46,6 +46,16 @@ export default function DispatchView({
   const [inlineEditField, setInlineEditField] = useState(null);
   const [inlineEditValue, setInlineEditValue] = useState("");
 
+  // Close inline status dropdown on click outside
+  useEffect(() => {
+    if (!inlineEditId || inlineEditField !== "status") return;
+    const handler = (e) => {
+      if (!e.target.closest('.inline-status-dd')) setInlineEditId(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [inlineEditId, inlineEditField]);
+
   // Spreadsheet-like Tab/Enter navigation — ordered list of editable columns
   const EDITABLE_COLS = useMemo(() => ["efj", "container", "pickup", "origin", "destination", "delivery", "truckType", "trailer", "driverPhone", "carrierEmail", "customerRate", "notes"], []);
   const sortedRef = useRef([]);
@@ -576,10 +586,15 @@ export default function DispatchView({
               return (
                 <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
                   style={{ cursor: "default", background: highlightedEfj === s.efj ? undefined : rowBg }}>
-                  <td style={{ padding: "5px 4px", width: 24, textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                  <td style={{ padding: "5px 4px", width: 30, textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                     <button onClick={() => handleLoadClick(s)} title="Open details"
-                      style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
-                      onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
+                      style={{ background: "rgba(0,184,212,0.06)", border: "1px solid rgba(0,184,212,0.12)", color: "#00b8d4", cursor: "pointer", padding: "3px 5px", borderRadius: 6, lineHeight: 1, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,184,212,0.18)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.4)"; e.currentTarget.style.transform = "scale(1.1)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,184,212,0.06)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.12)"; e.currentTarget.style.transform = "scale(1)"; }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M14 9l3 3-3 3" />
+                      </svg>
+                    </button>
                   </td>
                   {isColVisible("account") && <td style={{ ...cellStyleFor("account"), color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}
                     onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("account"); setInlineEditValue(s.account || ""); }}>
@@ -595,7 +610,7 @@ export default function DispatchView({
                   {isColVisible("status") && <td style={{ ...cellStyleFor("status"), position: "relative" }}
                     onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                     {isInlineEditing && inlineEditField === "status" ? (
-                      <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
+                      <div className="inline-status-dd" style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
                         {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                           const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
                           return (

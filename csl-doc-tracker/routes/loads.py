@@ -386,7 +386,32 @@ async def upload_load_document(efj: str, file: UploadFile = File(...), doc_type:
                 (efj, doc_type, safe_name, file.filename, len(contents), file_hash)
             )
             doc_id = cur.fetchone()["id"]
-    return JSONResponse({"ok": True, "id": doc_id, "original_name": file.filename})
+
+    # Auto-advance status when POD is uploaded and load is awaiting POD
+    auto_status = None
+    if doc_type == "pod":
+        try:
+            with db.get_cursor() as cur:
+                cur.execute("SELECT status, move_type FROM shipments WHERE efj = %s", (efj,))
+                ship = cur.fetchone()
+            if ship:
+                cur_status = (ship["status"] or "").lower().replace(" ", "_")
+                if cur_status in ("delivered", "need_pod"):
+                    with db.get_conn() as conn:
+                        with db.get_cursor(conn) as cur:
+                            cur.execute(
+                                "UPDATE shipments SET status = 'pod_received', updated_at = NOW() WHERE efj = %s",
+                                (efj,),
+                            )
+                    auto_status = "pod_received"
+                    log.info("Auto-advanced %s → pod_received on POD upload", efj)
+        except Exception as e:
+            log.warning("POD auto-status failed for %s: %s", efj, e)
+
+    resp = {"ok": True, "id": doc_id, "original_name": file.filename}
+    if auto_status:
+        resp["auto_status"] = auto_status
+    return JSONResponse(resp)
 
 
 @router.delete("/api/load/{efj}/documents/{doc_id}")

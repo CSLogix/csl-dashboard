@@ -5,6 +5,7 @@ import {
   STATUSES, FTL_STATUSES, STATUS_COLORS, FTL_STATUS_COLORS, BILLING_STATUSES,
   BILLING_STATUS_COLORS, REP_ACCOUNTS, REP_COLORS, MASTER_REPS, TRUCK_TYPES, Z,
   isFTLShipment, getStatusesForShipment, getStatusColors, resolveStatusLabel,
+  isPostDelivery,
 } from "../helpers/constants";
 import {
   isDateToday, isDateTomorrow, isDatePast, getRepShipments, splitDateTime, parseDate,
@@ -51,6 +52,16 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
     return () => document.removeEventListener('mousedown', handler);
   }, [repOpenFilterCol]);
 
+  // Close inline status dropdown on outside click
+  useEffect(() => {
+    if (!inlineEditId || inlineEditField !== "status") return;
+    const handler = (e) => {
+      if (!e.target.closest('.inline-status-dd')) setInlineEditId(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [inlineEditId, inlineEditField]);
+
   const isMaster = MASTER_REPS.includes(repName);
   const isBoviet = repName === "Boviet";
   const isTolead = repName === "Tolead";
@@ -59,9 +70,9 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   const repShipments = getRepShipments(shipments, repName);
   const incoming = repShipments.filter(s => ["at_port", "on_vessel", "pending"].includes(s.status)).length;
   const activeCount = repShipments.filter(s => ["in_transit", "out_for_delivery"].includes(s.status)).length;
-  const onSchedule = repShipments.filter(s => !["delivered", "empty_return"].includes(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))).length;
-  const behindSchedule = repShipments.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !["delivered", "empty_return"].includes(s.status)).length;
-  const delivered = repShipments.filter(s => s.status === "delivered").length;
+  const onSchedule = repShipments.filter(s => !isPostDelivery(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))).length;
+  const behindSchedule = repShipments.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !isPostDelivery(s.status)).length;
+  const delivered = repShipments.filter(s => isPostDelivery(s.status)).length;
   const invoiced = repShipments.filter(s => s._invoiced).length;
 
   // For master reps: group by account
@@ -72,9 +83,9 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
       ships: acctShips,
       incoming: acctShips.filter(s => ["at_port", "on_vessel", "pending"].includes(s.status)).length,
       active: acctShips.filter(s => ["in_transit", "out_for_delivery"].includes(s.status)).length,
-      onSchedule: acctShips.filter(s => !["delivered", "empty_return"].includes(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))).length,
-      behind: acctShips.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !["delivered", "empty_return"].includes(s.status)).length,
-      delivered: acctShips.filter(s => s.status === "delivered").length,
+      onSchedule: acctShips.filter(s => !isPostDelivery(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))).length,
+      behind: acctShips.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !isPostDelivery(s.status)).length,
+      delivered: acctShips.filter(s => isPostDelivery(s.status)).length,
       invoiced: acctShips.filter(s => s._invoiced).length,
     };
   }) : [];
@@ -99,16 +110,16 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   // Apply master rep table filter
   const displayShipsFiltered = isMaster && masterTableFilter !== "all" ? displayShipsBase.filter(s => {
     if (masterTableFilter === "incoming") return ["at_port", "on_vessel", "pending"].includes(s.status);
-    if (masterTableFilter === "active") return !["delivered", "empty_return"].includes(s.status);
-    if (masterTableFilter === "on_schedule") return !["delivered", "empty_return"].includes(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)));
-    if (masterTableFilter === "behind") return (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !["delivered", "empty_return"].includes(s.status);
-    if (masterTableFilter === "delivered") return s.status === "delivered";
+    if (masterTableFilter === "active") return !isPostDelivery(s.status);
+    if (masterTableFilter === "on_schedule") return !isPostDelivery(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)));
+    if (masterTableFilter === "behind") return (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !isPostDelivery(s.status);
+    if (masterTableFilter === "delivered") return isPostDelivery(s.status);
     if (masterTableFilter === "invoiced") return s._invoiced;
-    if (masterTableFilter === "pu_today") return isDateToday(s.pickupDate) && s.status !== "delivered";
-    if (masterTableFilter === "pu_tomorrow") return isDateTomorrow(s.pickupDate) && s.status !== "delivered";
+    if (masterTableFilter === "pu_today") return isDateToday(s.pickupDate) && !isPostDelivery(s.status);
+    if (masterTableFilter === "pu_tomorrow") return isDateTomorrow(s.pickupDate) && !isPostDelivery(s.status);
     if (masterTableFilter === "del_today") return isDateToday(s.deliveryDate);
-    if (masterTableFilter === "del_tomorrow") return isDateTomorrow(s.deliveryDate) && s.status !== "delivered";
-    if (masterTableFilter === "needs_driver") return s.rawStatus?.toLowerCase() === "unassigned" && !["delivered", "empty_return"].includes(s.status);
+    if (masterTableFilter === "del_tomorrow") return isDateTomorrow(s.deliveryDate) && !isPostDelivery(s.status);
+    if (masterTableFilter === "needs_driver") return s.rawStatus?.toLowerCase() === "unassigned" && !isPostDelivery(s.status);
     if (masterTableFilter === "awaiting_pod") { if (s.status !== "delivered") return false; const eb = (s.efj || "").replace(/^EFJ\s*/i, ""); const ebNS = (s.efj || "").replace(/\s/g, ""); return !(docSummary?.[eb] || docSummary?.[s.efj] || docSummary?.[ebNS])?.pod; }
     // Status key filter (from dropdown)
     if ([...STATUSES, ...FTL_STATUSES].some(st => st.key === masterTableFilter && st.key !== "all")) return s.status === masterTableFilter;
@@ -136,14 +147,14 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   // Action summary data (shared across all rep views)
   const isOps = isBoviet || isTolead;
   const actionBase = displayShipsBase; // unfiltered for pill counts
-  const actionPuToday = actionBase.filter(s => isDateToday(s.pickupDate) && s.status !== "delivered");
-  const actionPuTmrw = actionBase.filter(s => isDateTomorrow(s.pickupDate) && s.status !== "delivered");
+  const actionPuToday = actionBase.filter(s => isDateToday(s.pickupDate) && !isPostDelivery(s.status));
+  const actionPuTmrw = actionBase.filter(s => isDateTomorrow(s.pickupDate) && !isPostDelivery(s.status));
   const actionDelToday = actionBase.filter(s => isDateToday(s.deliveryDate));
-  const actionDelTmrw = actionBase.filter(s => isDateTomorrow(s.deliveryDate) && s.status !== "delivered");
-  const actionNoDriver = actionBase.filter(s => s.rawStatus?.toLowerCase() === "unassigned" && !["delivered", "empty_return"].includes(s.status));
-  const actionBehind = actionBase.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !["delivered", "empty_return"].includes(s.status));
-  const actionNoPod = actionBase.filter(s => { if (s.status !== "delivered") return false; const eb = (s.efj || "").replace(/^EFJ\s*/i, ""); const ebNS = (s.efj || "").replace(/\s/g, ""); return !(docSummary?.[eb] || docSummary?.[s.efj] || docSummary?.[ebNS])?.pod; });
-  const actionActive = actionBase.filter(s => !["delivered", "empty_return"].includes(s.status));
+  const actionDelTmrw = actionBase.filter(s => isDateTomorrow(s.deliveryDate) && !isPostDelivery(s.status));
+  const actionNoDriver = actionBase.filter(s => s.rawStatus?.toLowerCase() === "unassigned" && !isPostDelivery(s.status));
+  const actionBehind = actionBase.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !isPostDelivery(s.status));
+  const actionNoPod = actionBase.filter(s => { if (!["delivered", "need_pod"].includes(s.status)) return false; const eb = (s.efj || "").replace(/^EFJ\s*/i, ""); const ebNS = (s.efj || "").replace(/\s/g, ""); return !(docSummary?.[eb] || docSummary?.[s.efj] || docSummary?.[ebNS])?.pod; });
+  const actionActive = actionBase.filter(s => !isPostDelivery(s.status));
 
   // Inbox-derived pill data for this rep
   const repAccts = (REP_ACCOUNTS[repName] || []).map(a => a.toLowerCase());
@@ -170,23 +181,23 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   const inboxRateResponses = repInboxThreads.filter(t => t.email_type === "carrier_rate_response").length;
 
   const opsBase = displayShipsFiltered;
-  const opsPickupsToday = opsBase.filter(s => isDateToday(s.pickupDate) && s.status !== "delivered");
-  const opsPickupsTomorrow = opsBase.filter(s => isDateTomorrow(s.pickupDate) && s.status !== "delivered");
+  const opsPickupsToday = opsBase.filter(s => isDateToday(s.pickupDate) && !isPostDelivery(s.status));
+  const opsPickupsTomorrow = opsBase.filter(s => isDateTomorrow(s.pickupDate) && !isPostDelivery(s.status));
   const opsDeliveriesToday = opsBase.filter(s => isDateToday(s.deliveryDate));
-  const opsDeliveriesTomorrow = opsBase.filter(s => isDateTomorrow(s.deliveryDate) && s.status !== "delivered");
-  const needsDriver = opsBase.filter(s => s.rawStatus?.toLowerCase() === "unassigned" && !["delivered", "empty_return"].includes(s.status));
-  const opsBehind = opsBase.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !["delivered", "empty_return"].includes(s.status));
+  const opsDeliveriesTomorrow = opsBase.filter(s => isDateTomorrow(s.deliveryDate) && !isPostDelivery(s.status));
+  const needsDriver = opsBase.filter(s => s.rawStatus?.toLowerCase() === "unassigned" && !isPostDelivery(s.status));
+  const opsBehind = opsBase.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !isPostDelivery(s.status));
   const awaitingPod = opsBase.filter(s => {
-    if (s.status !== "delivered") return false;
+    if (!["delivered", "need_pod"].includes(s.status)) return false;
     const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
     const efjNS = (s.efj || "").replace(/\s/g, "");
     const docs = docSummary?.[efjBare] || docSummary?.[s.efj] || docSummary?.[efjNS];
     return !docs?.pod;
   });
-  const opsActive = opsBase.filter(s => !["delivered", "empty_return"].includes(s.status));
+  const opsActive = opsBase.filter(s => !isPostDelivery(s.status));
   const opsTableShips = !isOps ? [] :
     opsTableFilter === "behind" ? opsBehind :
-    opsTableFilter === "on_schedule" ? opsBase.filter(s => !["delivered", "empty_return"].includes(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))) :
+    opsTableFilter === "on_schedule" ? opsBase.filter(s => !isPostDelivery(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))) :
     opsTableFilter === "in_transit" ? opsBase.filter(s => ["in_transit", "out_for_delivery"].includes(s.status)) :
     opsTableFilter === "pu_today" ? opsPickupsToday :
     opsTableFilter === "pu_tomorrow" ? opsPickupsTomorrow :
@@ -344,7 +355,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                     <td style={{ ...tdBase, position: "relative" }}
                       onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                       {isEditing && inlineEditField === "status" ? (
-                        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
+                        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: Z.inlineEdit, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }} className="inline-status-dd">
                           {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                             const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
                             return (
@@ -776,8 +787,8 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 if (proj === "Other") return !hub || (hub !== "piedra" && hub !== "hanson");
                 return hub === proj.toLowerCase();
               });
-              const active = projShips.filter(s => !["delivered", "empty_return", "billed_closed", "cancelled"].includes(s.status)).length;
-              const delivered = projShips.filter(s => s.status === "delivered" || s.status === "empty_return").length;
+              const active = projShips.filter(s => !isPostDelivery(s.status) && s.status !== "cancelled").length;
+              const delivered = projShips.filter(s => isPostDelivery(s.status)).length;
               const pending = projShips.filter(s => ["pending", "booked", "confirmed"].includes(s.status)).length;
               const today = new Date().toISOString().slice(0, 10);
               const pickupsToday = projShips.filter(s => (s.pickupDate || "").startsWith(today)).length;
@@ -1041,7 +1052,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                       <td style={{ padding: "8px 14px", position: "relative" }}
                         onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                         {isEditing && inlineEditField === "status" ? (
-                          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 9999, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
+                          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 9999, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }} className="inline-status-dd">
                             {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                               const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
                               return (
@@ -1263,7 +1274,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                       <td style={{ padding: "8px 14px", position: "relative" }}
                         onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("status"); }}>
                         {isEditing && inlineEditField === "status" ? (
-                          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 9999, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }}>
+                          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 9999, background: "#1A2236", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 4, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", maxHeight: 280, overflowY: "auto", minWidth: 120 }} className="inline-status-dd">
                             {getStatusesForShipment(s).filter(st => st.key !== "all").map(st => {
                               const stc = getStatusColors(s)[st.key] || { main: "#94a3b8" };
                               return (
