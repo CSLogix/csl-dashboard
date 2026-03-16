@@ -585,7 +585,8 @@ export default function DispatchView({
               const rowBg = isSelected ? `${sc.main}10` : termBg || zebraBg;
               return (
                 <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
-                  style={{ cursor: "default", background: highlightedEfj === s.efj ? undefined : rowBg }}>
+                  onClick={() => handleLoadClick(s)}
+                  style={{ cursor: "pointer", background: highlightedEfj === s.efj ? undefined : rowBg }}>
                   <td style={{ padding: "5px 4px", width: 24, textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                     <button onClick={() => handleLoadClick(s)} title="Open details"
                       style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
