@@ -26,6 +26,9 @@ router = APIRouter()
 # Shared accounts that still need Google Sheet writes
 _SHARED_SHEET_ACCOUNTS = {"Tolead", "Boviet"}
 
+# Dashboard-only statuses — never write these to Google Sheet (not in Col M dropdown)
+_DASHBOARD_ONLY_STATUSES = {"need_pod", "pod_received", "picked_up"}
+
 # Post-delivery statuses — load is "done" for active-count / at-risk purposes
 _POST_DELIVERY_STATUSES = (
     "'delivered','completed','empty returned','empty_return','returned_to_port',"
@@ -312,8 +315,6 @@ async def api_v2_update_status(efj: str, request: Request, background_tasks: Bac
 
     account = row["account"]
 
-    # Dashboard-only statuses — never write these to Google Sheet (not in Col M dropdown)
-    _DASHBOARD_ONLY_STATUSES = {"need_pod", "pod_received", "picked_up"}
     _skip_sheet = new_status.strip().lower().replace(" ", "_") in _DASHBOARD_ONLY_STATUSES
 
     # Write back to Google Sheet for shared accounts
@@ -466,13 +467,11 @@ async def api_v2_update_field(efj: str, request: Request, background_tasks: Back
                 raise HTTPException(404, f"Shipment {efj} not found")
 
     # Fire-and-forget: write changed fields back to Master Sheet
-    # Skip dashboard-only statuses that aren't in the sheet's Col M dropdown
-    _DASHBOARD_ONLY = {"need_pod", "pod_received", "picked_up"}
     account = row["account"] or ""
     if account and account not in _SHARED_SHEET_ACCOUNTS:
         sheet_fields = {k: v for k, v in body.items() if k in ALLOWED and k != "archived"}
         # Strip status if it's a dashboard-only value
-        if sheet_fields.get("status", "").strip().lower().replace(" ", "_") in _DASHBOARD_ONLY:
+        if sheet_fields.get("status", "").strip().lower().replace(" ", "_") in _DASHBOARD_ONLY_STATUSES:
             sheet_fields.pop("status", None)
         if sheet_fields:
             background_tasks.add_task(_write_fields_to_master_sheet, efj, account, sheet_fields)

@@ -1167,7 +1167,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
               Drop files here {"\u2014"} PDF, images, Excel, Word, email
             </div>
             {docUploadMsg && (
-              <div style={{ marginTop: 6, fontSize: 11, fontWeight: 600, color: docUploadMsg === "Uploaded" ? "#34d399" : "#f87171", textAlign: "center" }}>
+              <div style={{ marginTop: 6, fontSize: 11, fontWeight: 600, color: docUploadMsg?.startsWith("Uploaded") ? "#34d399" : "#f87171", textAlign: "center" }}>
                 {docUploadMsg}
               </div>
             )}
