@@ -1,11 +1,132 @@
+import base64
+import json
+import re
+
 from collections import defaultdict
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
+import config
 import database as db
 from shared import log
+
+
+# ── Shared extraction helpers ────────────────────────────────────────
+
+_CARRIER_EXTRACT_PROMPT = """Extract rate/quote information from this carrier rate confirmation or email.
+Look carefully for the carrier's MC# and DOT# — these are often in the email signature block at the bottom.
+Return ONLY valid JSON (no markdown, no explanation) with these fields:
+{
+  "carrier_name": "string or null",
+  "carrier_mc": "MC number (digits only) or null",
+  "origin": "city, state or full address or null",
+  "destination": "city, state or full address or null",
+  "shipment_type": "Dray|FTL|LTL|Transload|OTR or null",
+  "rate_amount": "total all-in rate as numeric string or null",
+  "linehaul_items": [{"description": "string", "rate": "numeric string"}],
+  "accessorials": [{"charge": "name", "rate": "numeric string", "frequency": "flat|per day|per hour"}]
+}
+Only include fields you can confidently extract. For linehaul_items, list each charge line separately (linehaul, fuel surcharge, stop charges, etc). Omit null fields."""
+
+_MARKET_EXTRACT_PROMPT = """Extract ALL rate entries from this LoadMatch / RFQ / market rate screenshot or document.
+This contains multiple rate quotes for the same lane — extract every row.
+Return ONLY valid JSON (no markdown, no explanation):
+{
+  "origin": "port or origin city/state — if visible",
+  "destination": "destination city/state — if visible",
+  "rates": [
+    {
+      "date": "YYYY-MM-DD or null",
+      "terminal": "terminal or carrier name or null",
+      "base_rate": "numeric string (dollars, no $ sign)",
+      "fsc_pct": "numeric string (percentage, no % sign) or 0",
+      "total": "numeric string (total all-in rate)"
+    }
+  ]
+}
+Extract every row of rate data you can see. If a column is missing, set it to null.
+Dates should be normalized to YYYY-MM-DD format. Omit $ signs and commas from numbers."""
+
+
+def _call_claude(content: list) -> dict:
+    """Call Claude API with content blocks and return parsed JSON."""
+    import anthropic
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=2048,
+        messages=[{"role": "user", "content": content}],
+    )
+    text = message.content[0].text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    return json.loads(text)
+
+
+def _file_to_content_blocks(file_bytes: bytes, filename: str, prompt: str) -> list:
+    """Convert uploaded file bytes into Claude API content blocks + prompt."""
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    blocks = []
+
+    if ext in ("png", "jpg", "jpeg", "gif", "webp"):
+        media_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                     "gif": "image/gif", "webp": "image/webp"}
+        blocks.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": media_map.get(ext, "image/png"),
+                        "data": base64.b64encode(file_bytes).decode()},
+        })
+    elif ext == "pdf":
+        blocks.append({
+            "type": "document",
+            "source": {"type": "base64", "media_type": "application/pdf",
+                        "data": base64.b64encode(file_bytes).decode()},
+        })
+    elif ext == "msg":
+        try:
+            import extract_msg, io as _io
+            msg = extract_msg.openMsg(_io.BytesIO(file_bytes))
+            parts = []
+            if msg.subject: parts.append("Subject: " + str(msg.subject))
+            if msg.sender: parts.append("From: " + str(msg.sender))
+            if msg.body: parts.append(msg.body)
+            text_content = "\n".join(parts)
+            # Also grab image attachments
+            for att in (msg.attachments or []):
+                att_name = (att.longFilename or att.shortFilename or "").lower()
+                if att_name.endswith((".png", ".jpg", ".jpeg")) and att.data:
+                    ext2 = att_name.rsplit(".", 1)[-1]
+                    mt = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}.get(ext2, "image/png")
+                    blocks.append({"type": "image", "source": {"type": "base64", "media_type": mt,
+                                                                 "data": base64.b64encode(att.data).decode()}})
+            blocks.append({"type": "text", "text": text_content[:8000]})
+        except Exception:
+            # Brute-force ASCII extraction fallback
+            raw = file_bytes.decode("latin-1", errors="replace")
+            ascii_blocks = re.findall(r"[ -~]{20,}", raw)
+            blocks.append({"type": "text", "text": "\n".join(ascii_blocks)[:8000]})
+    elif ext in ("eml", "txt", "csv"):
+        try:
+            text_content = file_bytes.decode("utf-8", errors="replace")
+        except Exception:
+            text_content = file_bytes.decode("latin-1", errors="replace")
+        blocks.append({"type": "text", "text": text_content[:8000]})
+    elif ext in ("htm", "html"):
+        raw = file_bytes.decode("utf-8", errors="replace")
+        text_content = re.sub(r"<[^>]+>", " ", raw)
+        text_content = re.sub(r"\s+", " ", text_content).strip()
+        blocks.append({"type": "text", "text": text_content[:8000]})
+    else:
+        try:
+            text_content = file_bytes.decode("utf-8", errors="replace")
+        except Exception:
+            text_content = file_bytes.decode("latin-1", errors="replace")
+        blocks.append({"type": "text", "text": text_content[:8000]})
+
+    blocks.append({"type": "text", "text": prompt})
+    return blocks
 
 router = APIRouter()
 
@@ -546,3 +667,423 @@ async def api_lane_stats():
             "avg_customer_rate": float(r["avg_customer_rate"]) if r["avg_customer_rate"] else None,
         })
     return {"lanes": lanes}
+
+
+# ── Manual Intake (carrier rate from email / file / text) ────────────
+
+@router.post("/api/rate-iq/manual-intake")
+async def post_manual_intake(request: Request):
+    """Extract a carrier rate from pasted text or uploaded file (image, PDF, .msg, .eml, HTML).
+    Uses Claude Vision for files, Claude text extraction for pasted text.
+    Saves extracted rate to rate_quotes table."""
+    content_type = request.headers.get("content-type", "")
+    has_claude = bool(config.ANTHROPIC_API_KEY)
+
+    # Determine input source
+    text = None
+    file_bytes = None
+    filename = ""
+    move_type = "dray"
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        text = form.get("text")
+        if text:
+            text = str(text)
+        move_type = str(form.get("move_type", "dray"))
+        file_obj = form.get("file")
+        if file_obj and hasattr(file_obj, "read"):
+            file_bytes = await file_obj.read()
+            filename = getattr(file_obj, "filename", "") or ""
+    else:
+        body = await request.json()
+        text = (body.get("text") or "").strip()
+        move_type = (body.get("move_type") or "dray").strip().lower()
+
+    if not text and not file_bytes:
+        return JSONResponse(status_code=400, content={"error": "No text or file provided"})
+
+    # Extract rate data
+    extracted = None
+    if file_bytes and has_claude:
+        try:
+            blocks = _file_to_content_blocks(file_bytes, filename, _CARRIER_EXTRACT_PROMPT)
+            extracted = _call_claude(blocks)
+        except Exception as e:
+            log.warning("Claude file extraction failed: %s", e)
+            return JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
+    elif text and has_claude:
+        try:
+            blocks = [{"type": "text", "text": _CARRIER_EXTRACT_PROMPT + "\n\n" + text[:8000]}]
+            extracted = _call_claude(blocks)
+        except Exception as e:
+            log.warning("Claude text extraction failed: %s", e)
+            return JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
+    elif text:
+        # Regex fallback (basic)
+        from routes.quotes import _parse_rate_text
+        extracted = _parse_rate_text(text)
+    else:
+        return JSONResponse(status_code=422, content={"error": "File extraction requires ANTHROPIC_API_KEY"})
+
+    if not extracted:
+        return JSONResponse(status_code=400, content={"error": "Could not extract rate data"})
+
+    # Compute total rate if not directly provided
+    rate_amount = None
+    if extracted.get("rate_amount"):
+        try:
+            rate_amount = float(str(extracted["rate_amount"]).replace(",", "").replace("$", ""))
+        except (ValueError, TypeError):
+            pass
+    if not rate_amount and extracted.get("linehaul_items"):
+        try:
+            rate_amount = sum(float(str(item.get("rate", "0")).replace(",", "").replace("$", ""))
+                              for item in extracted["linehaul_items"])
+        except (ValueError, TypeError):
+            pass
+
+    origin = (extracted.get("origin") or "").strip()
+    destination = (extracted.get("destination") or "").strip()
+    carrier_name = (extracted.get("carrier_name") or "").strip()
+    shipment_type = (extracted.get("shipment_type") or move_type or "dray").lower()
+
+    if not origin or not destination:
+        return JSONResponse(status_code=400, content={
+            "error": "Could not extract origin and destination",
+            "extracted": extracted,
+        })
+
+    lane = f"{origin} → {destination}"
+    extracted["rate_amount"] = rate_amount
+    extracted["origin"] = origin
+    extracted["destination"] = destination
+
+    # Save to rate_quotes
+    from datetime import date as _date
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute(
+                    "INSERT INTO rate_quotes "
+                    "(origin, destination, lane, carrier_name, rate_amount, rate_unit, "
+                    " move_type, quote_date, status, source) "
+                    "VALUES (%s,%s,%s,%s,%s,'flat',%s,%s,'quoted','manual') "
+                    "ON CONFLICT DO NOTHING",
+                    (origin, destination, lane, carrier_name, rate_amount, shipment_type, _date.today())
+                )
+    except Exception as e:
+        log.warning("rate_quotes insert failed: %s", e)
+
+    return {"ok": True, "extracted": extracted}
+
+
+# ── Market Rates (LoadMatch / benchmark data — no carrier) ──────────
+
+@router.post("/api/rate-iq/market-rates")
+async def post_market_rates(request: Request):
+    """Parse pasted tab-separated LoadMatch data OR extract from uploaded screenshot.
+    Accepts JSON body (text paste) or multipart form (file upload)."""
+    from datetime import datetime as _dt
+    from decimal import Decimal, InvalidOperation
+
+    content_type = request.headers.get("content-type", "")
+    has_claude = bool(config.ANTHROPIC_API_KEY)
+
+    # Determine input: multipart file upload or JSON text paste
+    origin = ""
+    destination = ""
+    move_type = "dray"
+    text = ""
+    file_bytes = None
+    filename = ""
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        origin = str(form.get("origin", "")).strip()
+        destination = str(form.get("destination", "")).strip()
+        move_type = str(form.get("move_type", "dray")).strip().lower()
+        text = str(form.get("text", "")).strip()
+        file_obj = form.get("file")
+        if file_obj and hasattr(file_obj, "read"):
+            file_bytes = await file_obj.read()
+            filename = getattr(file_obj, "filename", "") or ""
+    else:
+        body = await request.json()
+        origin = (body.get("origin") or "").strip()
+        destination = (body.get("destination") or "").strip()
+        move_type = (body.get("move_type") or "dray").strip().lower()
+        text = (body.get("text") or "").strip()
+
+    # ── File upload path: use Claude Vision to extract multiple rates ──
+    if file_bytes:
+        if not has_claude:
+            return JSONResponse(status_code=422, content={"error": "Screenshot extraction requires ANTHROPIC_API_KEY"})
+        try:
+            blocks = _file_to_content_blocks(file_bytes, filename, _MARKET_EXTRACT_PROMPT)
+            extracted = _call_claude(blocks)
+        except Exception as e:
+            log.warning("Claude market rate extraction failed: %s", e)
+            return JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
+
+        # Use extracted origin/dest if user didn't provide
+        if not origin:
+            origin = (extracted.get("origin") or "").strip()
+        if not destination:
+            destination = (extracted.get("destination") or "").strip()
+        if not origin or not destination:
+            return JSONResponse(status_code=400, content={
+                "error": "Could not determine origin/destination — please fill in the fields",
+                "extracted": extracted,
+            })
+
+        rates_data = extracted.get("rates") or []
+        if not rates_data:
+            return JSONResponse(status_code=400, content={"error": "No rates extracted from file", "extracted": extracted})
+
+        rows_inserted = 0
+        errors = []
+        insert_params = []
+        for i, r in enumerate(rates_data):
+            try:
+                rate_date = None
+                if r.get("date"):
+                    try:
+                        rate_date = _dt.strptime(r["date"], "%Y-%m-%d").date()
+                    except ValueError:
+                        pass
+                terminal = r.get("terminal")
+                base_str = str(r.get("base_rate") or "").replace("$", "").replace(",", "")
+                total_str = str(r.get("total") or "").replace("$", "").replace(",", "")
+                fsc_str = str(r.get("fsc_pct") or "0").replace("%", "")
+                base_rate = Decimal(base_str) if base_str else None
+                total = Decimal(total_str) if total_str else None
+                fsc = Decimal(fsc_str) if fsc_str else Decimal("0")
+                if total is None and base_rate is not None:
+                    total = base_rate * (1 + fsc / 100) if fsc else base_rate
+                if total is None and base_rate is None:
+                    errors.append(f"Rate {i + 1}: no rate value")
+                    continue
+                insert_params.append((rate_date, terminal, origin, destination, base_rate, fsc, total, move_type))
+                rows_inserted += 1
+            except (InvalidOperation, ValueError) as e:
+                errors.append(f"Rate {i + 1}: {e}")
+
+        if rows_inserted == 0:
+            return JSONResponse(status_code=400, content={"error": "No valid rates in extraction", "errors": errors[:10]})
+
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                for p in insert_params:
+                    cur.execute("""
+                        INSERT INTO market_rates (rate_date, terminal, origin, destination, base_rate, fsc_pct, total, source, move_type)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, 'loadmatch', %s)
+                    """, p)
+
+        return {"ok": True, "inserted": rows_inserted, "skipped": len(errors), "errors": errors[:10]}
+
+    # ── Text paste path: parse tab-separated data ──
+    if not origin or not destination:
+        return JSONResponse(status_code=400, content={"error": "origin and destination are required"})
+    if not text:
+        return JSONResponse(status_code=400, content={"error": "text or file is required"})
+
+    DATE_FORMATS = ["%Y-%b-%d", "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%b %d, %Y"]
+    HEADER_WORDS = {"date", "terminal", "base", "fsc", "total", "linehaul", "rate"}
+
+    def parse_money(s):
+        """Strip $, commas, whitespace and return Decimal or None."""
+        s = s.strip().replace("$", "").replace(",", "")
+        if not s or s == "—" or s == "-":
+            return None
+        return Decimal(s)
+
+    def parse_pct(s):
+        """Parse a percentage string like '29%' to Decimal."""
+        s = s.strip().replace("%", "")
+        if not s or s == "—" or s == "-":
+            return Decimal("0")
+        return Decimal(s)
+
+    def parse_date(s):
+        """Try multiple date formats and return a date or None."""
+        s = s.strip()
+        for f in DATE_FORMATS:
+            try:
+                return _dt.strptime(s, f).date()
+            except ValueError:
+                continue
+        return None
+
+    rows_inserted = 0
+    rows_skipped = 0
+    errors = []
+    insert_params = []
+
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    for i, line in enumerate(lines):
+        # Split by tab or 2+ spaces
+        parts = [p.strip() for p in line.split("\t") if p.strip()]
+        if len(parts) < 3:
+            # Try splitting by 2+ whitespace
+            parts = [p.strip() for p in re.split(r"\s{2,}", line) if p.strip()]
+
+        # Skip header rows
+        if parts and any(w in parts[0].lower() for w in HEADER_WORDS):
+            continue
+
+        # Expect: date, terminal, base, fsc%, total  (5 cols)
+        # Or: date, terminal, base, total  (4 cols, no fsc)
+        # Or: terminal, base, fsc%, total  (4 cols, no date)
+        try:
+            rate_date = None
+            terminal = None
+            base_rate = None
+            fsc = Decimal("0")
+            total = None
+
+            if len(parts) >= 5:
+                rate_date = parse_date(parts[0])
+                terminal = parts[1]
+                base_rate = parse_money(parts[2])
+                fsc = parse_pct(parts[3])
+                total = parse_money(parts[4])
+            elif len(parts) == 4:
+                # Try date first
+                d = parse_date(parts[0])
+                if d:
+                    rate_date = d
+                    terminal = parts[1]
+                    base_rate = parse_money(parts[2])
+                    total = parse_money(parts[3])
+                else:
+                    terminal = parts[0]
+                    base_rate = parse_money(parts[1])
+                    fsc = parse_pct(parts[2])
+                    total = parse_money(parts[3])
+            elif len(parts) == 3:
+                terminal = parts[0]
+                base_rate = parse_money(parts[1])
+                total = parse_money(parts[2])
+            else:
+                rows_skipped += 1
+                continue
+
+            if total is None and base_rate is None:
+                rows_skipped += 1
+                errors.append(f"Line {i + 1}: no rate found")
+                continue
+
+            if total is None and base_rate is not None:
+                total = base_rate * (1 + fsc / 100) if fsc else base_rate
+
+            insert_params.append((rate_date, terminal, origin, destination, base_rate, fsc, total, move_type))
+            rows_inserted += 1
+
+        except (InvalidOperation, ValueError) as e:
+            rows_skipped += 1
+            errors.append(f"Line {i + 1}: {e}")
+
+    if rows_inserted == 0:
+        return JSONResponse(status_code=400, content={"error": "No valid rows parsed", "skipped": rows_skipped, "errors": errors[:10]})
+
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            for p in insert_params:
+                cur.execute("""
+                    INSERT INTO market_rates (rate_date, terminal, origin, destination, base_rate, fsc_pct, total, source, move_type)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'loadmatch', %s)
+                """, p)
+
+    return {"ok": True, "inserted": rows_inserted, "skipped": rows_skipped, "errors": errors[:10]}
+
+
+@router.get("/api/rate-iq/market-rates")
+async def get_market_rates(
+    origin: str = Query(default=""),
+    destination: str = Query(default=""),
+    move_type: str = Query(default=""),
+):
+    """Retrieve market benchmark rates for a lane with aggregate stats."""
+    origin = origin.strip()
+    destination = destination.strip()
+
+    if not origin and not destination:
+        return JSONResponse(status_code=400, content={"error": "origin or destination required"})
+
+    conditions = []
+    params = []
+    if origin:
+        conditions.append("LOWER(origin) LIKE %s")
+        params.append(f"%{origin.lower()}%")
+    if destination:
+        conditions.append("LOWER(destination) LIKE %s")
+        params.append(f"%{destination.lower()}%")
+    if move_type:
+        conditions.append("LOWER(move_type) = %s")
+        params.append(move_type.lower())
+
+    where = " AND ".join(conditions)
+
+    with db.get_cursor() as cur:
+        cur.execute(f"""
+            SELECT id, rate_date, terminal, origin, destination,
+                   base_rate, fsc_pct, total, source, move_type, created_at
+            FROM market_rates
+            WHERE {where}
+            ORDER BY rate_date DESC NULLS LAST
+            LIMIT 100
+        """, params)
+        rows = cur.fetchall()
+
+    rates = []
+    totals = []
+    for r in rows:
+        t = float(r["total"]) if r["total"] else None
+        if t:
+            totals.append(t)
+        rates.append({
+            "id": r["id"],
+            "date": r["rate_date"].isoformat() if r["rate_date"] else None,
+            "terminal": r["terminal"],
+            "origin": r["origin"],
+            "destination": r["destination"],
+            "base": float(r["base_rate"]) if r["base_rate"] else None,
+            "fsc_pct": float(r["fsc_pct"]) if r["fsc_pct"] else None,
+            "total": t,
+            "source": r["source"],
+            "move_type": r["move_type"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        })
+
+    stats = None
+    if totals:
+        mid = len(totals) // 2
+        recent = totals[:mid] if mid > 0 else totals
+        older = totals[mid:] if mid > 0 else []
+        recent_avg = sum(recent) / len(recent) if recent else None
+        older_avg = sum(older) / len(older) if older else None
+        trend_pct = round(((recent_avg - older_avg) / older_avg) * 100, 1) if recent_avg and older_avg and older_avg > 0 else None
+
+        stats = {
+            "avg": round(sum(totals) / len(totals), 2),
+            "min": min(totals),
+            "max": max(totals),
+            "count": len(totals),
+            "latest_date": rates[0]["date"] if rates else None,
+            "oldest_date": rates[-1]["date"] if rates else None,
+            "trend_pct": trend_pct,
+        }
+
+    return {"rates": rates, "stats": stats}
+
+
+@router.delete("/api/rate-iq/market-rates/{rate_id}")
+async def delete_market_rate(rate_id: int):
+    """Delete a single market rate entry."""
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute("DELETE FROM market_rates WHERE id = %s", (rate_id,))
+            if cur.rowcount == 0:
+                return JSONResponse(status_code=404, content={"error": "Rate not found"})
+    return {"ok": True}
