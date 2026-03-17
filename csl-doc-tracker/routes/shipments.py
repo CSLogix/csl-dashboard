@@ -219,6 +219,21 @@ async def api_team(request: Request):
 async def api_tracking_summary():
     """Return tracking status summary with stop timestamps for all FTL loads."""
     cache = _read_tracking_cache()
+
+    # Bulk-load driver_contacts from PG to enrich tracking with phone/trailer
+    _dc_map = {}  # efj_num -> {driver_phone, trailer_number}
+    try:
+        with db.get_cursor() as cur:
+            cur.execute("SELECT efj, driver_phone, trailer_number FROM driver_contacts")
+            for row in cur.fetchall():
+                efj_key = (row["efj"] or "").replace("EFJ", "").strip()
+                _dc_map[efj_key] = {
+                    "phone": (row["driver_phone"] or "").strip(),
+                    "trailer": (row["trailer_number"] or "").strip(),
+                }
+    except Exception:
+        pass  # PG unavailable — fall back to cache-only
+
     result = {}
     for efj, entry in cache.items():
         stop_times = entry.get("stop_times") or {}
@@ -246,6 +261,9 @@ async def api_tracking_summary():
             "stop2Eta": stop_times.get("stop2_eta"),
             "mpDisplayStatus": _ts_disp,
             "mpDisplayDetail": _ts_detail,
+            # Driver/trailer: prefer cache (real-time), fall back to PG driver_contacts
+            "driverPhone": entry.get("driver_phone", "") or _dc_map.get(efj, {}).get("phone", ""),
+            "trailer": entry.get("trailer", "") or _dc_map.get(efj, {}).get("trailer", ""),
         }
     return {"tracking": result}
 
