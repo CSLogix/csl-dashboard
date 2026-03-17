@@ -525,14 +525,14 @@ async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Qu
         # Also include rate_quotes (from manual intake, emails, etc.)
         rq_clauses, rq_params = [], []
         if port:
-            rq_clauses.append("(origin ILIKE %s OR lane ILIKE %s)")
-            rq_params.extend([f"%{port}%", f"%{port}%"])
+            rq_clauses.append("origin ILIKE %s")
+            rq_params.append(f"%{port}%")
         if carrier:
             rq_clauses.append("carrier_name ILIKE %s")
             rq_params.append(f"%{carrier}%")
         if destination:
-            rq_clauses.append("(destination ILIKE %s OR lane ILIKE %s)")
-            rq_params.extend([f"%{destination}%", f"%{destination}%"])
+            rq_clauses.append("destination ILIKE %s")
+            rq_params.append(f"%{destination}%")
         if move_type and move_type != "all":
             rq_clauses.append("move_type = %s")
             rq_params.append(move_type)

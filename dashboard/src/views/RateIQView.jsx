@@ -398,7 +398,7 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
                             </span>
                           </>
                         ) : (
-                          isHovered && <span style={{ fontSize: 11, color: "#3D4654", fontStyle: "italic" }}>+ MC#</span>
+                          <span style={{ fontSize: 11, color: "#3D4654", fontStyle: "italic" }}>+ MC#</span>
                         )}
                       </div>
                     )}
@@ -422,7 +422,7 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
                             {dispatchEmail}
                           </a>
                         ) : (
-                          isHovered && <span style={{ fontSize: 11, color: "#3D4654", fontStyle: "italic" }}>+ email</span>
+                          <span style={{ fontSize: 11, color: "#3D4654", fontStyle: "italic" }}>+ email</span>
                         )}
                       </div>
                     )}
@@ -851,6 +851,27 @@ export default function RateIQView() {
     return Object.values(map).map(g => {
       const mtEntries = Object.entries(g.moveTypes);
       g.move_type = mtEntries.length > 0 ? mtEntries.sort((a, b) => b[1] - a[1])[0][0] : "dray";
+      // Dedup carriers: same carrier_name + same total → keep the one with more data
+      const seen = {};
+      g.carriers = g.carriers.filter(cr => {
+        const dk = `${(cr.carrier_name || "").toLowerCase()}|${cr.total || cr.dray_rate || 0}`;
+        if (seen[dk]) {
+          // Merge: keep whichever has more populated fields
+          const prev = seen[dk];
+          const prevFields = Object.values(prev).filter(v => v != null && v !== "" && v !== 0).length;
+          const curFields = Object.values(cr).filter(v => v != null && v !== "" && v !== 0).length;
+          if (curFields > prevFields) { Object.assign(prev, cr); }
+          return false;
+        }
+        seen[dk] = cr;
+        return true;
+      });
+      // Recalculate stats after dedup
+      g.count = 0; g.total = 0; g.minRate = Infinity; g.maxRate = 0;
+      g.carriers.forEach(cr => {
+        const rate = parseFloat(cr.total || cr.dray_rate || 0);
+        if (rate > 0) { g.minRate = Math.min(g.minRate, rate); g.maxRate = Math.max(g.maxRate, rate); g.total += rate; g.count++; }
+      });
       return g;
     }).sort((a, b) => b.count - a.count);
   }, [laneResults]);
