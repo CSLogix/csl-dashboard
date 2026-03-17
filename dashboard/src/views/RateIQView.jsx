@@ -12,6 +12,34 @@ const grad = "linear-gradient(135deg, #00c853 0%, #00b8d4 50%, #2979ff 100%)";
 const fmt = (n) => { const num = parseFloat(n); return isNaN(num) ? "$0" : "$" + num.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 }); };
 const fmtDec = (n) => { const num = parseFloat(n); return isNaN(num) ? "$0.00" : "$" + num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
 
+// ── Port cluster normalization ──
+// Maps common port name variants to canonical cluster names for grouping + autofill
+const PORT_CLUSTERS = {
+  "la/lb": "LA/LB", "la/lb ports": "LA/LB", "lalb": "LA/LB", "lax": "LA/LB",
+  "los angeles": "LA/LB", "long beach": "LA/LB", "los angeles/long beach": "LA/LB",
+  "lbct": "LA/LB", "apm terminals": "LA/LB", "port of los angeles": "LA/LB",
+  "trapac": "LA/LB", "everport": "LA/LB", "ssa marine": "LA/LB", "pct": "LA/LB",
+  "san pedro": "LA/LB", "wilmington": "LA/LB", "carson": "LA/LB",
+  "ny/nj": "NY/NJ", "ny/nj ports": "NY/NJ", "port newark": "NY/NJ", "pnct": "NY/NJ",
+  "elizabeth": "NY/NJ", "bayonne": "NY/NJ", "maher": "NY/NJ", "newark": "NY/NJ",
+  "savannah": "Savannah", "savannah ports": "Savannah", "garden city": "Savannah",
+  "houston": "Houston", "houston ports": "Houston", "barbours cut": "Houston", "bayport": "Houston",
+  "charleston": "Charleston", "wando welch": "Charleston",
+  "norfolk": "Norfolk", "virginia": "Norfolk", "portsmouth": "Norfolk", "nit": "Norfolk",
+  "oakland": "Oakland",
+};
+function normalizePort(text) {
+  if (!text) return "";
+  const lower = text.trim().toLowerCase();
+  if (PORT_CLUSTERS[lower]) return PORT_CLUSTERS[lower];
+  // Substring match
+  const entries = Object.entries(PORT_CLUSTERS).sort((a, b) => b[0].length - a[0].length);
+  for (const [alias, cluster] of entries) {
+    if (lower.includes(alias)) return cluster;
+  }
+  return text.trim();
+}
+
 // ── History Tab Content (rate history by port group) ──
 function HistoryTabContent({ rateHistory, historyLoading, onLoad }) {
   useEffect(() => { onLoad(); }, []);
@@ -546,38 +574,48 @@ export default function RateIQView() {
     if (!searchOrigin || searchOrigin.length < 2) return [];
     const q = searchOrigin.toLowerCase();
     const seen = new Set();
+    // Check if query matches a port cluster alias — if so, match all ports in that cluster
+    const clusterMatch = PORT_CLUSTERS[q] || Object.entries(PORT_CLUSTERS).find(([a]) => a.includes(q) || q.includes(a))?.[1];
     return rateLaneSummaries
       .filter(ls => {
         const p = (ls.port || "").toLowerCase();
-        if (!p.includes(q) || seen.has(p)) return false;
-        seen.add(p);
+        const matches = p.includes(q) || (clusterMatch && normalizePort(ls.port) === clusterMatch);
+        // Group by normalized port name
+        const normP = normalizePort(ls.port || "").toLowerCase();
+        if (!matches || seen.has(normP)) return false;
+        seen.add(normP);
         return true;
       })
       .slice(0, 6)
       .map(ls => {
-        const matching = rateLaneSummaries.filter(l => (l.port || "").toLowerCase() === (ls.port || "").toLowerCase());
+        const normP = normalizePort(ls.port || "");
+        const matching = rateLaneSummaries.filter(l => normalizePort(l.port || "") === normP);
         const totalRates = matching.reduce((s, l) => s + l.load_count, 0);
         const avgAll = matching.length > 0 ? Math.round(matching.reduce((s, l) => s + l.avg_rate * l.load_count, 0) / totalRates) : 0;
-        return { port: ls.port, lanes: matching.length, avg: avgAll };
+        return { port: normP, lanes: matching.length, avg: avgAll };
       });
   }, [searchOrigin, rateLaneSummaries]);
   const destSuggestions = useMemo(() => {
     if (!searchDest || searchDest.length < 2) return [];
     const q = searchDest.toLowerCase();
     const seen = new Set();
+    const clusterMatch = PORT_CLUSTERS[q] || Object.entries(PORT_CLUSTERS).find(([a]) => a.includes(q) || q.includes(a))?.[1];
     return rateLaneSummaries
       .filter(ls => {
         const d = (ls.destination || "").toLowerCase();
-        if (!d.includes(q) || seen.has(d)) return false;
-        seen.add(d);
+        const matches = d.includes(q) || (clusterMatch && normalizePort(ls.destination) === clusterMatch);
+        const normD = normalizePort(ls.destination || "").toLowerCase();
+        if (!matches || seen.has(normD)) return false;
+        seen.add(normD);
         return true;
       })
       .slice(0, 6)
       .map(ls => {
-        const matching = rateLaneSummaries.filter(l => (l.destination || "").toLowerCase() === (ls.destination || "").toLowerCase());
+        const normD = normalizePort(ls.destination || "");
+        const matching = rateLaneSummaries.filter(l => normalizePort(l.destination || "") === normD);
         const totalRates = matching.reduce((s, l) => s + l.load_count, 0);
         const avgAll = matching.length > 0 ? Math.round(matching.reduce((s, l) => s + l.avg_rate * l.load_count, 0) / totalRates) : 0;
-        return { destination: ls.destination, lanes: matching.length, avg: avgAll, origin: searchOrigin || matching[0]?.port || "" };
+        return { destination: normD, lanes: matching.length, avg: avgAll, origin: searchOrigin || matching[0]?.port || "" };
       });
   }, [searchDest, searchOrigin, rateLaneSummaries]);
 
@@ -674,12 +712,12 @@ export default function RateIQView() {
     }).sort((a, b) => b.count - a.count);
   }, [laneResults]);
 
-  // ── Group rateLaneSummaries by origin city for collapsible browse view ──
+  // ── Group rateLaneSummaries by origin city for collapsible browse view (port-cluster aware) ──
   const originGroups = useMemo(() => {
     const filtered = rateLaneSummaries.filter(ls => moveTypeFilter === "all" || ls.move_type === moveTypeFilter);
     const map = {};
     filtered.forEach(ls => {
-      const origin = ls.port || ls.origin_city || "Unknown";
+      const origin = normalizePort(ls.port || ls.origin_city || "Unknown");
       if (!map[origin]) map[origin] = { origin, lanes: [], totalRate: 0, rateCount: 0, totalLoads: 0 };
       map[origin].lanes.push(ls);
       map[origin].totalLoads += (ls.load_count || 0);
@@ -795,14 +833,16 @@ export default function RateIQView() {
       setDirCarriers(carrierRes.carriers || carrierRes || []);
       setPortGroups(pgRes.groups || []);
 
-      // Build lane summaries from rate data (with trend detection)
+      // Build lane summaries from rate data (with trend detection + port cluster normalization)
       const allRates = laneRatesRes.lane_rates || (Array.isArray(laneRatesRes) ? laneRatesRes : []);
       const now = Date.now();
       const thirtyDaysAgo = now - 30 * 86400000;
       const laneMap = {};
       allRates.forEach(r => {
-        const key = `${r.port || ""}|${r.destination || ""}`;
-        if (!laneMap[key]) laneMap[key] = { port: r.port, destination: r.destination, count: 0, totalRate: 0, carriers: new Set(), recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
+        const normPort = normalizePort(r.port || "");
+        const normDest = normalizePort(r.destination || "");
+        const key = `${normPort}|${normDest}`;
+        if (!laneMap[key]) laneMap[key] = { port: normPort, destination: normDest, count: 0, totalRate: 0, carriers: new Set(), recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
         if (!laneMap[key].miles && r.miles) laneMap[key].miles = r.miles;
         if (!laneMap[key].origin_zip && r.origin_zip) laneMap[key].origin_zip = r.origin_zip;
         if (!laneMap[key].dest_zip && r.dest_zip) laneMap[key].dest_zip = r.dest_zip;

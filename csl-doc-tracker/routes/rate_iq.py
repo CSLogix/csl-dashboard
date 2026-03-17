@@ -13,6 +13,104 @@ import database as db
 from shared import log
 
 
+# ── Port cluster normalization for lane grouping ─────────────────────
+# Maps common port name variants to a single canonical cluster name.
+# Used so that "Los Angeles", "Long Beach", "LA/LB", "LBCT" etc. all
+# group into one lane instead of appearing as separate results.
+PORT_CLUSTERS = {
+    # LA/LB
+    "la/lb": "LA/LB",
+    "la/lb ports": "LA/LB",
+    "lalb": "LA/LB",
+    "lax": "LA/LB",
+    "los angeles": "LA/LB",
+    "long beach": "LA/LB",
+    "los angeles/long beach": "LA/LB",
+    "lbct": "LA/LB",
+    "apm terminals": "LA/LB",
+    "apm san pedro": "LA/LB",
+    "port of los angeles": "LA/LB",
+    "trapac": "LA/LB",
+    "everport": "LA/LB",
+    "ssa marine": "LA/LB",
+    "pct": "LA/LB",
+    "san pedro": "LA/LB",
+    "wilmington": "LA/LB",
+    "carson": "LA/LB",
+    # NY/NJ
+    "ny/nj": "NY/NJ",
+    "ny/nj ports": "NY/NJ",
+    "port newark": "NY/NJ",
+    "pnct": "NY/NJ",
+    "elizabeth": "NY/NJ",
+    "bayonne": "NY/NJ",
+    "maher": "NY/NJ",
+    "newark": "NY/NJ",
+    # Savannah
+    "savannah": "Savannah",
+    "savannah ports": "Savannah",
+    "garden city": "Savannah",
+    "garden city terminal": "Savannah",
+    # Houston
+    "houston": "Houston",
+    "houston ports": "Houston",
+    "barbours cut": "Houston",
+    "bayport": "Houston",
+    # Charleston
+    "charleston": "Charleston",
+    "wando welch": "Charleston",
+    # Norfolk / Virginia
+    "norfolk": "Norfolk",
+    "virginia": "Norfolk",
+    "portsmouth": "Norfolk",
+    "nit": "Norfolk",
+    # Oakland
+    "oakland": "Oakland",
+}
+
+# Reverse map: cluster → all aliases (for search expansion)
+_CLUSTER_ALIASES = defaultdict(set)
+for _alias, _cluster in PORT_CLUSTERS.items():
+    _CLUSTER_ALIASES[_cluster].add(_alias)
+
+
+def _normalize_port(text: str) -> str:
+    """Normalize a port/origin/destination string to its cluster name, or return as-is."""
+    if not text:
+        return ""
+    lower = text.strip().lower()
+    # Exact match
+    if lower in PORT_CLUSTERS:
+        return PORT_CLUSTERS[lower]
+    # Substring match (e.g. "Long Beach Container Terminal" contains "long beach")
+    for alias, cluster in sorted(PORT_CLUSTERS.items(), key=lambda x: -len(x[0])):
+        if alias in lower:
+            return cluster
+    return text.strip()
+
+
+def _expand_search_terms(query: str) -> list[str]:
+    """Given a search term like 'la' or 'long beach', return all port aliases
+    that should also be matched, plus the original term."""
+    if not query:
+        return []
+    q = query.strip().lower()
+    terms = {q}
+    # Check if query matches any alias → expand to all aliases in that cluster
+    matched_cluster = None
+    if q in PORT_CLUSTERS:
+        matched_cluster = PORT_CLUSTERS[q]
+    else:
+        for alias, cluster in PORT_CLUSTERS.items():
+            if q in alias or alias in q:
+                matched_cluster = cluster
+                break
+    if matched_cluster:
+        terms.update(_CLUSTER_ALIASES[matched_cluster])
+        terms.add(matched_cluster.lower())
+    return list(terms)
+
+
 # ── Shared extraction helpers ────────────────────────────────────────
 
 _CARRIER_EXTRACT_PROMPT = """Extract rate/quote information from this carrier rate confirmation or email.
@@ -455,23 +553,32 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
     origin_q = origin.strip().lower()
     dest_q = destination.strip().lower()
 
-    # Build WHERE conditions for each source
+    # Expand search terms to include port cluster aliases
+    # e.g. "la" → ["la", "la/lb", "los angeles", "long beach", "lbct", ...]
+    origin_terms = _expand_search_terms(origin_q) if origin_q else []
+    dest_terms = _expand_search_terms(dest_q) if dest_q else []
+
+    # Build WHERE conditions for each source (with port alias expansion)
     def _build_conditions(o_col, d_col, lane_col=None):
         conds, params = [], []
-        if origin_q:
-            if lane_col:
-                conds.append(f"(LOWER({o_col}) LIKE %s OR LOWER({lane_col}) LIKE %s)")
-                params.extend([f"%{origin_q}%", f"%{origin_q}%"])
-            else:
-                conds.append(f"LOWER({o_col}) LIKE %s")
-                params.append(f"%{origin_q}%")
-        if dest_q:
-            if lane_col:
-                conds.append(f"(LOWER({d_col}) LIKE %s OR LOWER({lane_col}) LIKE %s)")
-                params.extend([f"%{dest_q}%", f"%{dest_q}%"])
-            else:
-                conds.append(f"LOWER({d_col}) LIKE %s")
-                params.append(f"%{dest_q}%")
+        if origin_terms:
+            o_likes = []
+            for term in origin_terms:
+                o_likes.append(f"LOWER({o_col}) LIKE %s")
+                params.append(f"%{term}%")
+                if lane_col:
+                    o_likes.append(f"LOWER({lane_col}) LIKE %s")
+                    params.append(f"%{term}%")
+            conds.append(f"({' OR '.join(o_likes)})")
+        if dest_terms:
+            d_likes = []
+            for term in dest_terms:
+                d_likes.append(f"LOWER({d_col}) LIKE %s")
+                params.append(f"%{term}%")
+                if lane_col:
+                    d_likes.append(f"LOWER({lane_col}) LIKE %s")
+                    params.append(f"%{term}%")
+            conds.append(f"({' OR '.join(d_likes)})")
         return (" AND ".join(conds) if conds else "TRUE"), params
 
     rq_where, rq_params = _build_conditions("rq.origin", "rq.destination", "rq.lane")
@@ -537,14 +644,20 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
         """, rq_params + lr_params + wq_params + mr_params)
         all_rows = cur.fetchall()
 
-        # ── Directory carriers ──
+        # ── Directory carriers (with port alias expansion) ──
         c_conds, c_params = [], []
-        if origin_q:
-            c_conds.append("LOWER(c.pickup_area) LIKE %s")
-            c_params.append(f"%{origin_q}%")
-        if dest_q:
-            c_conds.append("LOWER(c.destination_area) LIKE %s")
-            c_params.append(f"%{dest_q}%")
+        if origin_terms:
+            o_likes = []
+            for term in origin_terms:
+                o_likes.append("LOWER(c.pickup_area) LIKE %s")
+                c_params.append(f"%{term}%")
+            c_conds.append(f"({' OR '.join(o_likes)})")
+        if dest_terms:
+            d_likes = []
+            for term in dest_terms:
+                d_likes.append("LOWER(c.destination_area) LIKE %s")
+                c_params.append(f"%{term}%")
+            c_conds.append(f"({' OR '.join(d_likes)})")
         c_where = " OR ".join(c_conds) if c_conds else "FALSE"
         try:
             cur.execute(f"""
@@ -577,12 +690,12 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
             "move_type": r["move_type"],
         })
 
-    # ── Group by normalized lane ──
+    # ── Group by normalized lane (port cluster aware) ──
     lane_map = defaultdict(list)
     for m in matches:
         key = (
-            (m["origin"] or "").strip().lower(),
-            (m["destination"] or "").strip().lower(),
+            _normalize_port(m["origin"] or "").lower(),
+            _normalize_port(m["destination"] or "").lower(),
         )
         lane_map[key].append(m)
 
@@ -596,10 +709,13 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
         for q in group:
             source_counts[q["source"]] = source_counts.get(q["source"], 0) + 1
         last_date = max((q["date"] or "") for q in group) or None
+        # Use the normalized cluster name as the lane display name
+        norm_origin = _normalize_port(group[0]["origin"] or "") or group[0]["origin"]
+        norm_dest = _normalize_port(group[0]["destination"] or "") or group[0]["destination"]
         lane_groups.append({
-            "lane": group[0]["lane"],
-            "origin": group[0]["origin"],
-            "destination": group[0]["destination"],
+            "lane": f"{norm_origin} → {norm_dest}",
+            "origin": norm_origin,
+            "destination": norm_dest,
             "count": len(group),
             "rated_count": len(rates),
             "floor": min(rates) if rates else None,
