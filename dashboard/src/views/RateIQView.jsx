@@ -291,10 +291,12 @@ function MarketBenchmarkCard({ benchmark, carrierAvg }) {
 }
 
 // ── Carrier Rate Table (simplified — key columns visible, rest expandable) ──
-function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingLaneField, editingLaneValue, setEditingLaneRateId, setEditingLaneField, setEditingLaneValue, handleLaneRateUpdate, laneOrigin, laneDestination, onUseRate }) {
+function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingLaneField, editingLaneValue, setEditingLaneRateId, setEditingLaneField, setEditingLaneValue, handleLaneRateUpdate, laneOrigin, laneDestination, onUseRate, onUpdateCarrierInfo }) {
   const [showAllCols, setShowAllCols] = useState(false);
   const [copiedMC, setCopiedMC] = useState(null);
   const [hoveredRow, setHoveredRow] = useState(null);
+  const [editingCarrierInfo, setEditingCarrierInfo] = useState(null); // { carrierName, field: 'mc_number'|'contact_email', value }
+  const [savingCarrierInfo, setSavingCarrierInfo] = useState(false);
   const primaryCols = ["Carrier", "Linehaul", "FSC", "Total", "Chassis/day", "Prepull", "OW", ""];
   const secondaryCols = ["Storage/day", "Detention", "Split", "Tolls", "HAZ", "Triaxle", "Reefer", "Bond"];
   const visibleCols = showAllCols ? ["Carrier", "Linehaul", "FSC", "Total", "Chassis/day", "Prepull", "OW", ...secondaryCols, ""] : primaryCols;
@@ -369,24 +371,57 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
                         </span>
                       )}
                     </div>
-                    {/* Line 2: MC Number + copy */}
-                    {mcNumber && (
+                    {/* Line 2: MC Number — inline editable */}
+                    {editingCarrierInfo?.carrierName === cr.carrier_name && editingCarrierInfo?.field === "mc_number" ? (
                       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <span style={{ fontSize: 11, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>MC-{mcNumber}</span>
-                        <span onClick={e => { e.stopPropagation(); copyMC(mcNumber); }}
-                          title="Copy MC#" style={{ fontSize: 11, cursor: "pointer", color: copiedMC === mcNumber ? "#34d399" : "#3D4654", transition: "color 0.15s" }}>
-                          {copiedMC === mcNumber ? "\u2713" : "\u2398"}
-                        </span>
+                        <span style={{ fontSize: 11, color: "#5A6478" }}>MC-</span>
+                        <input autoFocus type="text" value={editingCarrierInfo.value}
+                          onChange={e => setEditingCarrierInfo(prev => ({ ...prev, value: e.target.value }))}
+                          onBlur={() => { if (onUpdateCarrierInfo) { setSavingCarrierInfo(true); onUpdateCarrierInfo(cr.carrier_name, "mc_number", editingCarrierInfo.value).finally(() => setSavingCarrierInfo(false)); } setEditingCarrierInfo(null); }}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditingCarrierInfo(null); }}
+                          onClick={e => e.stopPropagation()}
+                          placeholder="Enter MC#"
+                          style={{ width: 90, padding: "2px 4px", borderRadius: 4, border: "1px solid rgba(0,212,170,0.4)", background: "rgba(0,212,170,0.06)", color: "#F0F2F5", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none" }} />
+                      </div>
+                    ) : (
+                      <div onClick={e => { e.stopPropagation(); setEditingCarrierInfo({ carrierName: cr.carrier_name, field: "mc_number", value: mcNumber || "" }); }}
+                        style={{ display: "flex", alignItems: "center", gap: 4, cursor: "text", minHeight: 16 }}>
+                        {mcNumber ? (
+                          <>
+                            <span style={{ fontSize: 11, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>MC-{mcNumber}</span>
+                            <span onClick={e => { e.stopPropagation(); copyMC(mcNumber); }}
+                              title="Copy MC#" style={{ fontSize: 11, cursor: "pointer", color: copiedMC === mcNumber ? "#34d399" : "#3D4654", transition: "color 0.15s" }}>
+                              {copiedMC === mcNumber ? "\u2713" : "\u2398"}
+                            </span>
+                          </>
+                        ) : (
+                          isHovered && <span style={{ fontSize: 11, color: "#3D4654", fontStyle: "italic" }}>+ MC#</span>
+                        )}
                       </div>
                     )}
-                    {/* Line 3: Dispatch email */}
-                    {dispatchEmail && (
-                      <a href={`mailto:${dispatchEmail}`} onClick={e => e.stopPropagation()}
-                        style={{ fontSize: 11, color: "#60a5fa", textDecoration: "none", display: "block", marginTop: 1, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                        onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"}
-                        onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}>
-                        {dispatchEmail}
-                      </a>
+                    {/* Line 3: Dispatch email — inline editable */}
+                    {editingCarrierInfo?.carrierName === cr.carrier_name && editingCarrierInfo?.field === "contact_email" ? (
+                      <input autoFocus type="email" value={editingCarrierInfo.value}
+                        onChange={e => setEditingCarrierInfo(prev => ({ ...prev, value: e.target.value }))}
+                        onBlur={() => { if (onUpdateCarrierInfo) { setSavingCarrierInfo(true); onUpdateCarrierInfo(cr.carrier_name, "contact_email", editingCarrierInfo.value).finally(() => setSavingCarrierInfo(false)); } setEditingCarrierInfo(null); }}
+                        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditingCarrierInfo(null); }}
+                        onClick={e => e.stopPropagation()}
+                        placeholder="dispatch@carrier.com"
+                        style={{ width: 180, padding: "2px 4px", borderRadius: 4, border: "1px solid rgba(0,212,170,0.4)", background: "rgba(0,212,170,0.06)", color: "#F0F2F5", fontSize: 11, outline: "none", marginTop: 1 }} />
+                    ) : (
+                      <div onClick={e => { e.stopPropagation(); setEditingCarrierInfo({ carrierName: cr.carrier_name, field: "contact_email", value: dispatchEmail || "" }); }}
+                        style={{ cursor: "text", minHeight: 16, marginTop: 1 }}>
+                        {dispatchEmail ? (
+                          <a href={`mailto:${dispatchEmail}`} onClick={e => e.stopPropagation()}
+                            style={{ fontSize: 11, color: "#60a5fa", textDecoration: "none", display: "block", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                            onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"}
+                            onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}>
+                            {dispatchEmail}
+                          </a>
+                        ) : (
+                          isHovered && <span style={{ fontSize: 11, color: "#3D4654", fontStyle: "italic" }}>+ email</span>
+                        )}
+                      </div>
                     )}
                   </td>
                   {visibleCols.slice(1, -1).map((col, vi) => {
@@ -756,7 +791,7 @@ export default function RateIQView() {
     const m = {};
     dirCarriers.forEach(c => {
       m[(c.carrier_name || "").toLowerCase()] = {
-        can_hazmat: c.can_hazmat, can_overweight: c.can_overweight, can_reefer: c.can_reefer,
+        id: c.id, can_hazmat: c.can_hazmat, can_overweight: c.can_overweight, can_reefer: c.can_reefer,
         can_bonded: c.can_bonded, can_oog: c.can_oog, can_warehousing: c.can_warehousing,
         can_transload: c.can_transload, tier_rank: c.tier_rank, dnu: c.dnu, mc_number: c.mc_number,
         contact_email: c.contact_email || c.email, contact_phone: c.contact_phone || c.phone,
@@ -924,6 +959,30 @@ export default function RateIQView() {
     setEditingLaneRateId(null);
     setEditingLaneField(null);
   };
+
+  // ── Update carrier directory info (MC#, email) from lane card ──
+  const handleUpdateCarrierInfo = useCallback(async (carrierName, field, value) => {
+    const key = (carrierName || "").toLowerCase();
+    const existing = carrierCapMap[key];
+    try {
+      if (existing?.id) {
+        // Update existing carrier in directory
+        await apiFetch(`${API_BASE}/api/carriers/${existing.id}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ [field]: value || null }),
+        });
+      } else {
+        // Create new carrier in directory
+        await apiFetch(`${API_BASE}/api/carriers`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ carrier_name: carrierName, [field]: value || null, source: "rate_card" }),
+        });
+      }
+      // Refresh carriers to update capMap
+      const res = await apiFetch(`${API_BASE}/api/carriers`).then(r => r.json());
+      setDirCarriers(res.carriers || res || []);
+    } catch (e) { console.error("Carrier info update failed:", e); }
+  }, [carrierCapMap]);
 
   // ── API: Fetch all data ──
   const fetchData = useCallback(async () => {
@@ -1528,6 +1587,7 @@ export default function RateIQView() {
                 setEditingLaneRateId={setEditingLaneRateId} setEditingLaneField={setEditingLaneField} setEditingLaneValue={setEditingLaneValue}
                 handleLaneRateUpdate={handleLaneRateUpdate}
                 laneOrigin={currentGroup.port} laneDestination={currentGroup.destination}
+                onUpdateCarrierInfo={handleUpdateCarrierInfo}
                 onUseRate={(cr) => {
                   // Build linehaul items from carrier rate fields
                   const items = [];
