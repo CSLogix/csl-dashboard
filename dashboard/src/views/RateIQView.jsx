@@ -117,6 +117,7 @@ function HistoryTabContent({ rateHistory, historyLoading, onLoad }) {
 
 // ── Market Rate Card (DrayRates-inspired) ──
 function MarketRateCard({ laneGroup, carrierCapMap }) {
+  const [feedback, setFeedback] = useState(null); // 'accurate' | 'inaccurate'
   if (!laneGroup) return null;
   const { carriers, minRate, maxRate, total, count, port, destination, miles, origin_zip, dest_zip, move_type } = laneGroup;
   const avgRate = count > 0 ? Math.round(total / count) : 0;
@@ -153,10 +154,12 @@ function MarketRateCard({ laneGroup, carrierCapMap }) {
           )}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(52,211,153,0.3)", background: "rgba(52,211,153,0.08)", color: "#34d399", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+          <button onClick={() => { setFeedback(f => f === "accurate" ? null : "accurate"); apiFetch(`${API_BASE}/api/rate-iq/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lane: `${port} → ${destination}`, rating: "accurate", avg_rate: avgRate, count }) }).catch(() => {}); }}
+            style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${feedback === "accurate" ? "rgba(52,211,153,0.6)" : "rgba(52,211,153,0.3)"}`, background: feedback === "accurate" ? "rgba(52,211,153,0.2)" : "rgba(52,211,153,0.08)", color: "#34d399", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
             👍 Accurate
           </button>
-          <button style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.08)", color: "#f87171", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+          <button onClick={() => { setFeedback(f => f === "inaccurate" ? null : "inaccurate"); apiFetch(`${API_BASE}/api/rate-iq/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lane: `${port} → ${destination}`, rating: "inaccurate", avg_rate: avgRate, count }) }).catch(() => {}); }}
+            style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${feedback === "inaccurate" ? "rgba(248,113,113,0.6)" : "rgba(248,113,113,0.3)"}`, background: feedback === "inaccurate" ? "rgba(248,113,113,0.2)" : "rgba(248,113,113,0.08)", color: "#f87171", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
             👎 Inaccurate
           </button>
         </div>
