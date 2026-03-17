@@ -84,6 +84,9 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
     return () => document.removeEventListener('mousedown', handler);
   }, [statusExpanded]);
   const [emailsCollapsed, setEmailsCollapsed] = useState(false);
+  const [expandedEmailId, setExpandedEmailId] = useState(null);
+  const [emailFullBody, setEmailFullBody] = useState({}); // { [emailId]: bodyHtml }
+  const [emailBodyLoading, setEmailBodyLoading] = useState(null);
   const [aiSummary, setAiSummary] = useState(null);
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
 
@@ -148,6 +151,9 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
       setDriverInfo({ driverName: "", driverPhone: "", driverEmail: "", carrierEmail: "", trailerNumber: "", macropointUrl: "" });
       setDriverEditing(null);
       setLoadEmails([]);
+      setExpandedEmailId(null);
+      setEmailFullBody({});
+      setEmailBodyLoading(null);
       setStatusExpanded(false);
       setAiSummary(null);
       setAiSummaryLoading(false);
@@ -348,7 +354,14 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
           handleStatusUpdate(selectedShipment.id, rData.auto_status);
           setDocUploadMsg(`Uploaded — status → ${rData.auto_status.replace(/_/g, " ")}`);
         }
-      } else { setDocUploadMsg(`Upload failed (${r.status})`); }
+      } else {
+          if (r.status === 409) {
+            const errData = await r.json().catch(() => ({}));
+            setDocUploadMsg(errData.error || "Duplicate file — already uploaded");
+          } else {
+            setDocUploadMsg(`Upload failed (${r.status})`);
+          }
+        }
     } catch { setDocUploadMsg("Upload error"); }
     setDocUploading(false);
   };
@@ -1026,40 +1039,113 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 <span style={{ fontSize: 11, color: "#5A6478", transition: "transform 0.2s", transform: emailsCollapsed ? "rotate(0deg)" : "rotate(180deg)" }}>&#9660;</span>
               </div>
               {!emailsCollapsed && (
-                <div style={{ maxHeight: 200, overflow: "auto", marginTop: 8 }}>
-                  {loadEmails.map(em => (
-                    <div key={em.id} style={{ display: "flex", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                      <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{em.has_attachments ? "\u{1F4CE}" : "\u2709"}</span>
-                      {em.priority && <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, marginTop: 5, background: em.priority >= 5 ? "#EF4444" : em.priority >= 4 ? "#F97316" : em.priority >= 3 ? "#3B82F6" : "#6B7280" }} />}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <div style={{ fontSize: 11, color: "#F0F2F5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
-                            {em.subject || "(no subject)"}
+                <div style={{ maxHeight: 400, overflow: "auto", marginTop: 8 }}>
+                  {loadEmails.map(em => {
+                    const isExpanded = expandedEmailId === em.id;
+                    return (
+                    <div key={em.id}
+                      style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", transition: "background 0.15s", background: isExpanded ? "rgba(255,255,255,0.03)" : "transparent", borderRadius: isExpanded ? 8 : 0 }}>
+                      {/* Email header row — clickable */}
+                      <div
+                        onClick={() => {
+                          const nextId = isExpanded ? null : em.id;
+                          setExpandedEmailId(nextId);
+                          // Fetch full body if not already cached
+                          if (nextId && !emailFullBody[em.id]) {
+                            setEmailBodyLoading(em.id);
+                            apiFetch(`${API_BASE}/api/email/${em.id}/body`)
+                              .then(r => r.ok ? r.json() : null)
+                              .then(data => {
+                                if (data) setEmailFullBody(prev => ({ ...prev, [em.id]: data }));
+                              })
+                              .catch(() => {})
+                              .finally(() => setEmailBodyLoading(null));
+                          }
+                        }}
+                        style={{ display: "flex", gap: 8, padding: "6px 4px", cursor: "pointer", borderRadius: 6 }}
+                        onMouseEnter={e => { if (!isExpanded) e.currentTarget.style.background = "rgba(255,255,255,0.02)"; }}
+                        onMouseLeave={e => { if (!isExpanded) e.currentTarget.style.background = "transparent"; }}>
+                        <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{em.has_attachments ? "\u{1F4CE}" : "\u2709"}</span>
+                        {em.priority && <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, marginTop: 5, background: em.priority >= 5 ? "#EF4444" : em.priority >= 4 ? "#F97316" : em.priority >= 3 ? "#3B82F6" : "#6B7280" }} />}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <div style={{ fontSize: 11, color: "#F0F2F5", fontWeight: isExpanded ? 700 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+                              {em.subject || "(no subject)"}
+                            </div>
+                            {em.email_type && em.email_type !== "general" && (
+                              <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, fontWeight: 600, background: em.email_type.includes("rate") ? "rgba(0,212,170,0.15)" : em.email_type === "detention" ? "rgba(239,68,68,0.15)" : "rgba(59,130,246,0.15)", color: em.email_type.includes("rate") ? "#00D4AA" : em.email_type === "detention" ? "#EF4444" : "#3B82F6", whiteSpace: "nowrap", flexShrink: 0 }}>
+                                {em.email_type.replace(/_/g, " ").toUpperCase()}
+                              </span>
+                            )}
+                            <span style={{ fontSize: 9, color: "#5A6478", flexShrink: 0, transition: "transform 0.15s", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>{"\u25BC"}</span>
                           </div>
-                          {em.email_type && em.email_type !== "general" && (
-                            <span style={{ fontSize: 7, padding: "1px 4px", borderRadius: 3, fontWeight: 600, background: em.email_type.includes("rate") ? "rgba(0,212,170,0.15)" : em.email_type === "detention" ? "rgba(239,68,68,0.15)" : "rgba(59,130,246,0.15)", color: em.email_type.includes("rate") ? "#00D4AA" : em.email_type === "detention" ? "#EF4444" : "#3B82F6", whiteSpace: "nowrap", flexShrink: 0 }}>
-                              {em.email_type.replace(/_/g, " ").toUpperCase()}
-                            </span>
+                          <div style={{ fontSize: 8, color: "#8B95A8" }}>
+                            {(em.sender || "").replace(/<[^>]+>/g, "").trim()}
+                            {" \u00B7 "}
+                            {em.sent_at ? new Date(em.sent_at).toLocaleDateString("en-US", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""}
+                          </div>
+                          {!isExpanded && em.ai_summary && (
+                            <div style={{ fontSize: 8, color: "#5A6478", marginTop: 2, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {em.ai_summary}
+                            </div>
+                          )}
+                          {!isExpanded && em.attachment_names && (
+                            <div style={{ fontSize: 8, color: "#4D5669", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {em.attachment_names}
+                            </div>
                           )}
                         </div>
-                        <div style={{ fontSize: 8, color: "#8B95A8" }}>
-                          {(em.sender || "").replace(/<[^>]+>/g, "").trim()}
-                          {" \u00B7 "}
-                          {em.sent_at ? new Date(em.sent_at).toLocaleDateString("en-US", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""}
-                        </div>
-                        {em.ai_summary && (
-                          <div style={{ fontSize: 8, color: "#5A6478", marginTop: 2, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {em.ai_summary}
-                          </div>
-                        )}
-                        {em.attachment_names && (
-                          <div style={{ fontSize: 8, color: "#4D5669", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {em.attachment_names}
-                          </div>
-                        )}
                       </div>
+                      {/* Expanded email body preview */}
+                      {isExpanded && (
+                        <div style={{ padding: "4px 8px 10px 28px" }}>
+                          {/* Recipients */}
+                          {em.recipients && (
+                            <div style={{ fontSize: 9, color: "#5A6478", marginBottom: 6 }}>
+                              <span style={{ color: "#8B95A8", fontWeight: 600 }}>To:</span> {em.recipients}
+                            </div>
+                          )}
+                          {/* AI Summary */}
+                          {em.ai_summary && (
+                            <div style={{ fontSize: 10, color: "#00D4AA", marginBottom: 8, padding: "6px 8px", background: "rgba(0,212,170,0.06)", borderRadius: 6, borderLeft: "2px solid rgba(0,212,170,0.3)", lineHeight: 1.5 }}>
+                              {em.ai_summary}
+                            </div>
+                          )}
+                          {/* Full body or preview */}
+                          {emailBodyLoading === em.id ? (
+                            <div style={{ fontSize: 10, color: "#5A6478", fontStyle: "italic", padding: "8px 0" }}>Loading email body...</div>
+                          ) : emailFullBody[em.id]?.body_html ? (
+                            <div style={{ background: "#fff", borderRadius: 8, padding: 12, maxHeight: 300, overflow: "auto", border: "1px solid rgba(255,255,255,0.06)" }}>
+                              <iframe
+                                srcDoc={emailFullBody[em.id].body_html}
+                                title="Email preview"
+                                sandbox="allow-same-origin"
+                                style={{ width: "100%", border: "none", minHeight: 120, maxHeight: 280 }}
+                                onLoad={e => { try { e.target.style.height = Math.min(280, e.target.contentDocument.body.scrollHeight + 16) + "px"; } catch {} }}
+                              />
+                            </div>
+                          ) : emailFullBody[em.id]?.body_text ? (
+                            <div style={{ fontSize: 10, color: "#C8CDD8", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word", background: "rgba(255,255,255,0.02)", borderRadius: 6, padding: "8px 10px", maxHeight: 250, overflow: "auto" }}>
+                              {emailFullBody[em.id].body_text}
+                            </div>
+                          ) : em.body_preview ? (
+                            <div style={{ fontSize: 10, color: "#C8CDD8", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word", background: "rgba(255,255,255,0.02)", borderRadius: 6, padding: "8px 10px", maxHeight: 250, overflow: "auto" }}>
+                              {em.body_preview}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 10, color: "#5A6478", fontStyle: "italic" }}>No preview available</div>
+                          )}
+                          {/* Attachments */}
+                          {em.attachment_names && (
+                            <div style={{ fontSize: 9, color: "#8B95A8", marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}>
+                              <span>{"\u{1F4CE}"}</span> {em.attachment_names}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  );
+                  })}
                 </div>
               )}
             </div>
