@@ -224,12 +224,13 @@ async def api_tracking_summary():
     _dc_map = {}  # efj_num -> {driver_phone, trailer_number}
     try:
         with db.get_cursor() as cur:
-            cur.execute("SELECT efj, driver_phone, trailer_number FROM driver_contacts")
+            cur.execute("SELECT efj, driver_phone, trailer_number, carrier_email FROM driver_contacts")
             for row in cur.fetchall():
                 efj_key = (row["efj"] or "").replace("EFJ", "").strip()
                 _dc_map[efj_key] = {
                     "phone": (row["driver_phone"] or "").strip(),
                     "trailer": (row["trailer_number"] or "").strip(),
+                    "carrierEmail": (row["carrier_email"] or "").strip(),
                 }
     except Exception:
         pass  # PG unavailable — fall back to cache-only
@@ -261,9 +262,10 @@ async def api_tracking_summary():
             "stop2Eta": stop_times.get("stop2_eta"),
             "mpDisplayStatus": _ts_disp,
             "mpDisplayDetail": _ts_detail,
-            # Driver/trailer: prefer cache (real-time), fall back to PG driver_contacts
+            # Driver/trailer/email: prefer cache (real-time), fall back to PG driver_contacts
             "driverPhone": entry.get("driver_phone", "") or _dc_map.get(efj, {}).get("phone", ""),
             "trailer": entry.get("trailer", "") or _dc_map.get(efj, {}).get("trailer", ""),
+            "carrierEmail": _dc_map.get(efj, {}).get("carrierEmail", ""),
         }
     return {"tracking": result}
 
