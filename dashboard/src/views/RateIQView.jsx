@@ -511,7 +511,7 @@ function LaneCard({ lane, onClick, onQuickQuote, onReclassify, rateIds }) {
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5" }}>
-            {lane.origin_city || lane.port || "—"} <span style={{ color: "#5A6478" }}>→</span> {lane.dest_city || lane.destination || "—"}
+            {lane.origin_city || lane.port || "—"} <span style={{ color: "#5A6478" }}>{lane.bidirectional ? "↔" : "→"}</span> {lane.dest_city || lane.destination || "—"}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
             <span style={{ fontSize: 11, color: "#5A6478" }}>{volume} rate{volume !== 1 ? "s" : ""} on file</span>
@@ -831,26 +831,41 @@ export default function RateIQView() {
     });
   }, [dirCarriers, dirSearch, dirMarket, dirCaps, dirHideDnu, dirPort, portGroups]);
 
-  // ── Group lane results by origin → destination (normalized) ──
+  // ── Group lane results by origin ↔ destination (bidirectional, normalized) ──
+  // Merges A→B and B→A into a single lane card so round-trip lanes aren't split
   const groupedLanes = useMemo(() => {
     const map = {};
     (Array.isArray(laneResults) ? laneResults : []).forEach(r => {
       const normOrigin = normalizePort(r.port || "");
       const normDest = normalizePort(r.destination || "");
-      const key = `${normOrigin} → ${normDest}`;
-      if (!map[key]) map[key] = { port: normOrigin, destination: normDest, carriers: [], minRate: Infinity, maxRate: 0, total: 0, count: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
-      map[key].carriers.push(r);
-      if (!map[key].miles && r.miles) map[key].miles = r.miles;
-      if (!map[key].origin_zip && r.origin_zip) map[key].origin_zip = r.origin_zip;
-      if (!map[key].dest_zip && r.dest_zip) map[key].dest_zip = r.dest_zip;
+      // Bidirectional key: sort endpoints alphabetically so A→B and B→A share a key
+      const endpoints = [normOrigin, normDest].sort();
+      const biKey = `${endpoints[0]} ↔ ${endpoints[1]}`;
+      if (!map[biKey]) map[biKey] = { port: normOrigin, destination: normDest, carriers: [], minRate: Infinity, maxRate: 0, total: 0, count: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {}, directions: {} };
+      map[biKey].carriers.push(r);
+      if (!map[biKey].miles && r.miles) map[biKey].miles = r.miles;
+      if (!map[biKey].origin_zip && r.origin_zip) map[biKey].origin_zip = r.origin_zip;
+      if (!map[biKey].dest_zip && r.dest_zip) map[biKey].dest_zip = r.dest_zip;
       const rate = parseFloat(r.total || r.dray_rate || 0);
-      if (rate > 0) { map[key].minRate = Math.min(map[key].minRate, rate); map[key].maxRate = Math.max(map[key].maxRate, rate); map[key].total += rate; map[key].count++; }
+      if (rate > 0) { map[biKey].minRate = Math.min(map[biKey].minRate, rate); map[biKey].maxRate = Math.max(map[biKey].maxRate, rate); map[biKey].total += rate; map[biKey].count++; }
       const mt = (r.move_type || "dray").toLowerCase();
-      map[key].moveTypes[mt] = (map[key].moveTypes[mt] || 0) + 1;
+      map[biKey].moveTypes[mt] = (map[biKey].moveTypes[mt] || 0) + 1;
+      // Track direction counts for display
+      const dirKey = `${normOrigin} → ${normDest}`;
+      map[biKey].directions[dirKey] = (map[biKey].directions[dirKey] || 0) + 1;
     });
     return Object.values(map).map(g => {
       const mtEntries = Object.entries(g.moveTypes);
       g.move_type = mtEntries.length > 0 ? mtEntries.sort((a, b) => b[1] - a[1])[0][0] : "dray";
+      // Use the most common direction as the primary display
+      const dirEntries = Object.entries(g.directions);
+      if (dirEntries.length > 1) g.bidirectional = true;
+      if (dirEntries.length > 0) {
+        const primary = dirEntries.sort((a, b) => b[1] - a[1])[0][0];
+        const [pOrig, pDest] = primary.split(" → ");
+        if (pOrig) g.port = pOrig;
+        if (pDest) g.destination = pDest;
+      }
       // Dedup carriers: same carrier_name + same total → keep the one with more data
       const seen = {};
       g.carriers = g.carriers.filter(cr => {
@@ -1419,6 +1434,7 @@ export default function RateIQView() {
                   carrier_count: group.carriers.length,
                   miles: group.miles, origin_zip: group.origin_zip, dest_zip: group.dest_zip,
                   move_type: group.move_type,
+                  bidirectional: group.bidirectional,
                 }} onClick={() => openLaneDetail(group.port, group.destination, gi, group.carriers)}
                   rateIds={(group.carriers || []).map(c => c.id).filter(Boolean)}
                   onReclassify={mt => handleReclassifyLane(group.port, group.destination, (group.carriers || []).map(c => c.id).filter(Boolean), mt)}

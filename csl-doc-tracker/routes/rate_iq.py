@@ -690,17 +690,22 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
             "move_type": r["move_type"],
         })
 
-    # ── Group by normalized lane (port cluster aware) ──
+    # ── Group by normalized lane (bidirectional, port cluster aware) ──
+    # Merges A→B and B→A into a single lane group so round-trip lanes
+    # aren't split into separate cards.
     lane_map = defaultdict(list)
+    lane_dir_counts = defaultdict(lambda: defaultdict(int))  # biKey → {dir_string: count}
     for m in matches:
-        key = (
-            _normalize_port(m["origin"] or "").lower(),
-            _normalize_port(m["destination"] or "").lower(),
-        )
-        lane_map[key].append(m)
+        norm_o = _normalize_port(m["origin"] or "").lower()
+        norm_d = _normalize_port(m["destination"] or "").lower()
+        # Bidirectional key: sort endpoints so A→B and B→A share a key
+        bi_key = tuple(sorted([norm_o, norm_d]))
+        lane_map[bi_key].append(m)
+        dir_str = f"{norm_o}|{norm_d}"
+        lane_dir_counts[bi_key][dir_str] += 1
 
     lane_groups = []
-    for (orig_key, dest_key), group in sorted(
+    for bi_key, group in sorted(
         lane_map.items(),
         key=lambda kv: min((q["rate"] or 9e9) for q in kv[1])
     ):
@@ -709,13 +714,19 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
         for q in group:
             source_counts[q["source"]] = source_counts.get(q["source"], 0) + 1
         last_date = max((q["date"] or "") for q in group) or None
-        # Use the normalized cluster name as the lane display name
-        norm_origin = _normalize_port(group[0]["origin"] or "") or group[0]["origin"]
-        norm_dest = _normalize_port(group[0]["destination"] or "") or group[0]["destination"]
+        # Use the most common direction as primary display
+        dir_counts = lane_dir_counts[bi_key]
+        primary_dir = max(dir_counts, key=dir_counts.get)
+        prim_o, prim_d = primary_dir.split("|")
+        norm_origin = _normalize_port(prim_o) or prim_o
+        norm_dest = _normalize_port(prim_d) or prim_d
+        bidirectional = len(dir_counts) > 1
+        arrow = " ↔ " if bidirectional else " → "
         lane_groups.append({
-            "lane": f"{norm_origin} → {norm_dest}",
+            "lane": f"{norm_origin}{arrow}{norm_dest}",
             "origin": norm_origin,
             "destination": norm_dest,
+            "bidirectional": bidirectional,
             "count": len(group),
             "rated_count": len(rates),
             "floor": min(rates) if rates else None,
