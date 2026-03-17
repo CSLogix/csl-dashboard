@@ -126,32 +126,21 @@ export default function OverviewView({ loaded, shipments, apiStats, accountOverv
             </div>
           </div>
           {/* Column headers */}
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 1fr) 56px 68px", gap: 4, marginBottom: 6, padding: "0 10px", alignItems: "center" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 1fr) 56px", gap: 4, marginBottom: 6, padding: "0 10px", alignItems: "center" }}>
             <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Rep</div>
             <div style={{ fontSize: 11, color: "#00b8d4", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active loads (not archived)">Loads</div>
-            <div style={{ fontSize: 11, color: "#00b8d4", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" }} title="Active revenue (all priced loads)">Rev</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             {repData.map(r => {
               const score = (repScoreboard || []).find(s => s.rep === r.name) || {};
               const loads7d = score.loads_7d || 0;
-              const revenue7d = score.revenue_7d || 0;
-              const revenueLoads = score.margin_loads || 0;
-
-              const formatRev = (val) => {
-                if (!val || val === 0) return "\u2014";
-                if (val >= 1000) return `$${(val / 1000).toFixed(1)}k`;
-                return `$${Math.round(val)}`;
-              };
 
               const loadsColor = loads7d >= 5 ? "#F0F2F5" : loads7d > 0 ? "#8B95A8" : "#3D4557";
-              // Revenue in green when positive
-              const revColor = revenue7d > 0 ? "#00D4AA" : "#3D4557";
 
               return (
                 <div key={r.name} className="rep-card"
                   onClick={() => onSelectRep(r.name)}
-                  style={{ display: "grid", gridTemplateColumns: "minmax(120px, 1fr) 56px 68px", gap: 4, alignItems: "center", padding: "7px 10px", borderRadius: 10,
+                  style={{ display: "grid", gridTemplateColumns: "minmax(120px, 1fr) 56px", gap: 4, alignItems: "center", padding: "7px 10px", borderRadius: 10,
                     background: "rgba(255,255,255,0.02)",
                     border: "1px solid rgba(255,255,255,0.06)", cursor: "pointer",
                     transition: "border-color 0.15s" }}>
@@ -177,13 +166,6 @@ export default function OverviewView({ loaded, shipments, apiStats, accountOverv
                   <div style={{ textAlign: "center" }}>
                     <div style={{ fontSize: 15, fontWeight: 800, color: loadsColor, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.2 }}>
                       {loads7d}
-                    </div>
-                  </div>
-
-                  {/* REVENUE — green when positive */}
-                  <div style={{ textAlign: "center" }} title={revenueLoads > 0 ? `$${Math.round(score.total_margin || 0).toLocaleString()} margin from ${revenueLoads} priced loads` : "No priced loads"}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: revColor, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.2 }}>
-                      {formatRev(revenue7d)}
                     </div>
                   </div>
                 </div>

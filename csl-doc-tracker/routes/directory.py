@@ -141,6 +141,11 @@ async def api_update_carrier(carrier_id: int, request: Request):
                    "can_reefer", "can_bonded", "can_oog", "can_warehousing", "dnu"}
     int_fields = {"tier_rank", "trucks"}
     array_fields = {"markets", "haz_classes"}
+    # Sync transload/warehousing — treat as synonyms
+    if "can_transload" in body and "can_warehousing" not in body:
+        body["can_warehousing"] = body["can_transload"]
+    elif "can_warehousing" in body and "can_transload" not in body:
+        body["can_transload"] = body["can_warehousing"]
     sets, params = [], []
     for k, v in body.items():
         if k in allowed:
@@ -179,8 +184,15 @@ async def api_delete_carrier(carrier_id: int):
     return JSONResponse({"ok": True})
 
 
-_CARRIER_EXTRACT_PROMPT = """Extract carrier directory information from this document (rate sheet, carrier packet, or screenshot).
-Return ONLY valid JSON (no markdown, no explanation) with these fields:
+_CARRIER_EXTRACT_PROMPT = """Extract carrier directory information from this document (rate sheet, carrier packet, or directory screenshot).
+
+If this is a DIRECTORY LISTING (like LoadMatch/Drayage Directory) with MULTIPLE carriers in a table:
+Return ONLY valid JSON (no markdown): {"carriers": [array of carrier objects]}
+
+If this is a SINGLE carrier rate sheet or packet:
+Return ONLY valid JSON (no markdown): a single carrier object (not wrapped in array)
+
+Each carrier object should have:
 {
   "carrier_name": "string",
   "mc_number": "MC number digits only, or null",
@@ -188,12 +200,21 @@ Return ONLY valid JSON (no markdown, no explanation) with these fields:
   "contact_email": "string or null",
   "contact_phone": "string or null",
   "contact_name": "string or null",
+  "city": "city name or null",
+  "state": "state abbreviation or null",
   "regions": "comma-separated service regions or null",
   "ports": "comma-separated ports served or null",
-  "equipment_types": "comma-separated equipment types (Dry Van, Flatbed, Reefer, etc.) or null",
+  "equipment_types": "comma-separated equipment types or null",
+  "can_hazmat": true/false (HZ abbreviation in directory),
+  "can_bonded": true/false (BD abbreviation),
+  "can_transload": true/false (TR or TR-WH abbreviation),
+  "can_warehousing": true/false (TR-WH or WH abbreviation, same as transload),
+  "can_overweight": true/false (Overweight label),
+  "can_oog": true/false (OOG or oversized),
+  "can_reefer": true/false (Refrigerated),
   "rates": [{"lane": "origin to destination", "rate": "dollar amount", "equipment": "type"}]
 }
-Extract ALL lanes/rates if this is a rate sheet. Omit null fields."""
+Extract ALL carriers visible. For directory screenshots, focus on carrier name, location, and capability flags. Omit null fields."""
 
 
 @router.post("/api/carriers/extract")
@@ -234,6 +255,64 @@ async def api_carrier_extract(request: Request):
     try:
         from shared import _extract_with_claude
         result = _extract_with_claude(content)
+
+        # If bulk carriers extracted (directory screenshot), save them
+        carriers_list = result.get("carriers") if isinstance(result, dict) else None
+        if not carriers_list and isinstance(result, dict) and result.get("carrier_name"):
+            carriers_list = [result]
+
+        if carriers_list and isinstance(carriers_list, list) and len(carriers_list) > 0:
+            saved = []
+            for c in carriers_list:
+                name = (c.get("carrier_name") or "").strip()
+                if not name:
+                    continue
+                mc = (c.get("mc_number") or "").strip() or None
+                # Sync transload/warehousing
+                can_tl = bool(c.get("can_transload", False))
+                can_wh = bool(c.get("can_warehousing", False))
+                if can_tl or can_wh:
+                    can_tl = can_wh = True
+                area = c.get("city", "")
+                if c.get("state"):
+                    area = f"{area}, {c['state']}" if area else c["state"]
+                with db.get_conn() as conn:
+                    with db.get_cursor(conn) as cur:
+                        # Upsert by mc_number or carrier_name
+                        if mc:
+                            cur.execute("SELECT id FROM carriers WHERE mc_number = %s", (mc,))
+                        else:
+                            cur.execute("SELECT id FROM carriers WHERE LOWER(carrier_name) = LOWER(%s)", (name,))
+                        existing = cur.fetchone()
+                        if existing:
+                            cur.execute("""UPDATE carriers SET
+                                can_hazmat = COALESCE(%s, can_hazmat), can_overweight = COALESCE(%s, can_overweight),
+                                can_transload = COALESCE(%s, can_transload), can_warehousing = COALESCE(%s, can_warehousing),
+                                can_reefer = COALESCE(%s, can_reefer), can_bonded = COALESCE(%s, can_bonded),
+                                can_oog = COALESCE(%s, can_oog),
+                                pickup_area = COALESCE(NULLIF(%s, ''), pickup_area),
+                                updated_at = NOW()
+                                WHERE id = %s RETURNING id, carrier_name""",
+                                (bool(c.get("can_hazmat")), bool(c.get("can_overweight")),
+                                 can_tl, can_wh,
+                                 bool(c.get("can_reefer")), bool(c.get("can_bonded")),
+                                 bool(c.get("can_oog")), area or "", existing["id"]))
+                            saved.append({"id": existing["id"], "name": name, "action": "updated"})
+                        else:
+                            cur.execute("""INSERT INTO carriers (carrier_name, mc_number, pickup_area,
+                                can_hazmat, can_overweight, can_transload, can_warehousing,
+                                can_reefer, can_bonded, can_oog, source)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'loadmatch')
+                                RETURNING id, carrier_name""",
+                                (name, mc, area or None,
+                                 bool(c.get("can_hazmat")), bool(c.get("can_overweight")),
+                                 can_tl, can_wh,
+                                 bool(c.get("can_reefer")), bool(c.get("can_bonded")),
+                                 bool(c.get("can_oog"))))
+                            row = cur.fetchone()
+                            saved.append({"id": row["id"], "name": name, "action": "created"})
+            return JSONResponse({"carriers": carriers_list, "saved": saved})
+
         return JSONResponse(result)
     except Exception as e:
         log.error("Carrier extraction failed: %s", e)

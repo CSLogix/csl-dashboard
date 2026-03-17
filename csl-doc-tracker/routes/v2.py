@@ -294,6 +294,29 @@ async def api_v2_team(request: Request):
     return {"team": team}
 
 
+@router.get("/api/rep-scoreboard")
+async def api_rep_scoreboard(request: Request):
+    """Per-rep active load counts for the dashboard overview."""
+    with db.get_cursor() as cur:
+        cur.execute(f"""
+        SELECT rep,
+               COUNT(*) FILTER (
+                   WHERE LOWER(status) NOT IN ({_POST_DELIVERY_STATUSES})
+                     AND archived = FALSE
+               ) AS loads_7d
+        FROM shipments
+        WHERE archived = FALSE AND rep IS NOT NULL AND rep != ''
+        GROUP BY rep
+        ORDER BY loads_7d DESC
+        """)
+        rows = cur.fetchall()
+    scoreboard = [
+        {"rep": r["rep"], "loads_7d": r["loads_7d"]}
+        for r in rows
+    ]
+    return {"scoreboard": scoreboard}
+
+
 @router.post("/api/v2/load/{efj}/status")
 async def api_v2_update_status(efj: str, request: Request, background_tasks: BackgroundTasks):
     """Update status in Postgres. Write back to Google Sheet if shared account."""

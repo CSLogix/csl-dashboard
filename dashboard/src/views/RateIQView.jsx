@@ -12,6 +12,34 @@ const grad = "linear-gradient(135deg, #00c853 0%, #00b8d4 50%, #2979ff 100%)";
 const fmt = (n) => { const num = parseFloat(n); return isNaN(num) ? "$0" : "$" + num.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 }); };
 const fmtDec = (n) => { const num = parseFloat(n); return isNaN(num) ? "$0.00" : "$" + num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
 
+// ── Port cluster normalization ──
+// Maps common port name variants to canonical cluster names for grouping + autofill
+const PORT_CLUSTERS = {
+  "la/lb": "LA/LB", "la/lb ports": "LA/LB", "lalb": "LA/LB", "lax": "LA/LB",
+  "los angeles": "LA/LB", "long beach": "LA/LB", "los angeles/long beach": "LA/LB",
+  "lbct": "LA/LB", "apm terminals": "LA/LB", "port of los angeles": "LA/LB",
+  "trapac": "LA/LB", "everport": "LA/LB", "ssa marine": "LA/LB", "pct": "LA/LB",
+  "san pedro": "LA/LB", "wilmington": "LA/LB", "carson": "LA/LB",
+  "ny/nj": "NY/NJ", "ny/nj ports": "NY/NJ", "port newark": "NY/NJ", "pnct": "NY/NJ",
+  "elizabeth": "NY/NJ", "bayonne": "NY/NJ", "maher": "NY/NJ", "newark": "NY/NJ",
+  "savannah": "Savannah", "savannah ports": "Savannah", "garden city": "Savannah",
+  "houston": "Houston", "houston ports": "Houston", "barbours cut": "Houston", "bayport": "Houston",
+  "charleston": "Charleston", "wando welch": "Charleston",
+  "norfolk": "Norfolk", "virginia": "Norfolk", "portsmouth": "Norfolk", "nit": "Norfolk",
+  "oakland": "Oakland",
+};
+function normalizePort(text) {
+  if (!text) return "";
+  const lower = text.trim().toLowerCase();
+  if (PORT_CLUSTERS[lower]) return PORT_CLUSTERS[lower];
+  // Substring match
+  const entries = Object.entries(PORT_CLUSTERS).sort((a, b) => b[0].length - a[0].length);
+  for (const [alias, cluster] of entries) {
+    if (lower.includes(alias)) return cluster;
+  }
+  return text.trim();
+}
+
 // ── History Tab Content (rate history by port group) ──
 function HistoryTabContent({ rateHistory, historyLoading, onLoad }) {
   useEffect(() => { onLoad(); }, []);
@@ -226,7 +254,7 @@ function MarketBenchmarkCard({ benchmark, carrierAvg }) {
 }
 
 // ── Carrier Rate Table (simplified — key columns visible, rest expandable) ──
-function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingLaneField, editingLaneValue, setEditingLaneRateId, setEditingLaneField, setEditingLaneValue, handleLaneRateUpdate, laneOrigin, laneDestination }) {
+function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingLaneField, editingLaneValue, setEditingLaneRateId, setEditingLaneField, setEditingLaneValue, handleLaneRateUpdate, laneOrigin, laneDestination, onUseRate }) {
   const [showAllCols, setShowAllCols] = useState(false);
   const [copiedMC, setCopiedMC] = useState(null);
   const [hoveredRow, setHoveredRow] = useState(null);
@@ -244,16 +272,12 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
     navigator.clipboard.writeText(mc).then(() => { setCopiedMC(mc); setTimeout(() => setCopiedMC(null), 1500); });
   };
 
-  const emailRC = (carrier) => {
+  const [copiedEmail, setCopiedEmail] = useState(null);
+  const copyEmail = (carrier) => {
     const caps = carrierCapMap[(carrier.carrier_name || "").toLowerCase()] || {};
     const email = caps.contact_email || carrier.contact_email;
     if (!email) return;
-    const total = carrier.total || carrier.dray_rate || "";
-    const subject = encodeURIComponent(`Rate Confirmation — ${laneOrigin || ""} → ${laneDestination || ""}`);
-    const body = encodeURIComponent(
-      `Hi,\n\nPlease confirm the following rate:\n\nLane: ${laneOrigin || ""} → ${laneDestination || ""}\nCarrier: ${carrier.carrier_name}\nRate: $${total}\n\nThank you`
-    );
-    window.open(`mailto:${email}?subject=${subject}&body=${body}`, "_self");
+    navigator.clipboard.writeText(email).then(() => { setCopiedEmail(email); setTimeout(() => setCopiedEmail(null), 1500); });
   };
 
   return (
@@ -349,16 +373,29 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
                       </td>
                     );
                   })}
-                  {/* Email RC action column */}
-                  <td style={{ padding: "10px 8px", textAlign: "center", verticalAlign: "middle", width: 36 }}>
-                    {isHovered && dispatchEmail && (
-                      <button onClick={e => { e.stopPropagation(); emailRC(cr); }}
-                        title={`Email rate confirmation to ${dispatchEmail}`}
-                        style={{ padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(59,130,246,0.3)", background: "rgba(59,130,246,0.08)", color: "#60a5fa", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.15s" }}
-                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(59,130,246,0.15)"; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(59,130,246,0.08)"; }}>
-                        \u2709 RC
-                      </button>
+                  {/* Actions column: Use Rate + Email RC */}
+                  <td style={{ padding: "10px 8px", textAlign: "center", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    {isHovered && (
+                      <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                        {onUseRate && (cr.total || cr.dray_rate) && (
+                          <button onClick={e => { e.stopPropagation(); onUseRate(cr); }}
+                            title="Use this rate in Quote Builder"
+                            style={{ padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(0,212,170,0.3)", background: "rgba(0,212,170,0.08)", color: "#00D4AA", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.15s" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,212,170,0.15)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,212,170,0.08)"; }}>
+                            Quote
+                          </button>
+                        )}
+                        {dispatchEmail && (
+                          <button onClick={e => { e.stopPropagation(); copyEmail(cr); }}
+                            title={`Copy ${dispatchEmail}`}
+                            style={{ padding: "4px 8px", borderRadius: 5, border: `1px solid ${copiedEmail === dispatchEmail ? "rgba(52,211,153,0.3)" : "rgba(59,130,246,0.3)"}`, background: copiedEmail === dispatchEmail ? "rgba(52,211,153,0.08)" : "rgba(59,130,246,0.08)", color: copiedEmail === dispatchEmail ? "#34d399" : "#60a5fa", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.15s" }}
+                            onMouseEnter={e => { if (copiedEmail !== dispatchEmail) e.currentTarget.style.background = "rgba(59,130,246,0.15)"; }}
+                            onMouseLeave={e => { if (copiedEmail !== dispatchEmail) e.currentTarget.style.background = "rgba(59,130,246,0.08)"; }}>
+                            {copiedEmail === dispatchEmail ? "\u2713 Copied" : "Email"}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -477,7 +514,7 @@ function LaneCard({ lane, onClick, onQuickQuote, onReclassify, rateIds }) {
 // ═══════════════════════════════════════════════════════════════
 export default function RateIQView() {
   // ── View state ──
-  const [view, setView] = useState("browse"); // browse | detail | quote | scorecard | directory | history | oog
+  const [view, setView] = useState("browse"); // browse | detail | intake | build-quote | scorecard | directory | history | oog
   const [selectedLane, setSelectedLane] = useState(null); // { origin, destination }
 
   // ── Data state ──
@@ -516,6 +553,63 @@ export default function RateIQView() {
   const [marketRateResult, setMarketRateResult] = useState(null);
   const [marketBenchmark, setMarketBenchmark] = useState(null);
 
+  // ── AI Rate Assistant state ──
+  const [aiMessages, setAiMessages] = useState([]); // { role: "user"|"assistant", text }
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiInput, setAiInput] = useState("");
+  const aiChatRef = useRef(null);
+
+  const askAI = useCallback(async (question, laneData) => {
+    if (!question.trim()) return;
+    setAiMessages(prev => [...prev, { role: "user", text: question }]);
+    setAiInput("");
+    setAiLoading(true);
+    try {
+      // Build rich context from lane data
+      const carriers = (laneData?.carriers || []).map(c => ({
+        name: c.carrier_name,
+        rate: c.total || c.dray_rate,
+        fsc: c.fsc,
+        chassis: c.chassis_per_day,
+        prepull: c.prepull,
+        overweight: c.overweight,
+        date: c.created_at,
+      }));
+      const avgRate = laneData?.count > 0 ? Math.round(laneData.total / laneData.count) : null;
+      const context = {
+        lane: `${laneData?.port || ""} → ${laneData?.destination || ""}`,
+        carrier_count: carriers.length,
+        avg_rate: avgRate,
+        floor: laneData?.minRate !== Infinity ? laneData?.minRate : null,
+        ceiling: laneData?.maxRate > 0 ? laneData?.maxRate : null,
+        carriers,
+        market_benchmark: marketBenchmark ? {
+          avg: marketBenchmark.stats?.avg,
+          min: marketBenchmark.stats?.min,
+          max: marketBenchmark.stats?.max,
+          trend_pct: marketBenchmark.stats?.trend_pct,
+        } : null,
+      };
+      const res = await apiFetch(`${API_BASE}/api/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: `You are a dray/freight rate analyst assistant. Answer concisely about this lane.\n\nLane: ${context.lane}\nCarrier rates on file: ${carriers.length}\nAvg rate: $${avgRate || "N/A"}\nFloor: $${context.floor || "N/A"} | Ceiling: $${context.ceiling || "N/A"}\n${context.market_benchmark ? `Market benchmark avg: $${context.market_benchmark.avg}, trend: ${context.market_benchmark.trend_pct > 0 ? "+" : ""}${context.market_benchmark.trend_pct?.toFixed(1) || 0}%` : ""}\n\nCarrier details:\n${carriers.map(c => `- ${c.name}: $${c.rate} (${c.date ? new Date(c.date).toLocaleDateString() : "no date"})`).join("\n")}\n\nUser question: ${question}`,
+          context,
+        }),
+      }).then(r => r.json());
+      const answer = res.answer || res.response || res.text || JSON.stringify(res);
+      setAiMessages(prev => [...prev, { role: "assistant", text: answer }]);
+    } catch (e) {
+      setAiMessages(prev => [...prev, { role: "assistant", text: "Sorry, I couldn't process that request. " + (e.message || "") }]);
+    }
+    setAiLoading(false);
+    setTimeout(() => { if (aiChatRef.current) aiChatRef.current.scrollTop = aiChatRef.current.scrollHeight; }, 50);
+  }, [marketBenchmark]);
+
+  // Reset AI chat when lane changes
+  useEffect(() => { setAiMessages([]); setAiInput(""); }, [selectedLane]);
+
   // ── Lane Search state ──
   const [searchOrigin, setSearchOrigin] = useState("");
   const [searchDest, setSearchDest] = useState("");
@@ -546,38 +640,48 @@ export default function RateIQView() {
     if (!searchOrigin || searchOrigin.length < 2) return [];
     const q = searchOrigin.toLowerCase();
     const seen = new Set();
+    // Check if query matches a port cluster alias — if so, match all ports in that cluster
+    const clusterMatch = PORT_CLUSTERS[q] || Object.entries(PORT_CLUSTERS).find(([a]) => a.includes(q) || q.includes(a))?.[1];
     return rateLaneSummaries
       .filter(ls => {
         const p = (ls.port || "").toLowerCase();
-        if (!p.includes(q) || seen.has(p)) return false;
-        seen.add(p);
+        const matches = p.includes(q) || (clusterMatch && normalizePort(ls.port) === clusterMatch);
+        // Group by normalized port name
+        const normP = normalizePort(ls.port || "").toLowerCase();
+        if (!matches || seen.has(normP)) return false;
+        seen.add(normP);
         return true;
       })
       .slice(0, 6)
       .map(ls => {
-        const matching = rateLaneSummaries.filter(l => (l.port || "").toLowerCase() === (ls.port || "").toLowerCase());
+        const normP = normalizePort(ls.port || "");
+        const matching = rateLaneSummaries.filter(l => normalizePort(l.port || "") === normP);
         const totalRates = matching.reduce((s, l) => s + l.load_count, 0);
         const avgAll = matching.length > 0 ? Math.round(matching.reduce((s, l) => s + l.avg_rate * l.load_count, 0) / totalRates) : 0;
-        return { port: ls.port, lanes: matching.length, avg: avgAll };
+        return { port: normP, lanes: matching.length, avg: avgAll };
       });
   }, [searchOrigin, rateLaneSummaries]);
   const destSuggestions = useMemo(() => {
     if (!searchDest || searchDest.length < 2) return [];
     const q = searchDest.toLowerCase();
     const seen = new Set();
+    const clusterMatch = PORT_CLUSTERS[q] || Object.entries(PORT_CLUSTERS).find(([a]) => a.includes(q) || q.includes(a))?.[1];
     return rateLaneSummaries
       .filter(ls => {
         const d = (ls.destination || "").toLowerCase();
-        if (!d.includes(q) || seen.has(d)) return false;
-        seen.add(d);
+        const matches = d.includes(q) || (clusterMatch && normalizePort(ls.destination) === clusterMatch);
+        const normD = normalizePort(ls.destination || "").toLowerCase();
+        if (!matches || seen.has(normD)) return false;
+        seen.add(normD);
         return true;
       })
       .slice(0, 6)
       .map(ls => {
-        const matching = rateLaneSummaries.filter(l => (l.destination || "").toLowerCase() === (ls.destination || "").toLowerCase());
+        const normD = normalizePort(ls.destination || "");
+        const matching = rateLaneSummaries.filter(l => normalizePort(l.destination || "") === normD);
         const totalRates = matching.reduce((s, l) => s + l.load_count, 0);
         const avgAll = matching.length > 0 ? Math.round(matching.reduce((s, l) => s + l.avg_rate * l.load_count, 0) / totalRates) : 0;
-        return { destination: ls.destination, lanes: matching.length, avg: avgAll, origin: searchOrigin || matching[0]?.port || "" };
+        return { destination: normD, lanes: matching.length, avg: avgAll, origin: searchOrigin || matching[0]?.port || "" };
       });
   }, [searchDest, searchOrigin, rateLaneSummaries]);
 
@@ -589,6 +693,14 @@ export default function RateIQView() {
   const [dirPort, setDirPort] = useState("all");
   const [dirExpanded, setDirExpanded] = useState(null);
   const [editingCarrierId, setEditingCarrierId] = useState(null);
+  const [showAddCarrier, setShowAddCarrier] = useState(false);
+  const [newCarrier, setNewCarrier] = useState({ carrier_name: "", mc_number: "", pickup_area: "" });
+  const [addCarrierSaving, setAddCarrierSaving] = useState(false);
+  const [dirScreenshotFile, setDirScreenshotFile] = useState(null);
+  const [dirScreenshotResult, setDirScreenshotResult] = useState(null);
+  const [dirScreenshotProcessing, setDirScreenshotProcessing] = useState(false);
+  const dirScreenshotRef = useRef(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   // ── Detail navigation ──
   const [laneIndex, setLaneIndex] = useState(0); // for prev/next within grouped results
@@ -599,8 +711,7 @@ export default function RateIQView() {
     { key: "can_reefer", label: "Reefer", color: "#60a5fa" },
     { key: "can_bonded", label: "Bonded", color: "#a78bfa" },
     { key: "can_oog", label: "OOG", color: "#fb923c" },
-    { key: "can_warehousing", label: "WHS", color: "#34d399" },
-    { key: "can_transload", label: "Transload", color: "#38bdf8" },
+    { key: "can_transload", label: "Transload", color: "#38bdf8", sync: "can_warehousing" },
   ];
 
   // ── Carrier capability lookup ──
@@ -667,12 +778,12 @@ export default function RateIQView() {
     }).sort((a, b) => b.count - a.count);
   }, [laneResults]);
 
-  // ── Group rateLaneSummaries by origin city for collapsible browse view ──
+  // ── Group rateLaneSummaries by origin city for collapsible browse view (port-cluster aware) ──
   const originGroups = useMemo(() => {
     const filtered = rateLaneSummaries.filter(ls => moveTypeFilter === "all" || ls.move_type === moveTypeFilter);
     const map = {};
     filtered.forEach(ls => {
-      const origin = ls.port || ls.origin_city || "Unknown";
+      const origin = normalizePort(ls.port || ls.origin_city || "Unknown");
       if (!map[origin]) map[origin] = { origin, lanes: [], totalRate: 0, rateCount: 0, totalLoads: 0 };
       map[origin].lanes.push(ls);
       map[origin].totalLoads += (ls.load_count || 0);
@@ -686,14 +797,72 @@ export default function RateIQView() {
   // ── API: Manual intake — paste email text, AI extracts rate ──
   // ── API: Carrier update ──
   const handleCarrierUpdate = async (carrierId, field, value) => {
-    setDirCarriers(prev => prev.map(c => c.id === carrierId ? { ...c, [field]: value } : c));
+    // Sync WHS/Transload — treat as synonyms
+    const capDef = CAP_OPTIONS.find(c => c.key === field);
+    const updates = { [field]: value };
+    if (capDef?.sync) updates[capDef.sync] = value;
+    setDirCarriers(prev => prev.map(c => c.id === carrierId ? { ...c, ...updates } : c));
     try {
       const r = await apiFetch(`${API_BASE}/api/carriers/${carrierId}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [field]: value }),
+        body: JSON.stringify(updates),
       });
       if (!r.ok) throw new Error(r.status);
     } catch (e) { console.error("Carrier update failed:", e); }
+  };
+
+  // ── API: Add carrier ──
+  const handleAddCarrier = async () => {
+    if (!newCarrier.carrier_name.trim()) return;
+    setAddCarrierSaving(true);
+    try {
+      const r = await apiFetch(`${API_BASE}/api/carriers`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...newCarrier, source: "manual" }),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        setDirCarriers(prev => [data.carrier || data, ...prev]);
+        setNewCarrier({ carrier_name: "", mc_number: "", pickup_area: "" });
+        setShowAddCarrier(false);
+      }
+    } catch (e) { console.error("Add carrier failed:", e); }
+    setAddCarrierSaving(false);
+  };
+
+  // ── API: Delete carrier ──
+  const handleDeleteCarrier = async (carrierId) => {
+    try {
+      const r = await apiFetch(`${API_BASE}/api/carriers/${carrierId}`, { method: "DELETE" });
+      if (r.ok) {
+        setDirCarriers(prev => prev.filter(c => c.id !== carrierId));
+        setDeleteConfirm(null);
+        setEditingCarrierId(null);
+      }
+    } catch (e) { console.error("Delete carrier failed:", e); }
+  };
+
+  // ── API: LoadMatch screenshot import ──
+  const handleDirScreenshot = async () => {
+    if (!dirScreenshotFile) return;
+    setDirScreenshotProcessing(true);
+    setDirScreenshotResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", dirScreenshotFile);
+      const r = await apiFetch(`${API_BASE}/api/carriers/extract`, { method: "POST", body: formData });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      setDirScreenshotResult(data);
+      // If carriers were extracted and saved, refresh directory
+      if (data.carriers?.length > 0 || data.saved?.length > 0) {
+        const res = await apiFetch(`${API_BASE}/api/carriers?exclude_dnu=false`);
+        if (res.ok) { const d = await res.json(); setDirCarriers(d.carriers || d || []); }
+      }
+    } catch (e) {
+      setDirScreenshotResult({ error: e.message || "Screenshot extraction failed" });
+    }
+    setDirScreenshotProcessing(false);
   };
 
   // ── API: Lane rate update ──
@@ -730,14 +899,16 @@ export default function RateIQView() {
       setDirCarriers(carrierRes.carriers || carrierRes || []);
       setPortGroups(pgRes.groups || []);
 
-      // Build lane summaries from rate data (with trend detection)
+      // Build lane summaries from rate data (with trend detection + port cluster normalization)
       const allRates = laneRatesRes.lane_rates || (Array.isArray(laneRatesRes) ? laneRatesRes : []);
       const now = Date.now();
       const thirtyDaysAgo = now - 30 * 86400000;
       const laneMap = {};
       allRates.forEach(r => {
-        const key = `${r.port || ""}|${r.destination || ""}`;
-        if (!laneMap[key]) laneMap[key] = { port: r.port, destination: r.destination, count: 0, totalRate: 0, carriers: new Set(), recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
+        const normPort = normalizePort(r.port || "");
+        const normDest = normalizePort(r.destination || "");
+        const key = `${normPort}|${normDest}`;
+        if (!laneMap[key]) laneMap[key] = { port: normPort, destination: normDest, count: 0, totalRate: 0, carriers: new Set(), recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
         if (!laneMap[key].miles && r.miles) laneMap[key].miles = r.miles;
         if (!laneMap[key].origin_zip && r.origin_zip) laneMap[key].origin_zip = r.origin_zip;
         if (!laneMap[key].dest_zip && r.dest_zip) laneMap[key].dest_zip = r.dest_zip;
@@ -803,8 +974,19 @@ export default function RateIQView() {
     setLaneSearching(false);
   }, [searchOrigin, searchDest, moveTypeFilter, fetchMarketBenchmark]);
 
-  // Re-search when move type filter changes (if there's an active search)
-  useEffect(() => { if (searchOrigin || searchDest) searchLanes(); }, [moveTypeFilter, searchLanes]);
+  // Debounced auto-search: fires 400ms after user stops typing
+  useEffect(() => {
+    if (!searchOrigin && !searchDest) {
+      // User cleared both fields — reset results immediately
+      setLaneResults([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      searchLanes();
+      if (searchOrigin && searchDest) saveRecent(searchOrigin, searchDest);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchOrigin, searchDest, moveTypeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── API: Manual intake — paste email text OR upload file, AI extracts rate ──
   const handleManualIntake = useCallback(async (file) => {
@@ -957,7 +1139,7 @@ export default function RateIQView() {
           {/* Secondary nav */}
           <div style={{ display: "flex", gap: 6 }}>
             {[
-              { key: "quote", label: "Quote Builder", icon: "📝" },
+              { key: "intake", label: "Rate Intake", icon: "📥" },
               { key: "oog", label: "OOG IQ", icon: "📦" },
               { key: "directory", label: `Directory (${dirCarriers.length})`, icon: "📖" },
               { key: "scorecard", label: "Scorecard", icon: "🏆" },
@@ -973,227 +1155,6 @@ export default function RateIQView() {
           </div>
         </div>
 
-        {/* Manual Intake — Drag/Drop + Paste */}
-        <div className="glass" style={{ borderRadius: 14, marginBottom: 16, border: `1px solid ${intakeDragOver ? "rgba(0,212,170,0.4)" : "rgba(255,255,255,0.06)"}`, overflow: "hidden", transition: "border-color 0.2s" }}>
-          <input ref={intakeFileRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.msg,.eml,.html,.htm,.txt" style={{ display: "none" }}
-            onChange={e => { const f = e.target.files?.[0]; if (f) { setIntakeFile(f); setIntakeOpen(true); setIntakeResult(null); } e.target.value = ""; }} />
-          <div onClick={() => setIntakeOpen(!intakeOpen)}
-            style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
-            onDragOver={e => { e.preventDefault(); e.stopPropagation(); setIntakeDragOver(true); if (!intakeOpen) setIntakeOpen(true); }}
-            onDragLeave={() => setIntakeDragOver(false)}
-            onDrop={e => {
-              e.preventDefault(); e.stopPropagation(); setIntakeDragOver(false);
-              const file = e.dataTransfer.files?.[0];
-              if (file) { setIntakeFile(file); setIntakeOpen(true); setIntakeResult(null); return; }
-              const text = e.dataTransfer.getData("text/plain");
-              if (text) { setIntakeText(text); setIntakeOpen(true); }
-            }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 14 }}>📋</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>CARRIER RATE INTAKE</span>
-              <span style={{ fontSize: 11, color: "#5A6478" }}>— drop .msg / .eml / screenshot / paste email text</span>
-            </div>
-            <span style={{ fontSize: 12, color: "#5A6478", transform: intakeOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</span>
-          </div>
-          {intakeOpen && (
-            <div style={{ padding: "0 24px 20px" }}
-              onDragOver={e => { e.preventDefault(); setIntakeDragOver(true); }}
-              onDragLeave={() => setIntakeDragOver(false)}
-              onDrop={e => {
-                e.preventDefault(); setIntakeDragOver(false);
-                const file = e.dataTransfer.files?.[0];
-                if (file) { setIntakeFile(file); setIntakeResult(null); return; }
-                const text = e.dataTransfer.getData("text/plain");
-                if (text) setIntakeText(text);
-              }}>
-              <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
-                {["dray", "transload", "ftl"].map(mt => {
-                  const active = intakeMoveType === mt;
-                  const s = MOVE_TYPE_STYLES[mt];
-                  return (
-                    <button key={mt} onClick={() => setIntakeMoveType(mt)}
-                      style={{ padding: "4px 14px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: `1px solid ${active ? s.color + "55" : "rgba(255,255,255,0.06)"}`, background: active ? s.color + "18" : "transparent", color: active ? s.color : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
-                      {s.label}
-                    </button>
-                  );
-                })}
-                <div style={{ flex: 1 }} />
-                <button onClick={() => intakeFileRef.current?.click()}
-                  style={{ padding: "4px 14px", fontSize: 11, fontWeight: 600, borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", cursor: "pointer", fontFamily: "inherit" }}>
-                  Browse Files
-                </button>
-              </div>
-              {intakeFile && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 8, borderRadius: 8, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.15)" }}>
-                  <span style={{ fontSize: 11, color: "#34d399", fontWeight: 700 }}>File:</span>
-                  <span style={{ fontSize: 11, color: "#C8D0DC", fontFamily: "'JetBrains Mono', monospace" }}>{intakeFile.name}</span>
-                  <span style={{ fontSize: 10, color: "#5A6478" }}>({(intakeFile.size / 1024).toFixed(1)} KB)</span>
-                  <button onClick={() => setIntakeFile(null)} style={{ marginLeft: "auto", fontSize: 10, color: "#f87171", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
-                </div>
-              )}
-              {!intakeFile && (
-                <textarea value={intakeText} onChange={e => setIntakeText(e.target.value)}
-                  onPaste={e => {
-                    const items = e.clipboardData?.items;
-                    if (items) {
-                      for (const item of items) {
-                        if (item.type.startsWith("image/")) {
-                          e.preventDefault();
-                          const file = item.getAsFile();
-                          if (file) { setIntakeFile(file); setIntakeResult(null); }
-                          return;
-                        }
-                      }
-                    }
-                    const text = e.clipboardData.getData("text/plain");
-                    if (text && !intakeText) { e.preventDefault(); setIntakeText(text); }
-                  }}
-                  placeholder="Paste carrier rate email here, or drag & drop a file (.msg, .eml, .pdf, screenshot)..."
-                  style={{ width: "100%", minHeight: 100, maxHeight: 200, padding: 14, borderRadius: 10, border: `1px solid ${intakeDragOver ? "rgba(0,212,170,0.3)" : "rgba(255,255,255,0.08)"}`, background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box", transition: "border-color 0.2s" }} />
-              )}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-                <div style={{ fontSize: 11, color: "#5A6478" }}>
-                  {intakeFile ? "Ready to extract from file" : intakeText.length > 0 ? `${intakeText.length.toLocaleString()} chars` : ""}
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  {intakeResult?.ok && (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399" }}>
-                      ✓ Added: {intakeResult.extracted.carrier_name} — {intakeResult.extracted.origin} → {intakeResult.extracted.destination}{intakeResult.extracted.rate_amount ? ` @ $${intakeResult.extracted.rate_amount}` : ""}
-                    </span>
-                  )}
-                  {intakeResult?.error && (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {intakeResult.error}</span>
-                  )}
-                  {(intakeText.trim() || intakeFile) && (
-                    <button onClick={() => handleManualIntake()} disabled={intakeProcessing}
-                      style={{ padding: "6px 20px", borderRadius: 8, border: "none", background: grad, color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: intakeProcessing ? "wait" : "pointer", fontFamily: "inherit", opacity: intakeProcessing ? 0.6 : 1 }}>
-                      {intakeProcessing ? "Extracting..." : "Extract & Save"}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Market Rates — Drag/Drop Screenshot + Paste */}
-        <div className="glass" style={{ borderRadius: 14, marginBottom: 16, border: `1px solid ${marketRateDragOver ? "rgba(251,146,60,0.4)" : "rgba(251,146,60,0.1)"}`, overflow: "hidden", transition: "border-color 0.2s" }}>
-          <input ref={marketRateFileRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf" style={{ display: "none" }}
-            onChange={e => { const f = e.target.files?.[0]; if (f) { setMarketRateFile(f); setMarketRateOpen(true); setMarketRateResult(null); } e.target.value = ""; }} />
-          <div onClick={() => setMarketRateOpen(!marketRateOpen)}
-            style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
-            onDragOver={e => { e.preventDefault(); e.stopPropagation(); setMarketRateDragOver(true); if (!marketRateOpen) setMarketRateOpen(true); }}
-            onDragLeave={() => setMarketRateDragOver(false)}
-            onDrop={e => {
-              e.preventDefault(); e.stopPropagation(); setMarketRateDragOver(false);
-              const file = e.dataTransfer.files?.[0];
-              if (file) { setMarketRateFile(file); setMarketRateOpen(true); setMarketRateResult(null); return; }
-              const text = e.dataTransfer.getData("text/plain");
-              if (text) { setMarketRateText(text); setMarketRateOpen(true); }
-            }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 14 }}>📊</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px" }}>MARKET RATES</span>
-              <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(251,146,60,0.12)", color: "#fb923c", border: "1px solid rgba(251,146,60,0.25)" }}>LOADMATCH</span>
-              <span style={{ fontSize: 11, color: "#5A6478" }}>— drop RFQ screenshot or paste tab-separated data</span>
-            </div>
-            <span style={{ fontSize: 12, color: "#5A6478", transform: marketRateOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</span>
-          </div>
-          {marketRateOpen && (
-            <div style={{ padding: "0 24px 20px" }}
-              onDragOver={e => { e.preventDefault(); setMarketRateDragOver(true); }}
-              onDragLeave={() => setMarketRateDragOver(false)}
-              onDrop={e => {
-                e.preventDefault(); setMarketRateDragOver(false);
-                const file = e.dataTransfer.files?.[0];
-                if (file) { setMarketRateFile(file); setMarketRateResult(null); return; }
-                const text = e.dataTransfer.getData("text/plain");
-                if (text) setMarketRateText(text);
-              }}>
-              <div style={{ display: "flex", gap: 12, marginBottom: 10, alignItems: "flex-end" }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>Origin / Port</label>
-                  <input value={marketRateOrigin} onChange={e => setMarketRateOrigin(e.target.value)} placeholder="e.g. Long Beach, LA/LB"
-                    style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>Destination</label>
-                  <input value={marketRateDest} onChange={e => setMarketRateDest(e.target.value)} placeholder="e.g. Sparks NV"
-                    style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>Type</label>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    {["dray", "ftl", "transload"].map(mt => {
-                      const active = marketRateMoveType === mt;
-                      const s = MOVE_TYPE_STYLES[mt];
-                      return (
-                        <button key={mt} onClick={() => setMarketRateMoveType(mt)}
-                          style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, borderRadius: 6, border: `1px solid ${active ? s.color + "55" : "rgba(255,255,255,0.06)"}`, background: active ? s.color + "18" : "transparent", color: active ? s.color : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
-                          {s.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <button onClick={() => marketRateFileRef.current?.click()}
-                  style={{ padding: "6px 14px", fontSize: 11, fontWeight: 600, borderRadius: 6, border: "1px solid rgba(251,146,60,0.2)", background: "transparent", color: "#fb923c", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-                  Browse Screenshot
-                </button>
-              </div>
-              {marketRateFile && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 8, borderRadius: 8, background: "rgba(251,146,60,0.06)", border: "1px solid rgba(251,146,60,0.15)" }}>
-                  <span style={{ fontSize: 11, color: "#fb923c", fontWeight: 700 }}>Screenshot:</span>
-                  <span style={{ fontSize: 11, color: "#C8D0DC", fontFamily: "'JetBrains Mono', monospace" }}>{marketRateFile.name}</span>
-                  <span style={{ fontSize: 10, color: "#5A6478" }}>({(marketRateFile.size / 1024).toFixed(1)} KB)</span>
-                  <button onClick={() => setMarketRateFile(null)} style={{ marginLeft: "auto", fontSize: 10, color: "#f87171", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
-                </div>
-              )}
-              {!marketRateFile && (
-                <textarea value={marketRateText} onChange={e => setMarketRateText(e.target.value)}
-                  onPaste={e => {
-                    const items = e.clipboardData?.items;
-                    if (items) {
-                      for (const item of items) {
-                        if (item.type.startsWith("image/")) {
-                          e.preventDefault();
-                          const file = item.getAsFile();
-                          if (file) { setMarketRateFile(file); setMarketRateResult(null); }
-                          return;
-                        }
-                      }
-                    }
-                    const text = e.clipboardData.getData("text/plain");
-                    if (text && !marketRateText) { e.preventDefault(); setMarketRateText(text); }
-                  }}
-                  placeholder={"Drop a screenshot here, or paste tab-separated LoadMatch data:\n2026-Mar-14\tLong Beach Container\t$2,600\t0%\t$2,600\n2026-Mar-12\tAPM Los Angeles\t$2,250\t0%\t$2,250"}
-                  style={{ width: "100%", minHeight: 100, maxHeight: 200, padding: 14, borderRadius: 10, border: `1px solid ${marketRateDragOver ? "rgba(251,146,60,0.3)" : "rgba(251,146,60,0.12)"}`, background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box", transition: "border-color 0.2s" }} />
-              )}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-                <div style={{ fontSize: 11, color: "#5A6478" }}>
-                  {marketRateFile ? "Ready to extract rates from screenshot" : marketRateText.length > 0 ? `${marketRateText.length.toLocaleString()} chars` : ""}
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  {marketRateResult?.ok && (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399" }}>
-                      ✓ Saved {marketRateResult.inserted} rate{marketRateResult.inserted !== 1 ? "s" : ""}{marketRateResult.skipped > 0 ? ` (${marketRateResult.skipped} skipped)` : ""}
-                    </span>
-                  )}
-                  {marketRateResult?.error && (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {marketRateResult.error}</span>
-                  )}
-                  {(marketRateFile || (marketRateText.trim() && marketRateOrigin.trim() && marketRateDest.trim())) && (
-                    <button onClick={() => handleMarketRatePaste()} disabled={marketRateProcessing}
-                      style={{ padding: "6px 20px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #fb923c, #f59e0b)", color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: marketRateProcessing ? "wait" : "pointer", fontFamily: "inherit", opacity: marketRateProcessing ? 0.6 : 1 }}>
-                      {marketRateProcessing ? (marketRateFile ? "Extracting..." : "Parsing...") : (marketRateFile ? "Extract & Save" : "Parse & Save")}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Search Bar */}
         <div className="glass" style={{ borderRadius: 14, padding: "20px 24px", marginBottom: 24, border: "1px solid rgba(255,255,255,0.06)" }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", marginBottom: 12 }}>SEARCH LANES</div>
@@ -1202,8 +1163,7 @@ export default function RateIQView() {
               <label style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 }}>Origin / Port</label>
               <input value={searchOrigin} onChange={e => setSearchOrigin(e.target.value)} placeholder="e.g. Houston, NYNJ, Savannah..."
                 style={{ width: "100%", padding: "10px 16px", borderRadius: 10, border: `1px solid ${originFocused ? "rgba(0,212,170,0.3)" : "rgba(255,255,255,0.08)"}`, background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
-                onFocus={() => setOriginFocused(true)} onBlur={() => setTimeout(() => setOriginFocused(false), 150)}
-                onKeyDown={e => e.key === "Enter" && searchLanes()} />
+                onFocus={() => setOriginFocused(true)} onBlur={() => setTimeout(() => setOriginFocused(false), 150)} />
               {originFocused && originSuggestions.length > 0 && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50, marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "#151922", boxShadow: "0 12px 32px rgba(0,0,0,0.5)", overflow: "hidden" }}>
                   {originSuggestions.map((s, i) => (
@@ -1223,8 +1183,7 @@ export default function RateIQView() {
               <label style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 }}>Destination</label>
               <input value={searchDest} onChange={e => setSearchDest(e.target.value)} placeholder="e.g. Dallas, Chicago..."
                 style={{ width: "100%", padding: "10px 16px", borderRadius: 10, border: `1px solid ${destFocused ? "rgba(0,212,170,0.3)" : "rgba(255,255,255,0.08)"}`, background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
-                onFocus={() => setDestFocused(true)} onBlur={() => setTimeout(() => setDestFocused(false), 150)}
-                onKeyDown={e => e.key === "Enter" && searchLanes()} />
+                onFocus={() => setDestFocused(true)} onBlur={() => setTimeout(() => setDestFocused(false), 150)} />
               {destFocused && destSuggestions.length > 0 && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50, marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "#151922", boxShadow: "0 12px 32px rgba(0,0,0,0.5)", overflow: "hidden" }}>
                   {destSuggestions.map((s, i) => (
@@ -1241,10 +1200,9 @@ export default function RateIQView() {
                 </div>
               )}
             </div>
-            <button onClick={() => { searchLanes(); if (searchOrigin && searchDest) saveRecent(searchOrigin, searchDest); }} disabled={laneSearching}
-              style={{ padding: "10px 28px", borderRadius: 10, border: "none", background: grad, color: "#0A0F1C", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: laneSearching ? 0.6 : 1, whiteSpace: "nowrap" }}>
-              {laneSearching ? "Searching..." : "Search"}
-            </button>
+            {laneSearching && (
+              <div style={{ padding: "10px 0", color: "#5A6478", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>Searching...</div>
+            )}
           </div>
 
           {/* Recent Searches */}
@@ -1328,7 +1286,7 @@ export default function RateIQView() {
                 }} onClick={() => openLaneDetail(group.port, group.destination, gi)}
                   rateIds={(group.carriers || []).map(c => c.id).filter(Boolean)}
                   onReclassify={mt => handleReclassifyLane(group.port, group.destination, (group.carriers || []).map(c => c.id).filter(Boolean), mt)}
-                  onQuickQuote={() => { setSelectedLane({ origin: group.port, destination: group.destination }); setView("quote"); }} />
+                  onQuickQuote={() => { setSelectedLane({ origin: group.port, destination: group.destination }); setView("build-quote"); }} />
               ))}
             </div>
             </>; })()}
@@ -1465,9 +1423,9 @@ export default function RateIQView() {
                 </button>
               </div>
             )}
-            <button onClick={() => setView("quote")}
+            <button onClick={() => setView("build-quote")}
               style={{ padding: "8px 20px", borderRadius: 10, border: "none", background: grad, color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
-              📋 Generate Quote
+              Build Quote
             </button>
           </div>
         </div>
@@ -1517,77 +1475,167 @@ export default function RateIQView() {
                 setEditingLaneRateId={setEditingLaneRateId} setEditingLaneField={setEditingLaneField} setEditingLaneValue={setEditingLaneValue}
                 handleLaneRateUpdate={handleLaneRateUpdate}
                 laneOrigin={currentGroup.port} laneDestination={currentGroup.destination}
+                onUseRate={(cr) => {
+                  // Build linehaul items from carrier rate fields
+                  const items = [];
+                  if (cr.dray_rate) items.push({ description: "Linehaul", rate: String(cr.dray_rate) });
+                  if (cr.fsc) items.push({ description: "Fuel Surcharge", rate: String(cr.fsc) });
+                  if (cr.prepull) items.push({ description: "Pre-Pull", rate: String(cr.prepull) });
+                  if (cr.chassis_per_day) items.push({ description: "Chassis", rate: String(cr.chassis_per_day) });
+                  if (cr.overweight) items.push({ description: "Overweight", rate: String(cr.overweight) });
+                  if (cr.tolls) items.push({ description: "Tolls", rate: String(cr.tolls) });
+                  // Build accessorials from optional fields
+                  const accessorials = {};
+                  if (cr.storage_per_day) accessorials.storage = String(cr.storage_per_day);
+                  if (cr.detention) accessorials.detention = String(cr.detention);
+                  if (cr.chassis_split) accessorials.chassis_split = String(cr.chassis_split);
+                  if (cr.hazmat) accessorials.hazmat = String(cr.hazmat);
+                  if (cr.reefer) accessorials.reefer = String(cr.reefer);
+                  if (cr.bond_fee) accessorials.bond = String(cr.bond_fee);
+                  if (cr.triaxle) accessorials.triaxle = String(cr.triaxle);
+                  setSelectedLane({
+                    origin: currentGroup.port,
+                    destination: currentGroup.destination,
+                    carrier: cr.carrier_name,
+                    linehaul: items.length > 0 ? items : undefined,
+                    accessorials: Object.keys(accessorials).length > 0 ? accessorials : undefined,
+                    miles: currentGroup.miles,
+                  });
+                  setView("build-quote");
+                }}
               />
             </div>
 
             {/* Right column — AI Rate Assistant */}
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div className="glass" style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.06)", flex: 1, display: "flex", flexDirection: "column" }}>
+              <div className="glass" style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.06)", flex: 1, display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 200px)" }}>
                 <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(0,212,170,0.12)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🤖</div>
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5" }}>AI Rate Assistant</div>
-                    <div style={{ fontSize: 11, color: "#5A6478" }}>Lane intelligence for {selectedLane?.origin || "—"}</div>
+                    <div style={{ fontSize: 11, color: "#5A6478" }}>Lane intelligence for {selectedLane?.origin || "—"} → {selectedLane?.destination || "—"}</div>
                   </div>
+                  {aiMessages.length > 0 && (
+                    <button onClick={() => setAiMessages([])} title="Clear chat"
+                      style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#5A6478", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                      Clear
+                    </button>
+                  )}
                 </div>
-                <div style={{ padding: "16px 20px", flex: 1, overflowY: "auto" }}>
-                  {/* Rate Insights */}
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#F0F2F5", marginBottom: 10 }}>Rate Insights</div>
-
-                  {/* Trend analysis */}
-                  {currentGroup.count >= 3 && (() => {
+                <div ref={aiChatRef} style={{ padding: "16px 20px", flex: 1, overflowY: "auto" }}>
+                  {/* Auto-generated data insights (always shown) */}
+                  {currentGroup.count >= 2 && (() => {
                     const sorted = [...currentGroup.carriers].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+                    const rates = sorted.map(c => parseFloat(c.total || c.dray_rate || 0)).filter(r => r > 0);
                     const recentAvg = sorted.slice(-3).reduce((s, c) => s + parseFloat(c.total || c.dray_rate || 0), 0) / Math.min(sorted.length, 3);
                     const oldAvg = sorted.slice(0, 3).reduce((s, c) => s + parseFloat(c.total || c.dray_rate || 0), 0) / Math.min(sorted.length, 3);
                     const trend = recentAvg > oldAvg ? "rising" : recentAvg < oldAvg ? "falling" : "stable";
                     const trendColor = trend === "rising" ? "#f87171" : trend === "falling" ? "#34d399" : "#8B95A8";
                     const pctChange = oldAvg > 0 ? Math.abs(((recentAvg - oldAvg) / oldAvg) * 100).toFixed(0) : 0;
+                    // Find cheapest carrier
+                    const cheapest = sorted.reduce((best, c) => {
+                      const r = parseFloat(c.total || c.dray_rate || 0);
+                      return r > 0 && (!best || r < best.rate) ? { name: c.carrier_name, rate: r } : best;
+                    }, null);
+                    // Rate spread
+                    const spread = rates.length >= 2 ? Math.round(Math.max(...rates) - Math.min(...rates)) : 0;
+                    // Freshest rate age
+                    const newest = sorted[sorted.length - 1];
+                    const newestDays = newest?.created_at ? Math.floor((Date.now() - new Date(newest.created_at).getTime()) / 86400000) : null;
+                    // Accessorials present in data
+                    const accPresent = [];
+                    const hasAcc = (field) => sorted.some(c => c[field] && parseFloat(c[field]) > 0);
+                    if (hasAcc("chassis_per_day")) accPresent.push("Chassis");
+                    if (hasAcc("prepull")) accPresent.push("Pre-Pull");
+                    if (hasAcc("storage_per_day")) accPresent.push("Storage");
+                    if (hasAcc("detention")) accPresent.push("Detention");
+                    if (hasAcc("overweight")) accPresent.push("Overweight");
+                    if (hasAcc("hazmat")) accPresent.push("Hazmat");
+                    if (hasAcc("reefer")) accPresent.push("Reefer");
+
                     return (
-                      <div style={{ padding: "10px 14px", borderRadius: 10, background: trendColor + "08", border: `1px solid ${trendColor}20`, marginBottom: 12 }}>
-                        <div style={{ fontSize: 11, color: "#C8D0DC", lineHeight: 1.5 }}>
-                          Rates on this lane are <span style={{ fontWeight: 700, color: trendColor }}>{trend}</span>
-                          {pctChange > 2 && <span> ({pctChange}% {trend === "rising" ? "increase" : "decrease"})</span>}.
-                          {trend === "rising" && " Consider locking in rates soon."}
-                          {trend === "falling" && " Good opportunity to negotiate."}
+                      <div style={{ marginBottom: 16 }}>
+                        {/* Trend */}
+                        <div style={{ padding: "10px 14px", borderRadius: 10, background: trendColor + "08", border: `1px solid ${trendColor}20`, marginBottom: 10 }}>
+                          <div style={{ fontSize: 11, color: "#C8D0DC", lineHeight: 1.5 }}>
+                            Rates are <span style={{ fontWeight: 700, color: trendColor }}>{trend}</span>
+                            {pctChange > 2 && <span> ({pctChange}% {trend === "rising" ? "increase" : "decrease"})</span>}.
+                            {trend === "rising" && " Consider locking in rates soon."}
+                            {trend === "falling" && " Good opportunity to negotiate."}
+                          </div>
+                        </div>
+                        {/* Key metrics */}
+                        <div style={{ fontSize: 11, color: "#C8D0DC", lineHeight: 1.8, padding: "0 4px" }}>
+                          {cheapest && <div><span style={{ color: "#5A6478" }}>Best rate:</span> <span style={{ fontWeight: 700, color: "#34d399" }}>{fmt(cheapest.rate)}</span> ({cheapest.name})</div>}
+                          {spread > 50 && <div><span style={{ color: "#5A6478" }}>Rate spread:</span> <span style={{ fontWeight: 700, color: "#FBBF24" }}>{fmt(spread)}</span> — room to negotiate</div>}
+                          {newestDays !== null && <div><span style={{ color: "#5A6478" }}>Freshest rate:</span> {newestDays === 0 ? "today" : newestDays < 7 ? `${newestDays}d ago` : newestDays < 30 ? `${Math.floor(newestDays / 7)}w ago` : `${Math.floor(newestDays / 30)}mo ago`}{newestDays > 30 && <span style={{ color: "#FBBF24" }}> — consider refreshing</span>}</div>}
+                          {marketBenchmark?.stats?.avg && <div><span style={{ color: "#5A6478" }}>vs Market:</span> {(() => {
+                            const avg = currentGroup.count > 0 ? currentGroup.total / currentGroup.count : 0;
+                            const diff = avg - marketBenchmark.stats.avg;
+                            const pct = marketBenchmark.stats.avg > 0 ? Math.abs(diff / marketBenchmark.stats.avg * 100).toFixed(0) : 0;
+                            return diff > 0
+                              ? <span style={{ color: "#f87171" }}>{pct}% above market avg ({fmt(marketBenchmark.stats.avg)})</span>
+                              : <span style={{ color: "#34d399" }}>{pct}% below market avg ({fmt(marketBenchmark.stats.avg)})</span>;
+                          })()}</div>}
+                          {accPresent.length > 0 && <div><span style={{ color: "#5A6478" }}>Accessorials on file:</span> {accPresent.join(", ")}</div>}
                         </div>
                       </div>
                     );
                   })()}
 
-                  {/* Potential accessorial charges */}
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#C8D0DC", marginTop: 8, marginBottom: 8 }}>Potential Accessorial Charges</div>
-                  {[
-                    { icon: "📦", label: "Chassis fee", desc: "$35-55/day — check carrier terms" },
-                    { icon: "⏱", label: "Detention", desc: "$75-100/hr after free time" },
-                    { icon: "🏗", label: "Pre-pull", desc: "$125-200 if required" },
-                    { icon: "📋", label: "Storage", desc: "$35-55/day at terminal" },
-                    { icon: "⚖", label: "Overweight surcharge", desc: "$100-200 flat" },
-                  ].map((item, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                      <span style={{ fontSize: 12, marginTop: 1 }}>{item.icon}</span>
-                      <div>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "#C8D0DC" }}>{item.label}</div>
-                        <div style={{ fontSize: 11, color: "#5A6478" }}>{item.desc}</div>
+                  {/* Quick-ask buttons */}
+                  {aiMessages.length === 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", marginBottom: 8 }}>Ask about this lane:</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {[
+                          "Which carrier should I use?",
+                          "What's a fair rate for this lane?",
+                          "Compare my rates to market",
+                          "Any red flags on this lane?",
+                        ].map((q, i) => (
+                          <button key={i} onClick={() => askAI(q, currentGroup)}
+                            style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(0,212,170,0.15)", background: "rgba(0,212,170,0.04)", color: "#00D4AA", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}
+                            onMouseEnter={e => e.currentTarget.style.background = "rgba(0,212,170,0.1)"}
+                            onMouseLeave={e => e.currentTarget.style.background = "rgba(0,212,170,0.04)"}>
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Chat messages */}
+                  {aiMessages.map((msg, i) => (
+                    <div key={i} style={{ marginBottom: 12, display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start" }}>
+                      <div style={{
+                        padding: "10px 14px", borderRadius: 12, maxWidth: "90%", fontSize: 12, lineHeight: 1.6,
+                        background: msg.role === "user" ? "rgba(59,130,246,0.12)" : "rgba(0,212,170,0.06)",
+                        border: `1px solid ${msg.role === "user" ? "rgba(59,130,246,0.2)" : "rgba(0,212,170,0.15)"}`,
+                        color: "#C8D0DC", whiteSpace: "pre-wrap",
+                      }}>
+                        {msg.text}
                       </div>
                     </div>
                   ))}
+                  {aiLoading && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0" }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#00D4AA", animation: "pulse 1s infinite" }} />
+                      <span style={{ fontSize: 11, color: "#5A6478" }}>Analyzing lane data...</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* AI Chat Input */}
                 <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <input placeholder="Ask me anything about this lane..."
-                      onKeyDown={e => {
-                        if (e.key === "Enter" && e.target.value.trim()) {
-                          // Dispatch Ask AI with lane context
-                          const query = e.target.value.trim();
-                          e.target.value = "";
-                          document.dispatchEvent(new CustomEvent("openAskAI", { detail: { query: `[Lane: ${laneName}] ${query}` } }));
-                          document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
-                        }
-                      }}
+                    <input value={aiInput} onChange={e => setAiInput(e.target.value)}
+                      placeholder="Ask about rates, carriers, trends..."
+                      onKeyDown={e => { if (e.key === "Enter" && aiInput.trim() && !aiLoading) askAI(aiInput, currentGroup); }}
                       style={{ flex: 1, padding: "8px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 11, fontFamily: "inherit", outline: "none" }} />
-                    <button style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "rgba(0,212,170,0.12)", color: "#00D4AA", fontSize: 13, cursor: "pointer" }}>→</button>
+                    <button onClick={() => { if (aiInput.trim() && !aiLoading) askAI(aiInput, currentGroup); }}
+                      disabled={aiLoading || !aiInput.trim()}
+                      style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: aiInput.trim() ? "rgba(0,212,170,0.12)" : "rgba(255,255,255,0.04)", color: aiInput.trim() ? "#00D4AA" : "#3D4654", fontSize: 13, cursor: aiInput.trim() ? "pointer" : "default", transition: "all 0.15s" }}>→</button>
                   </div>
                 </div>
               </div>
@@ -1607,9 +1655,163 @@ export default function RateIQView() {
   }
 
   // ═════════════════════════════════════════════════════════════
-  // QUOTE BUILDER VIEW
+  // RATE INTAKE VIEW (unified carrier rates + market rates)
   // ═════════════════════════════════════════════════════════════
-  if (view === "quote") {
+  if (view === "intake") {
+    return (
+      <div style={{ padding: "0 24px 24px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
+          <button onClick={() => setView("browse")}
+            style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 16, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }}>
+            ←
+          </button>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", margin: 0 }}>Rate Intake</h2>
+          <span style={{ fontSize: 11, color: "#5A6478" }}>Drop carrier rate emails, screenshots, or paste rate data</span>
+        </div>
+
+        {/* Hidden file inputs */}
+        <input ref={intakeFileRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.msg,.eml,.html,.htm,.txt" style={{ display: "none" }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) { setIntakeFile(f); setIntakeResult(null); } e.target.value = ""; }} />
+        <input ref={marketRateFileRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf" style={{ display: "none" }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) { setIntakeFile(f); setIntakeResult(null); } e.target.value = ""; }} />
+
+        {/* Unified Drag-Drop Zone */}
+        <div className="glass" style={{ borderRadius: 14, padding: 32, marginBottom: 20,
+          border: `2px dashed ${intakeDragOver ? "rgba(0,212,170,0.5)" : "rgba(255,255,255,0.1)"}`,
+          background: intakeDragOver ? "rgba(0,212,170,0.04)" : "rgba(255,255,255,0.01)",
+          textAlign: "center", transition: "all 0.2s", cursor: "pointer" }}
+          onClick={() => intakeFileRef.current?.click()}
+          onDragOver={e => { e.preventDefault(); e.stopPropagation(); setIntakeDragOver(true); }}
+          onDragLeave={() => setIntakeDragOver(false)}
+          onDrop={e => {
+            e.preventDefault(); e.stopPropagation(); setIntakeDragOver(false);
+            const file = e.dataTransfer.files?.[0];
+            if (file) { setIntakeFile(file); setIntakeResult(null); setMarketRateResult(null); return; }
+            const text = e.dataTransfer.getData("text/plain");
+            if (text) { setIntakeText(text); }
+          }}>
+          <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.4 }}>&#128206;</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#8B95A8", marginBottom: 4 }}>
+            Drop carrier quote or rate screenshot here
+          </div>
+          <div style={{ fontSize: 11, color: "#5A6478" }}>
+            .msg / .eml emails, screenshots, PDFs, or paste text below
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 12 }}>
+            <button onClick={e => { e.stopPropagation(); intakeFileRef.current?.click(); }}
+              style={{ padding: "6px 16px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid rgba(0,212,170,0.3)", background: "rgba(0,212,170,0.08)", color: "#34d399", cursor: "pointer", fontFamily: "inherit" }}>
+              Browse Files
+            </button>
+          </div>
+        </div>
+
+        {/* File badge */}
+        {intakeFile && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", marginBottom: 12, borderRadius: 10, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.15)" }}>
+            <span style={{ fontSize: 11, color: "#34d399", fontWeight: 700 }}>File:</span>
+            <span style={{ fontSize: 11, color: "#C8D0DC", fontFamily: "'JetBrains Mono', monospace" }}>{intakeFile.name}</span>
+            <span style={{ fontSize: 10, color: "#5A6478" }}>({(intakeFile.size / 1024).toFixed(1)} KB)</span>
+            <button onClick={() => setIntakeFile(null)} style={{ marginLeft: "auto", fontSize: 10, color: "#f87171", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
+          </div>
+        )}
+
+        {/* Text paste area */}
+        {!intakeFile && (
+          <textarea value={intakeText} onChange={e => setIntakeText(e.target.value)}
+            onPaste={e => {
+              const items = e.clipboardData?.items;
+              if (items) {
+                for (const item of items) {
+                  if (item.type.startsWith("image/")) {
+                    e.preventDefault();
+                    const file = item.getAsFile();
+                    if (file) { setIntakeFile(file); setIntakeResult(null); }
+                    return;
+                  }
+                }
+              }
+              const text = e.clipboardData.getData("text/plain");
+              if (text && !intakeText) { e.preventDefault(); setIntakeText(text); }
+            }}
+            placeholder={"Paste carrier rate email, or tab-separated market rate data:\n\n2026-Mar-14\tLong Beach Container\t$2,600\t0%\t$2,600\n2026-Mar-12\tAPM Los Angeles\t$2,250\t0%\t$2,250"}
+            style={{ width: "100%", minHeight: 120, maxHeight: 240, padding: 14, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box", marginBottom: 12 }} />
+        )}
+
+        {/* Controls row */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          {/* Move type */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Type:</span>
+            {["dray", "transload", "ftl"].map(mt => {
+              const active = intakeMoveType === mt;
+              const s = MOVE_TYPE_STYLES[mt];
+              return (
+                <button key={mt} onClick={() => setIntakeMoveType(mt)}
+                  style={{ padding: "4px 12px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: `1px solid ${active ? s.color + "55" : "rgba(255,255,255,0.06)"}`, background: active ? s.color + "18" : "transparent", color: active ? s.color : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Optional origin/dest for market rates */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto" }}>
+            <input value={marketRateOrigin} onChange={e => setMarketRateOrigin(e.target.value)} placeholder="Origin (optional)"
+              style={{ width: 140, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+            <span style={{ color: "#5A6478", fontSize: 11 }}>→</span>
+            <input value={marketRateDest} onChange={e => setMarketRateDest(e.target.value)} placeholder="Destination (optional)"
+              style={{ width: 140, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+          </div>
+        </div>
+
+        {/* Results / Actions */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 14 }}>
+          <div style={{ fontSize: 11, color: "#5A6478" }}>
+            {intakeFile ? "Ready to extract from file" : intakeText.length > 0 ? `${intakeText.length.toLocaleString()} chars` : ""}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {intakeResult?.ok && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399" }}>
+                ✓ {intakeResult.extracted ? `Added: ${intakeResult.extracted.carrier_name} — ${intakeResult.extracted.origin} → ${intakeResult.extracted.destination}${intakeResult.extracted.rate_amount ? ` @ $${intakeResult.extracted.rate_amount}` : ""}` : `Saved ${intakeResult.inserted || 0} rate(s)`}
+              </span>
+            )}
+            {intakeResult?.error && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {intakeResult.error}</span>
+            )}
+            {marketRateResult?.ok && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399" }}>
+                ✓ Saved {marketRateResult.inserted} rate{marketRateResult.inserted !== 1 ? "s" : ""}{marketRateResult.skipped > 0 ? ` (${marketRateResult.skipped} skipped)` : ""}
+              </span>
+            )}
+            {marketRateResult?.error && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {marketRateResult.error}</span>
+            )}
+            {(intakeText.trim() || intakeFile) && (
+              <button onClick={() => {
+                // Auto-detect: if text looks like tab-separated market data and has origin/dest, use market rate handler
+                const isTabSeparated = intakeText && intakeText.includes("\t") && marketRateOrigin.trim() && marketRateDest.trim();
+                if (isTabSeparated && !intakeFile) {
+                  setMarketRateText(intakeText);
+                  setMarketRateMoveType(intakeMoveType);
+                  handleMarketRatePaste();
+                } else {
+                  handleManualIntake();
+                }
+              }} disabled={intakeProcessing || marketRateProcessing}
+                style={{ padding: "8px 24px", borderRadius: 8, border: "none", background: grad, color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: (intakeProcessing || marketRateProcessing) ? "wait" : "pointer", fontFamily: "inherit", opacity: (intakeProcessing || marketRateProcessing) ? 0.6 : 1 }}>
+                {(intakeProcessing || marketRateProcessing) ? "Extracting..." : "Extract & Save"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════
+  // BUILD QUOTE VIEW (from lane detail)
+  // ═════════════════════════════════════════════════════════════
+  if (view === "build-quote") {
     return (
       <div style={{ padding: "0 24px 24px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
@@ -1617,11 +1819,11 @@ export default function RateIQView() {
             style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 16, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }}>
             ←
           </button>
-          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", margin: 0 }}>Quote Builder</h2>
-          {selectedLane && <span style={{ fontSize: 12, color: "#5A6478" }}>Pre-filled: {selectedLane.origin} → {selectedLane.destination}</span>}
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", margin: 0 }}>Build Quote</h2>
+          {selectedLane && <span style={{ fontSize: 12, color: "#5A6478" }}>{selectedLane.origin} → {selectedLane.destination}</span>}
         </div>
         <div style={{ height: "calc(100vh - 180px)" }}>
-          <QuoteBuilder />
+          <QuoteBuilder prefill={selectedLane || undefined} />
         </div>
       </div>
     );
@@ -1733,7 +1935,73 @@ export default function RateIQView() {
             <h2 style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", margin: 0 }}>Carrier Directory</h2>
             <div style={{ fontSize: 11, color: "#5A6478", marginTop: 2 }}>{dirCarriers.length} carriers</div>
           </div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            <button onClick={() => setShowAddCarrier(!showAddCarrier)}
+              style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid rgba(0,212,170,0.3)", background: showAddCarrier ? "rgba(0,212,170,0.1)" : "transparent", color: "#34d399", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              + Add Carrier
+            </button>
+          </div>
         </div>
+
+        {/* LoadMatch Screenshot Import */}
+        <input ref={dirScreenshotRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf" style={{ display: "none" }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) { setDirScreenshotFile(f); setDirScreenshotResult(null); } e.target.value = ""; }} />
+        <div style={{ borderRadius: 10, padding: "12px 16px", marginBottom: 12,
+          border: "1px dashed rgba(251,146,60,0.25)", background: "rgba(251,146,60,0.02)",
+          display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
+          onClick={() => dirScreenshotRef.current?.click()}
+          onDragOver={e => e.preventDefault()}
+          onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) { setDirScreenshotFile(f); setDirScreenshotResult(null); } }}>
+          <span style={{ fontSize: 11, color: "#fb923c", fontWeight: 700 }}>LOADMATCH IMPORT</span>
+          <span style={{ fontSize: 11, color: "#5A6478" }}>— drop screenshot to extract carriers + capabilities</span>
+          {dirScreenshotFile && (
+            <span style={{ fontSize: 11, color: "#C8D0DC", fontFamily: "'JetBrains Mono', monospace", marginLeft: 8 }}>
+              {dirScreenshotFile.name}
+              <button onClick={e => { e.stopPropagation(); setDirScreenshotFile(null); setDirScreenshotResult(null); }} style={{ marginLeft: 6, fontSize: 10, color: "#f87171", background: "none", border: "none", cursor: "pointer" }}>×</button>
+            </span>
+          )}
+          {dirScreenshotFile && !dirScreenshotProcessing && (
+            <button onClick={e => { e.stopPropagation(); handleDirScreenshot(); }}
+              style={{ marginLeft: "auto", padding: "4px 14px", borderRadius: 6, border: "none", background: "linear-gradient(135deg, #fb923c, #f59e0b)", color: "#0A0F1C", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              Extract & Import
+            </button>
+          )}
+          {dirScreenshotProcessing && <span style={{ marginLeft: "auto", fontSize: 11, color: "#fb923c" }}>Extracting...</span>}
+          {dirScreenshotResult?.error && <span style={{ fontSize: 11, color: "#f87171", marginLeft: "auto" }}>✗ {dirScreenshotResult.error}</span>}
+          {dirScreenshotResult?.carriers && <span style={{ fontSize: 11, color: "#34d399", marginLeft: "auto" }}>✓ Imported {dirScreenshotResult.carriers.length} carriers</span>}
+          {dirScreenshotResult?.saved && <span style={{ fontSize: 11, color: "#34d399", marginLeft: "auto" }}>✓ Imported {dirScreenshotResult.saved.length} carriers</span>}
+        </div>
+
+        {/* Add Carrier Form */}
+        {showAddCarrier && (
+          <div className="glass" style={{ borderRadius: 10, padding: 16, marginBottom: 12, border: "1px solid rgba(0,212,170,0.2)" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 180px" }}>
+                <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", display: "block", marginBottom: 3 }}>Carrier Name *</label>
+                <input value={newCarrier.carrier_name} onChange={e => setNewCarrier(p => ({ ...p, carrier_name: e.target.value }))} placeholder="Carrier name"
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ flex: "0 0 120px" }}>
+                <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", display: "block", marginBottom: 3 }}>MC#</label>
+                <input value={newCarrier.mc_number} onChange={e => setNewCarrier(p => ({ ...p, mc_number: e.target.value }))} placeholder="MC number"
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ flex: "1 1 140px" }}>
+                <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", display: "block", marginBottom: 3 }}>City / State</label>
+                <input value={newCarrier.pickup_area} onChange={e => setNewCarrier(p => ({ ...p, pickup_area: e.target.value }))} placeholder="e.g. Los Angeles, CA"
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <button onClick={handleAddCarrier} disabled={addCarrierSaving || !newCarrier.carrier_name.trim()}
+                style={{ padding: "6px 16px", borderRadius: 6, border: "none", background: grad, color: "#0A0F1C", fontSize: 11, fontWeight: 700, cursor: (addCarrierSaving || !newCarrier.carrier_name.trim()) ? "default" : "pointer", fontFamily: "inherit", opacity: (addCarrierSaving || !newCarrier.carrier_name.trim()) ? 0.5 : 1 }}>
+                {addCarrierSaving ? "Saving..." : "Add"}
+              </button>
+              <button onClick={() => setShowAddCarrier(false)}
+                style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Filters */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
@@ -1869,6 +2137,28 @@ export default function RateIQView() {
                         {editInput("Record", "service_record", { placeholder: "Worked with Previously" })}
                         {editInput("Comments", "comments", { color: c.dnu ? "#f87171" : "#C8D0DC", placeholder: "General comments" })}
                       </div>
+                      {isEdit && (
+                        <div style={{ gridColumn: "1 / -1", borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 8, display: "flex", justifyContent: "flex-end" }}>
+                          {deleteConfirm === c.id ? (
+                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                              <span style={{ fontSize: 11, color: "#f87171" }}>Delete this carrier?</span>
+                              <button onClick={e => { e.stopPropagation(); handleDeleteCarrier(c.id); }}
+                                style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.15)", color: "#f87171", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                                Confirm Delete
+                              </button>
+                              <button onClick={e => { e.stopPropagation(); setDeleteConfirm(null); }}
+                                style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button onClick={e => { e.stopPropagation(); setDeleteConfirm(c.id); }}
+                              style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.2)", background: "transparent", color: "#f87171", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: 0.7 }}>
+                              Delete Carrier
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
