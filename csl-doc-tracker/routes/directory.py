@@ -501,8 +501,10 @@ async def api_warehouse_extract(request: Request):
 
 @router.get("/api/lane-rates")
 async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Query(default=None),
-                              destination: str = Query(default=None)):
+                              destination: str = Query(default=None),
+                              move_type: str = Query(default=None)):
     with db.get_cursor() as cur:
+        # Query lane_rates table
         clauses, params = [], []
         if port:
             clauses.append("port ILIKE %s")
@@ -513,9 +515,51 @@ async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Qu
         if destination:
             clauses.append("destination ILIKE %s")
             params.append(f"%{destination}%")
+        if move_type and move_type != "all":
+            clauses.append("move_type = %s")
+            params.append(move_type)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         cur.execute(f"SELECT * FROM lane_rates {where} ORDER BY port, destination, total ASC NULLS LAST LIMIT 1000", params)
         rows = [_serialize_row(r) for r in cur.fetchall()]
+
+        # Also include rate_quotes (from manual intake, emails, etc.)
+        rq_clauses, rq_params = [], []
+        if port:
+            rq_clauses.append("(origin ILIKE %s OR lane ILIKE %s)")
+            rq_params.extend([f"%{port}%", f"%{port}%"])
+        if carrier:
+            rq_clauses.append("carrier_name ILIKE %s")
+            rq_params.append(f"%{carrier}%")
+        if destination:
+            rq_clauses.append("(destination ILIKE %s OR lane ILIKE %s)")
+            rq_params.extend([f"%{destination}%", f"%{destination}%"])
+        if move_type and move_type != "all":
+            rq_clauses.append("move_type = %s")
+            rq_params.append(move_type)
+        rq_clauses.append("rate_amount IS NOT NULL")
+        rq_where = "WHERE " + " AND ".join(rq_clauses) if rq_clauses else ""
+        cur.execute(f"""
+            SELECT id, origin AS port, destination, carrier_name, carrier_email,
+                   rate_amount AS dray_rate, rate_amount AS total,
+                   NULL::numeric AS fsc, NULL::numeric AS chassis_per_day,
+                   NULL::numeric AS prepull, NULL::numeric AS storage_per_day,
+                   NULL::numeric AS detention, NULL::numeric AS chassis_split,
+                   NULL::numeric AS overweight, NULL::numeric AS tolls,
+                   NULL::numeric AS reefer, NULL::numeric AS hazmat,
+                   NULL::numeric AS triaxle, NULL::numeric AS bond_fee,
+                   NULL::numeric AS residential, NULL::numeric AS all_in_total,
+                   move_type, miles, quote_date AS created_at,
+                   source, status, NULL::int AS rank,
+                   NULL AS equipment_type, NULL AS notes
+            FROM rate_quotes {rq_where}
+            ORDER BY quote_date DESC NULLS LAST LIMIT 500
+        """, rq_params)
+        rq_rows = [_serialize_row(r) for r in cur.fetchall()]
+        # Mark source for rate_quotes entries
+        for r in rq_rows:
+            r["_source"] = r.get("source") or "rate_quote"
+        rows.extend(rq_rows)
+
     return JSONResponse({"lane_rates": rows, "total": len(rows)})
 
 @router.put("/api/lane-rates/{rate_id}")
