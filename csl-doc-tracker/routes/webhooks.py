@@ -143,6 +143,20 @@ def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload
                     elif pg_efj in cache:
                         matched_key = pg_efj
                     else:
+                        # Pull driver_phone from driver_contacts if available
+                        _init_phone = ""
+                        _init_trailer = ""
+                        try:
+                            cur.execute(
+                                "SELECT driver_phone, trailer_number FROM driver_contacts WHERE efj = %s",
+                                (pg_efj,),
+                            )
+                            dc_row = cur.fetchone()
+                            if dc_row:
+                                _init_phone = (dc_row["driver_phone"] or "").strip()
+                                _init_trailer = (dc_row["trailer_number"] or "").strip()
+                        except Exception as e:
+                            log.debug("driver_contacts lookup for %s failed: %s", pg_efj, e)
                         # Create a new cache entry for this load
                         cache[efj_num] = {
                             "efj": pg_efj,
@@ -153,7 +167,8 @@ def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload
                             "stop_times": {},
                             "macropoint_url": "",
                             "last_scraped": "",
-                            "driver_phone": "",
+                            "driver_phone": _init_phone,
+                            "trailer": _init_trailer,
                         }
                         matched_key = efj_num
                         log.info(f"Webhook: created cache entry {efj_num} for container {load_ref}")
@@ -351,7 +366,7 @@ def _webhook_send_alert_background(efj: str, load_num: str, status: str,
             log.info(f"Billing bridge: scheduled ready_to_close for {efj} in 60s")
 
 
-        # Write container_url to PG if available from cache
+        # Write container_url and driver_phone to PG if available from cache
         try:
             with open(TRACKING_CACHE_FILE, "r") as _cf:
                 _cache_tmp = json.load(_cf)
@@ -364,8 +379,24 @@ def _webhook_send_alert_background(efj: str, load_num: str, status: str,
                         (_mp_url, efj)
                     )
                     log.info(f"Webhook bg: wrote container_url for {efj}")
+
+            # Sync driver_phone from cache to driver_contacts PG table
+            _cached_phone = (_entry_tmp.get("driver_phone") or "").strip()
+            _cached_trailer = (_entry_tmp.get("trailer") or "").strip()
+            if _cached_phone or _cached_trailer:
+                with db.get_cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO driver_contacts (efj, driver_phone, trailer_number, updated_at)
+                           VALUES (%s, %s, %s, NOW())
+                           ON CONFLICT (efj) DO UPDATE SET
+                               driver_phone = CASE WHEN EXCLUDED.driver_phone != '' THEN EXCLUDED.driver_phone ELSE driver_contacts.driver_phone END,
+                               trailer_number = CASE WHEN EXCLUDED.trailer_number != '' THEN EXCLUDED.trailer_number ELSE driver_contacts.trailer_number END,
+                               updated_at = NOW()""",
+                        (efj, _cached_phone or None, _cached_trailer or None),
+                    )
+                    log.info(f"Webhook bg: synced driver_contacts for {efj} (phone={bool(_cached_phone)}, trailer={bool(_cached_trailer)})")
         except Exception as _url_exc:
-            log.debug(f"Webhook bg: container_url write skipped for {efj}: {_url_exc}")
+            log.debug(f"Webhook bg: cache→PG sync skipped for {efj}: {_url_exc}")
 
         # Send real-time email alert (with dedup)
         sent = send_webhook_alert(

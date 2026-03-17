@@ -219,6 +219,26 @@ async def api_team(request: Request):
 async def api_tracking_summary():
     """Return tracking status summary with stop timestamps for all FTL loads."""
     cache = _read_tracking_cache()
+
+    # Bulk-load driver_contacts from PG to enrich tracking with phone/trailer
+    _dc_map = {}  # efj_num -> {driver_phone, trailer_number}
+    try:
+        with db.get_cursor() as cur:
+            cur.execute("SELECT efj, driver_phone, trailer_number, carrier_email FROM driver_contacts")
+            for row in cur.fetchall():
+                _raw_efj = (row["efj"] or "").strip()
+                _dc_entry = {
+                    "phone": (row["driver_phone"] or "").strip(),
+                    "trailer": (row["trailer_number"] or "").strip(),
+                    "carrierEmail": (row["carrier_email"] or "").strip(),
+                }
+                # Index under both raw key ("EFJ106996") and stripped ("106996")
+                # so lookups match regardless of cache key format
+                _dc_map[_raw_efj] = _dc_entry
+                _dc_map[_raw_efj.replace("EFJ", "").strip()] = _dc_entry
+    except Exception as e:
+        log.debug("driver_contacts bulk load failed, using cache-only: %s", e)
+
     result = {}
     for efj, entry in cache.items():
         stop_times = entry.get("stop_times") or {}
@@ -246,6 +266,10 @@ async def api_tracking_summary():
             "stop2Eta": stop_times.get("stop2_eta"),
             "mpDisplayStatus": _ts_disp,
             "mpDisplayDetail": _ts_detail,
+            # Driver/trailer/email: prefer cache (real-time), fall back to PG driver_contacts
+            "driverPhone": entry.get("driver_phone", "") or _dc_map.get(efj, {}).get("phone", ""),
+            "trailer": entry.get("trailer", "") or _dc_map.get(efj, {}).get("trailer", ""),
+            "carrierEmail": _dc_map.get(efj, {}).get("carrierEmail", ""),
         }
     return {"tracking": result}
 
