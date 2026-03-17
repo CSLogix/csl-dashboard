@@ -16,6 +16,30 @@ import DocIndicators from "../components/DocIndicators";
 import TrackingBadge from "../components/TrackingBadge";
 import TerminalBadge from "../components/TerminalBadge";
 
+/**
+ * Render a rep-specific dashboard that displays Dray and FTL views with inline editing, column/date filtering, per-account grouping for master reps, inbox/action summary pills, and a per-load delete confirmation flow.
+ *
+ * @param {Object} props - Component props.
+ * @param {string} props.repName - The representative name used to filter and customize the dashboard (e.g., "Boviet", "Tolead", master rep names).
+ * @param {Array<Object>} props.shipments - List of shipment objects to display and operate on.
+ * @param {function():void} props.onBack - Callback invoked when the Back action is triggered.
+ * @param {function(string,string):void} props.handleStatusUpdate - Persist a status change for a shipment; called with (shipmentId, statusKey).
+ * @param {function(Object,Object=):void} props.handleLoadClick - Open a shipment slide-over or details view; called with (shipment, options).
+ * @param {function(Object,string,string):void} props.handleFieldUpdate - Persist a simple field update on a shipment; called with (shipment, field, value).
+ * @param {function(Object,string,any):void} props.handleMetadataUpdate - Persist metadata-level updates (e.g., truckType, customerRate, notes); called with (shipment, key, value).
+ * @param {function(Object,string,any):void} props.handleDriverFieldUpdate - Persist driver-related fields (e.g., trailer, driverPhone, carrierEmail); called with (shipment, key, value).
+ * @param {function(string):Promise<void>} props.handleDeleteLoad - Delete a load by EFJ identifier; used by the delete confirmation modal.
+ * @param {Object<string, Object>} props.repProfiles - Map of rep profile metadata (e.g., avatar_url) keyed by rep name.
+ * @param {function():void} [props.onProfileUpdate] - Optional callback invoked after a rep profile/avatar upload completes.
+ * @param {Object<string, Object>} props.trackingSummary - Map of EFJ/container -> tracking metadata used for MP/terminal badges.
+ * @param {Object<string, Object>} props.docSummary - Map of EFJ -> document metadata (pod presence, etc.) used by indicators and filters.
+ * @param {Array<Object>} props.inboxThreads - List of inbox threads used to compute needs-reply and rate-response counts and to link into the inbox.
+ * @param {function(string, string=):void} props.onNavigateInbox - Navigate to the inbox; called with (viewKey, filter?).
+ * @param {function():void} [props.onAddLoad] - Optional callback to create a new load.
+ * @param {function():void} [props.onRefresh] - Optional callback to refresh dashboard data.
+ *
+ * @returns {JSX.Element} The rendered RepDashboardView React element.
+ */
 export default function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, handleDeleteLoad, repProfiles, onProfileUpdate, trackingSummary, docSummary, inboxThreads, onNavigateInbox, onAddLoad, onRefresh }) {
   const highlightedEfj = useAppStore(s => s.highlightedEfj);
   const [expandedAccount, setExpandedAccount] = useState(null);

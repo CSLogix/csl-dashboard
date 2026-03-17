@@ -38,6 +38,14 @@ import PlaybooksView from "./views/PlaybooksView";
 import UserManagementView from "./views/UserManagementView";
 import AddForm from "./views/AddForm";
 
+/**
+ * Render the main dispatch dashboard UI that displays and manages shipments, alerts, inbox drafts, analytics, billing, and related workflows.
+ *
+ * This component coordinates data fetching, periodic refreshes, global keyboard shortcuts, and a wide set of handlers for updating shipment state,
+ * metadata, documents, rates, drafts, and user interactions across multiple views (overview, dispatch, history, inbox, billing, analytics, etc.).
+ *
+ * @returns {JSX.Element} A React element representing the full dispatch dashboard UI. 
+ */
 export default function DispatchDashboard() {
   // ── Core state from Zustand store (shared across components) ──
   const {

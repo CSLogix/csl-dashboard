@@ -1,3 +1,12 @@
+/**
+ * Render small emoji indicators for document types present in the provided docs object.
+ *
+ * @param {Object} docs - Object of boolean-like or numeric indicators for document types.
+ *   Recognized keys: `bol`, `pod`, `customer_rate`, `carrier_rate`, `carrier_invoice`, `msds`.
+ *   Values may be truthy/falsey or numeric; when no specific indicators are truthy the component
+ *   falls back to a single icon labeled with the total count (sum of Object.values(docs)).
+ * @returns {JSX.Element|null} A span containing one or more icon spans for each detected document indicator, or `null` if `docs` is falsy or has no keys.
+ */
 export default function DocIndicators({ docs }) {
   if (!docs || Object.keys(docs).length === 0) return null;
   const icons = [];

@@ -14,6 +14,35 @@ import TerminalBadge from "../components/TerminalBadge";
 import DocIndicators from "../components/DocIndicators";
 import TrackingBadge from "../components/TrackingBadge";
 
+/**
+ * Render a slide-over panel showing and managing detailed shipment information and actions.
+ *
+ * Displays shipment header, tracking preview, status selector, editable shipment and driver fields,
+ * financial controls (rates/margins), notes, timestamped notes log, email history, and a document hub
+ * with upload, preview, reclassification, and drag-and-drop support. Also exposes actions for AI
+ * summaries, sharing, calling/emailing driver or carrier, and deleting the load.
+ *
+ * @param {Object|null} selectedShipment - The currently selected shipment object or `null` to close the panel.
+ * @param {Function} setSelectedShipment - Setter to change the selected shipment (passing `null` closes the panel).
+ * @param {Array<Object>} shipments - Array of shipments in the current view/state.
+ * @param {Function} setShipments - Setter to replace the shipments array.
+ * @param {Function} handleStatusUpdate - Callback to update a shipment's status: (shipmentId, statusKey) => void.
+ * @param {string|null} editField - Identifier of the field currently being edited in the slide-over (or `null`).
+ * @param {Function} setEditField - Setter to set or clear the in-slide edit field identifier.
+ * @param {string} editValue - Current value for the in-slide edit input.
+ * @param {Function} setEditValue - Setter for the in-slide edit input value.
+ * @param {Function} handleFieldEdit - Handler for quick in-place edits that operate on local state: (shipmentId, field, value) => void.
+ * @param {Function} addSheetLog - Logger callback for app-level audit/history messages: (message) => void.
+ * @param {Array<Object>} carrierDirectory - Optional directory of carrier metadata used to surface MC/registry info.
+ * @param {Function} onDocChange - Optional callback invoked after documents are added/removed/reclassified.
+ * @param {boolean} isMobile - True when rendering in a mobile layout (adjusts sizing and positioning).
+ * @param {boolean} expandEmailsOnOpen - When true and emails exist, the Emails section will auto-expand on open.
+ * @param {Function} onConsumeExpandEmails - Optional callback invoked once expandEmailsOnOpen has been consumed.
+ * @param {Function} handleFieldUpdate - Handler for authoritative field updates that persist to the backend: (shipment, fieldKey, value, opts?) => void.
+ * @param {Function} handleMetadataUpdate - Handler to update shipment metadata fields (rates, notes, etc.): (shipment, key, value, opts?) => void.
+ * @param {Function} handleApplyRate - Handler to apply a suggested rate: (quote, opts?) => void.
+ * @returns {JSX.Element|null} The slide-over React element when a shipment is selected, or `null` when closed.
+ */
 export default function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setShipments, handleStatusUpdate, editField, setEditField, editValue, setEditValue, handleFieldEdit, addSheetLog, carrierDirectory, onDocChange, isMobile, expandEmailsOnOpen, onConsumeExpandEmails, handleFieldUpdate, handleMetadataUpdate, handleApplyRate }) {
   const docInputRef = useRef(null);
   const emailsSectionRef = useRef(null);
