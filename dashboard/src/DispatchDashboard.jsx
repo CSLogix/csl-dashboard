@@ -549,6 +549,7 @@ export default function DispatchDashboard() {
     if (!res.ok) { const txt = await res.text(); throw new Error(txt); }
     addSheetLog(`Deleted load | ${efj}`);
     setShipments(prev => prev.filter(s => s.efj !== efj));
+    setSelectedShipment(prev => prev && prev.efj === efj ? null : prev);
   }, [addSheetLog]);
 
   // Inline metadata update — writes to Postgres via POST /api/v2/load/{efj}/update
@@ -945,7 +946,7 @@ export default function DispatchDashboard() {
               onFilterRepDispatch={(rep, status) => { setActiveRep(rep); if (status) setActiveStatus(status); setActiveView("dispatch"); }} />
           )}
           {activeView === "dashboard" && selectedRep && (
-            <RepDashboardView repName={selectedRep} shipments={shipments} onBack={goBackFromRep}
+            <RepDashboardView key={selectedRep} repName={selectedRep} shipments={shipments} onBack={goBackFromRep}
               handleStatusUpdate={handleStatusUpdate} handleLoadClick={handleLoadClick}
               handleFieldUpdate={handleFieldUpdate} handleMetadataUpdate={handleMetadataUpdate}
               handleDriverFieldUpdate={handleDriverFieldUpdate} handleDeleteLoad={handleDeleteLoad}

@@ -1111,7 +1111,8 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                   if (docFilter === "bol") return d.doc_type === "bol";
                   if (docFilter === "email") return d.doc_type === "email";
                   if (docFilter === "carrier_invoice") return d.doc_type === "carrier_invoice";
-                  return d.doc_type !== "customer_rate" && d.doc_type !== "carrier_rate" && d.doc_type !== "pod" && d.doc_type !== "bol" && d.doc_type !== "email" && d.doc_type !== "carrier_invoice";
+                  if (docFilter === "msds") return d.doc_type === "msds";
+                  return d.doc_type !== "customer_rate" && d.doc_type !== "carrier_rate" && d.doc_type !== "pod" && d.doc_type !== "bol" && d.doc_type !== "email" && d.doc_type !== "carrier_invoice" && d.doc_type !== "msds";
                 }).map(doc => {
                   const icon = doc.doc_type === "carrier_invoice" ? "\u{1F9FE}" : doc.doc_type.includes("rate") ? "\u{1F4B0}" : doc.doc_type === "pod" ? "\u{1F4F8}" : doc.doc_type === "bol" ? "\u{1F4CB}" : doc.doc_type === "packing_list" ? "\u{1F4E6}" : doc.doc_type === "screenshot" ? "\u{1F5BC}" : doc.doc_type === "email" ? "\u2709" : "\u{1F4C4}";
                   const size = doc.size_bytes < 1024 ? `${doc.size_bytes}B` : doc.size_bytes < 1048576 ? `${Math.round(doc.size_bytes / 1024)}KB` : `${(doc.size_bytes / 1048576).toFixed(1)}MB`;
