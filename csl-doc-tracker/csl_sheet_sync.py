@@ -89,10 +89,11 @@ BOVIET_TAB_CONFIGS = {
                          "carrier_email_col": 10, "driver_name_col": 13,
                          "default_origin": "Greenville, NC", "default_dest": "Mexia, TX",
                          "start_row": 45},
-    "Hanson":           {"efj_col": 0, "load_id_col": 1, "status_col": 6,
-                         "pickup_col": 4, "delivery_col": 5,
-                         "phone_col": 8, "trailer_col": 10,
-                         "carrier_email_col": 7, "driver_name_col": 9},
+    "Hanson":           {"efj_col": 0, "load_id_col": 2, "status_col": 8,
+                         "pickup_col": 6, "delivery_col": 7,
+                         "phone_col": 11, "trailer_col": 13,
+                         "carrier_email_col": 10, "driver_name_col": 12,
+                         "default_origin": "Houston, TX", "default_dest": "Valera, TX"},
 }
 
 TOLEAD_HUB_CONFIGS = {
