@@ -1129,6 +1129,14 @@ export default function RateIQView() {
               style={{ padding: "10px 28px", borderRadius: 10, border: "none", background: grad, color: "#0A0F1C", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: laneSearching ? 0.6 : 1, whiteSpace: "nowrap" }}>
               {laneSearching ? "Searching..." : "Search"}
             </button>
+            {(searchOrigin || searchDest || laneResults.length > 0) && (
+              <button onClick={() => { setSearchOrigin(""); setSearchDest(""); setLaneResults([]); setSelectedLane(null); setView("browse"); }}
+                style={{ padding: "10px 16px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "#8B95A8", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.15s" }}
+                onMouseEnter={e => { e.currentTarget.style.color = "#F0F2F5"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)"; }}
+                onMouseLeave={e => { e.currentTarget.style.color = "#8B95A8"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}>
+                Clear
+              </button>
+            )}
           </div>
 
           {/* Recent Searches */}
