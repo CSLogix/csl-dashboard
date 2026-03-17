@@ -951,7 +951,8 @@ export default function RateIQView() {
         const normPort = normalizePort(r.port || "");
         const normDest = normalizePort(r.destination || "");
         const key = `${normPort}|${normDest}`;
-        if (!laneMap[key]) laneMap[key] = { port: normPort, destination: normDest, count: 0, totalRate: 0, carriers: new Set(), recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
+        if (!laneMap[key]) laneMap[key] = { port: normPort, destination: normDest, count: 0, totalRate: 0, carriers: new Set(), rawRates: [], recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
+        laneMap[key].rawRates.push(r);
         if (!laneMap[key].miles && r.miles) laneMap[key].miles = r.miles;
         if (!laneMap[key].origin_zip && r.origin_zip) laneMap[key].origin_zip = r.origin_zip;
         if (!laneMap[key].dest_zip && r.dest_zip) laneMap[key].dest_zip = r.dest_zip;
@@ -977,7 +978,7 @@ export default function RateIQView() {
           // Determine primary move type (most common across rates for this lane)
           const mtEntries = Object.entries(l.moveTypes);
           const primary_move_type = mtEntries.length > 0 ? mtEntries.sort((a, b) => b[1] - a[1])[0][0] : "dray";
-          return { port: l.port, destination: l.destination, load_count: l.count, avg_rate, carrier_count: l.carriers.size, trend_pct, miles: l.miles, origin_zip: l.origin_zip, dest_zip: l.dest_zip, move_type: primary_move_type };
+          return { port: l.port, destination: l.destination, load_count: l.count, avg_rate, carrier_count: l.carriers.size, trend_pct, miles: l.miles, origin_zip: l.origin_zip, dest_zip: l.dest_zip, move_type: primary_move_type, rawRates: l.rawRates };
         })
         .sort((a, b) => b.load_count - a.load_count);
       setRateLaneSummaries(summaries);
@@ -1017,8 +1018,11 @@ export default function RateIQView() {
     setLaneSearching(false);
   }, [searchOrigin, searchDest, moveTypeFilter, fetchMarketBenchmark]);
 
-  // Debounced auto-search: fires 400ms after user stops typing
+  // Debounced auto-search: fires 400ms after user stops typing (browse view only)
+  const viewRef = useRef(view);
+  viewRef.current = view;
   useEffect(() => {
+    if (viewRef.current === "detail") return; // Don't re-fetch when navigating to detail with existing data
     if (!searchOrigin && !searchDest) {
       // User cleared both fields — reset results immediately
       setLaneResults([]);
@@ -1142,14 +1146,20 @@ export default function RateIQView() {
   }, [handleReclassifyLane]);
 
   // ── Navigate to lane detail ──
-  const openLaneDetail = useCallback(async (origin, destination, idx = 0) => {
+  const openLaneDetail = useCallback(async (origin, destination, idx = 0, existingCarriers = null) => {
     setSelectedLane({ origin, destination });
     setSearchOrigin(origin || "");
     setSearchDest(destination || "");
     setLaneIndex(idx);
     setView("detail");
     if (origin && destination) saveRecent(origin, destination);
-    // Trigger lane search for detail view
+    // If we already have carrier data from the grouped search results, use it directly
+    if (existingCarriers && existingCarriers.length > 0) {
+      setLaneResults(existingCarriers);
+      fetchMarketBenchmark(origin, destination);
+      return;
+    }
+    // Otherwise fetch from API — use raw origin/dest for query
     setLaneSearching(true);
     try {
       const params = new URLSearchParams();
@@ -1326,7 +1336,7 @@ export default function RateIQView() {
                   carrier_count: group.carriers.length,
                   miles: group.miles, origin_zip: group.origin_zip, dest_zip: group.dest_zip,
                   move_type: group.move_type,
-                }} onClick={() => openLaneDetail(group.port, group.destination, gi)}
+                }} onClick={() => openLaneDetail(group.port, group.destination, gi, group.carriers)}
                   rateIds={(group.carriers || []).map(c => c.id).filter(Boolean)}
                   onReclassify={mt => handleReclassifyLane(group.port, group.destination, (group.carriers || []).map(c => c.id).filter(Boolean), mt)}
                   onQuickQuote={() => { setSelectedLane({ origin: group.port, destination: group.destination }); setView("build-quote"); }} />
@@ -1380,7 +1390,7 @@ export default function RateIQView() {
                             const avgRate = ls.avg_rate || ls.average || 0;
                             const mtStyle = MOVE_TYPE_STYLES[(ls.move_type || "dray").toLowerCase()] || MOVE_TYPE_STYLES.dray;
                             return (
-                              <div key={li} onClick={() => openLaneDetail(ls.port, ls.destination, 0)}
+                              <div key={li} onClick={() => openLaneDetail(ls.port, ls.destination, 0, ls.rawRates)}
                                 style={{ padding: "12px 20px 12px 44px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.03)", transition: "background 0.1s" }}
                                 onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
                                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
