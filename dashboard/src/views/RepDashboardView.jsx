@@ -45,7 +45,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   const [expandedAccount, setExpandedAccount] = useState(null);
   const [bovietTab, setBovietTab] = useState("All");
   const [toleadHub, setToleadHub] = useState("All");
-  const [opsTableFilter, setOpsTableFilter] = useState("del_today");
+  const [opsTableFilter, setOpsTableFilter] = useState("all");
   const [masterTableFilter, setMasterTableFilter] = useState("all");
   const [repViewMode, setRepViewMode] = useState("dray"); // "dray" | "ftl"
   const [inlineEditId, setInlineEditId] = useState(null);
@@ -914,10 +914,15 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
 
       {/* ── Dray View: Operations Dashboard — Boviet/Tolead ── */}
       {repViewMode === "dray" && isOps && (<>
-        <div className="dash-panel" style={{ overflow: "hidden" }}>
+        {/* FTL loads use the same FTL dispatch table as FTL view for uniform columns */}
+        {(() => { const ftlLoads = opsDataFiltered.filter(s => s.moveType === "FTL"); return ftlLoads.length > 0 ? renderFTLTable(ftlLoads) : null; })()}
+
+        {/* Non-FTL (dray) loads use dray-oriented columns */}
+        {(() => { const drayLoads = opsDataFiltered.filter(s => s.moveType !== "FTL"); return drayLoads.length > 0 ? (
+        <div className="dash-panel" style={{ overflow: "hidden", marginTop: opsDataFiltered.some(s => s.moveType === "FTL") ? 14 : 0 }}>
           <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span className="dash-panel-title">
-              {isBoviet ? (bovietTab === "All" ? "All Projects" : bovietTab) : (toleadHub === "All" ? "All Hubs" : `${toleadHub} Hub`)} {"\u2014"} {opsDataFiltered.length} {opsDataFiltered.length === 1 ? "Load" : "Loads"}
+              {isBoviet ? (bovietTab === "All" ? "All Projects" : bovietTab) : (toleadHub === "All" ? "All Hubs" : `${toleadHub} Hub`)} {"\u2014"} {drayLoads.length} Dray {drayLoads.length === 1 ? "Load" : "Loads"}
             </span>
             {opsTableFilter !== "all" && (
               <button onClick={() => setOpsTableFilter("all")}
@@ -934,7 +939,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 </tr>
               </thead>
               <tbody>
-                {opsDataFiltered.map((s) => {
+                {drayLoads.map((s) => {
                   const sc = STATUS_COLORS[s.status] || { main: "#94a3b8" };
                   const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
                   const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
@@ -1137,21 +1142,40 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 })}
               </tbody>
             </table>
-            {opsTableShipsDateFiltered.length === 0 && (
+            {drayLoads.length === 0 && (
               <div style={{ textAlign: "center", padding: 40, color: "#3D4557" }}>
-                <div style={{ fontSize: 11, fontWeight: 600 }}>No loads found</div>
+                <div style={{ fontSize: 11, fontWeight: 600 }}>No dray loads found</div>
               </div>
             )}
           </div>
         </div>
+        ) : null; })()}
+        {/* Show empty state only when no loads at all */}
+        {opsDataFiltered.length === 0 && (
+          <div className="dash-panel" style={{ overflow: "hidden" }}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              <span className="dash-panel-title">
+                {isBoviet ? (bovietTab === "All" ? "All Projects" : bovietTab) : (toleadHub === "All" ? "All Hubs" : `${toleadHub} Hub`)} {"\u2014"} 0 Loads
+              </span>
+            </div>
+            <div style={{ textAlign: "center", padding: 40, color: "#3D4557" }}>
+              <div style={{ fontSize: 11, fontWeight: 600 }}>No loads found</div>
+            </div>
+          </div>
+        )}
       </>)}
 
       {/* ── Dray View: Shipment table — master reps ── */}
-      {repViewMode === "dray" && isMaster && (
-      <div className="dash-panel" style={{ overflow: "hidden" }}>
+      {repViewMode === "dray" && isMaster && (<>
+      {/* FTL loads use uniform FTL dispatch table */}
+      {(() => { const masterFtlLoads = displayDataFiltered.filter(s => s.moveType === "FTL"); return masterFtlLoads.length > 0 ? renderFTLTable(masterFtlLoads) : null; })()}
+
+      {/* Non-FTL (dray) loads */}
+      {(() => { const masterDrayLoads = displayDataFiltered.filter(s => s.moveType !== "FTL"); return masterDrayLoads.length > 0 ? (
+      <div className="dash-panel" style={{ overflow: "hidden", marginTop: displayDataFiltered.some(s => s.moveType === "FTL") ? 14 : 0 }}>
         <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span className="dash-panel-title">
-            {expandedAccount || "All Accounts"} {"\u2014"} {displayDataFiltered.length} loads
+            {expandedAccount || "All Accounts"} {"\u2014"} {masterDrayLoads.length} Dray {masterDrayLoads.length === 1 ? "Load" : "Loads"}
           </span>
           {masterTableFilter !== "all" && (
             <button onClick={() => setMasterTableFilter("all")}
@@ -1171,7 +1195,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 </tr>
               </thead>
               <tbody>
-                {displayDataFiltered.map((s) => {
+                {masterDrayLoads.map((s) => {
                   const sc = STATUS_COLORS[s.status] || { main: "#94a3b8" };
                   const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
                   const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
@@ -1390,14 +1414,25 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
             </table>
             );
           })()}
-          {displayShips.length === 0 && (
+          {masterDrayLoads.length === 0 && (
             <div style={{ textAlign: "center", padding: 40, color: "#3D4557" }}>
-              <div style={{ fontSize: 11, fontWeight: 600 }}>No loads found</div>
+              <div style={{ fontSize: 11, fontWeight: 600 }}>No dray loads found</div>
             </div>
           )}
         </div>
       </div>
+      ) : null; })()}
+      {displayDataFiltered.length === 0 && (
+        <div className="dash-panel" style={{ overflow: "hidden" }}>
+          <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+            <span className="dash-panel-title">{expandedAccount || "All Accounts"} {"\u2014"} 0 Loads</span>
+          </div>
+          <div style={{ textAlign: "center", padding: 40, color: "#3D4557" }}>
+            <div style={{ fontSize: 11, fontWeight: 600 }}>No loads found</div>
+          </div>
+        </div>
       )}
+      </>)}
 
       {/* Delete confirmation modal */}
       {deleteConfirmEfj && (
