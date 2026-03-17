@@ -38,6 +38,14 @@ import PlaybooksView from "./views/PlaybooksView";
 import UserManagementView from "./views/UserManagementView";
 import AddForm from "./views/AddForm";
 
+/**
+ * Render the main dispatch dashboard UI that displays and manages shipments, alerts, inbox drafts, analytics, billing, and related workflows.
+ *
+ * This component coordinates data fetching, periodic refreshes, global keyboard shortcuts, and a wide set of handlers for updating shipment state,
+ * metadata, documents, rates, drafts, and user interactions across multiple views (overview, dispatch, history, inbox, billing, analytics, etc.).
+ *
+ * @returns {JSX.Element} A React element representing the full dispatch dashboard UI. 
+ */
 export default function DispatchDashboard() {
   // ── Core state from Zustand store (shared across components) ──
   const {
@@ -535,6 +543,15 @@ export default function DispatchDashboard() {
     }
   };
 
+  // Delete load — shared by DispatchView and RepDashboardView
+  const handleDeleteLoad = useCallback(async (efj) => {
+    const res = await apiFetch(`${API_BASE}/api/v2/load/${efj}`, { method: "DELETE" });
+    if (!res.ok) { const txt = await res.text(); throw new Error(txt); }
+    addSheetLog(`Deleted load | ${efj}`);
+    setShipments(prev => prev.filter(s => s.efj !== efj));
+    setSelectedShipment(prev => prev && prev.efj === efj ? null : prev);
+  }, [addSheetLog]);
+
   // Inline metadata update — writes to Postgres via POST /api/v2/load/{efj}/update
   const META_TO_PG = { truckType: "equipment_type", customerRate: "customer_rate", carrierPay: "carrier_pay", notes: "notes" };
   const FIELD_LABELS = { customerRate: "Customer Rate", carrierPay: "Carrier Pay", notes: "Notes", truckType: "Equipment" };
@@ -929,10 +946,10 @@ export default function DispatchDashboard() {
               onFilterRepDispatch={(rep, status) => { setActiveRep(rep); if (status) setActiveStatus(status); setActiveView("dispatch"); }} />
           )}
           {activeView === "dashboard" && selectedRep && (
-            <RepDashboardView repName={selectedRep} shipments={shipments} onBack={goBackFromRep}
+            <RepDashboardView key={selectedRep} repName={selectedRep} shipments={shipments} onBack={goBackFromRep}
               handleStatusUpdate={handleStatusUpdate} handleLoadClick={handleLoadClick}
               handleFieldUpdate={handleFieldUpdate} handleMetadataUpdate={handleMetadataUpdate}
-              handleDriverFieldUpdate={handleDriverFieldUpdate}
+              handleDriverFieldUpdate={handleDriverFieldUpdate} handleDeleteLoad={handleDeleteLoad}
               repProfiles={repProfiles} onProfileUpdate={fetchProfiles}
               trackingSummary={trackingSummary} docSummary={docSummary}
               inboxThreads={inboxThreads}

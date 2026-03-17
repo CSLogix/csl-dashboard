@@ -457,12 +457,22 @@ async def download_load_document(efj: str, doc_id: int, inline: bool = False):
 
 @router.patch("/api/load/{efj}/documents/{doc_id}")
 async def update_load_document(efj: str, doc_id: int, request: Request):
-    """Update document metadata (doc_type reclassification)."""
+    """
+    Reclassify a load document by updating its `doc_type`.
+    
+    Validates the provided `doc_type` against the allowed set and updates the matching `load_documents` record for the given `efj` and `doc_id`.
+    
+    Returns:
+        JSONResponse: On success, `{"ok": True, "doc_type": <new_type>}`.
+        If `doc_type` is invalid, returns status 400 with `{"error": "Invalid doc_type. Must be one of: <allowed_types>"}`.
+        If no matching document is found, returns status 404 with `{"error": "not found"}`.
+    """
     body = await request.json()
     new_type = body.get("doc_type", "").strip()
     valid_types = [
         "customer_rate", "carrier_rate", "rate", "unclassified",
-        "pod", "bol", "carrier_invoice", "screenshot", "email", "other",
+        "pod", "bol", "carrier_invoice", "packing_list", "msds",
+        "screenshot", "email", "other",
     ]
     if new_type not in valid_types:
         return JSONResponse(status_code=400, content={"error": f"Invalid doc_type. Must be one of: {valid_types}"})

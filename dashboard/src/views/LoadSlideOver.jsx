@@ -14,6 +14,35 @@ import TerminalBadge from "../components/TerminalBadge";
 import DocIndicators from "../components/DocIndicators";
 import TrackingBadge from "../components/TrackingBadge";
 
+/**
+ * Render a slide-over panel showing and managing detailed shipment information and actions.
+ *
+ * Displays shipment header, tracking preview, status selector, editable shipment and driver fields,
+ * financial controls (rates/margins), notes, timestamped notes log, email history, and a document hub
+ * with upload, preview, reclassification, and drag-and-drop support. Also exposes actions for AI
+ * summaries, sharing, calling/emailing driver or carrier, and deleting the load.
+ *
+ * @param {Object|null} selectedShipment - The currently selected shipment object or `null` to close the panel.
+ * @param {Function} setSelectedShipment - Setter to change the selected shipment (passing `null` closes the panel).
+ * @param {Array<Object>} shipments - Array of shipments in the current view/state.
+ * @param {Function} setShipments - Setter to replace the shipments array.
+ * @param {Function} handleStatusUpdate - Callback to update a shipment's status: (shipmentId, statusKey) => void.
+ * @param {string|null} editField - Identifier of the field currently being edited in the slide-over (or `null`).
+ * @param {Function} setEditField - Setter to set or clear the in-slide edit field identifier.
+ * @param {string} editValue - Current value for the in-slide edit input.
+ * @param {Function} setEditValue - Setter for the in-slide edit input value.
+ * @param {Function} handleFieldEdit - Handler for quick in-place edits that operate on local state: (shipmentId, field, value) => void.
+ * @param {Function} addSheetLog - Logger callback for app-level audit/history messages: (message) => void.
+ * @param {Array<Object>} carrierDirectory - Optional directory of carrier metadata used to surface MC/registry info.
+ * @param {Function} onDocChange - Optional callback invoked after documents are added/removed/reclassified.
+ * @param {boolean} isMobile - True when rendering in a mobile layout (adjusts sizing and positioning).
+ * @param {boolean} expandEmailsOnOpen - When true and emails exist, the Emails section will auto-expand on open.
+ * @param {Function} onConsumeExpandEmails - Optional callback invoked once expandEmailsOnOpen has been consumed.
+ * @param {Function} handleFieldUpdate - Handler for authoritative field updates that persist to the backend: (shipment, fieldKey, value, opts?) => void.
+ * @param {Function} handleMetadataUpdate - Handler to update shipment metadata fields (rates, notes, etc.): (shipment, key, value, opts?) => void.
+ * @param {Function} handleApplyRate - Handler to apply a suggested rate: (quote, opts?) => void.
+ * @returns {JSX.Element|null} The slide-over React element when a shipment is selected, or `null` when closed.
+ */
 export default function LoadSlideOver({ selectedShipment, setSelectedShipment, shipments, setShipments, handleStatusUpdate, editField, setEditField, editValue, setEditValue, handleFieldEdit, addSheetLog, carrierDirectory, onDocChange, isMobile, expandEmailsOnOpen, onConsumeExpandEmails, handleFieldUpdate, handleMetadataUpdate, handleApplyRate }) {
   const docInputRef = useRef(null);
   const emailsSectionRef = useRef(null);
@@ -1052,10 +1081,11 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                   { id: "cx_rate", label: "CX Rate", match: t => t === "customer_rate" },
                   { id: "rc", label: "RC", match: t => t === "carrier_rate" },
                   { id: "pod", label: "POD", match: t => t === "pod" },
-                  { id: "bol", label: "BOL", match: t => t === "bol" },
+                  { id: "bol", label: "BOL 1", match: t => t === "bol" },
                   { id: "email", label: "Email", match: t => t === "email" },
                   { id: "carrier_invoice", label: "Carrier Invoice", match: t => t === "carrier_invoice" },
-                  { id: "other", label: "Other", match: t => t !== "customer_rate" && t !== "carrier_rate" && t !== "pod" && t !== "bol" && t !== "email" && t !== "carrier_invoice" },
+                  { id: "msds", label: "MSDS", match: t => t === "msds" },
+                  { id: "other", label: "Other", match: t => !["customer_rate", "carrier_rate", "pod", "bol", "email", "carrier_invoice", "msds"].includes(t) },
                 ].map(tab => {
                   const count = tab.id === "all" ? loadDocs.length : loadDocs.filter(d => tab.match(d.doc_type)).length;
                   return (
@@ -1081,7 +1111,8 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                   if (docFilter === "bol") return d.doc_type === "bol";
                   if (docFilter === "email") return d.doc_type === "email";
                   if (docFilter === "carrier_invoice") return d.doc_type === "carrier_invoice";
-                  return d.doc_type !== "customer_rate" && d.doc_type !== "carrier_rate" && d.doc_type !== "pod" && d.doc_type !== "bol" && d.doc_type !== "email" && d.doc_type !== "carrier_invoice";
+                  if (docFilter === "msds") return d.doc_type === "msds";
+                  return d.doc_type !== "customer_rate" && d.doc_type !== "carrier_rate" && d.doc_type !== "pod" && d.doc_type !== "bol" && d.doc_type !== "email" && d.doc_type !== "carrier_invoice" && d.doc_type !== "msds";
                 }).map(doc => {
                   const icon = doc.doc_type === "carrier_invoice" ? "\u{1F9FE}" : doc.doc_type.includes("rate") ? "\u{1F4B0}" : doc.doc_type === "pod" ? "\u{1F4F8}" : doc.doc_type === "bol" ? "\u{1F4CB}" : doc.doc_type === "packing_list" ? "\u{1F4E6}" : doc.doc_type === "screenshot" ? "\u{1F5BC}" : doc.doc_type === "email" ? "\u2709" : "\u{1F4C4}";
                   const size = doc.size_bytes < 1024 ? `${doc.size_bytes}B` : doc.size_bytes < 1048576 ? `${Math.round(doc.size_bytes / 1024)}KB` : `${(doc.size_bytes / 1048576).toFixed(1)}MB`;
@@ -1113,6 +1144,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                                 <option value="bol">BOL</option>
                                 <option value="carrier_invoice">Carrier Invoice</option>
                                 <option value="packing_list">Packing List</option>
+                                <option value="msds">MSDS</option>
                                 <option value="screenshot">Screenshot</option>
                                 <option value="email">Email</option>
                                 <option value="other">Other</option>
@@ -1151,6 +1183,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 <option value="bol" style={{ background: "#0D1119" }}>BOL</option>
                 <option value="carrier_invoice" style={{ background: "#0D1119" }}>Carrier Invoice</option>
                 <option value="packing_list" style={{ background: "#0D1119" }}>Packing List</option>
+                <option value="msds" style={{ background: "#0D1119" }}>MSDS</option>
                 <option value="screenshot" style={{ background: "#0D1119" }}>Screenshot</option>
                 <option value="email" style={{ background: "#0D1119" }}>Email</option>
                 <option value="other" style={{ background: "#0D1119" }}>Other</option>

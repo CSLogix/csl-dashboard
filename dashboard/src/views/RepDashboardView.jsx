@@ -16,7 +16,31 @@ import DocIndicators from "../components/DocIndicators";
 import TrackingBadge from "../components/TrackingBadge";
 import TerminalBadge from "../components/TerminalBadge";
 
-export default function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, repProfiles, onProfileUpdate, trackingSummary, docSummary, inboxThreads, onNavigateInbox, onAddLoad, onRefresh }) {
+/**
+ * Render a rep-specific dashboard that displays Dray and FTL views with inline editing, column/date filtering, per-account grouping for master reps, inbox/action summary pills, and a per-load delete confirmation flow.
+ *
+ * @param {Object} props - Component props.
+ * @param {string} props.repName - The representative name used to filter and customize the dashboard (e.g., "Boviet", "Tolead", master rep names).
+ * @param {Array<Object>} props.shipments - List of shipment objects to display and operate on.
+ * @param {function():void} props.onBack - Callback invoked when the Back action is triggered.
+ * @param {function(string,string):void} props.handleStatusUpdate - Persist a status change for a shipment; called with (shipmentId, statusKey).
+ * @param {function(Object,Object=):void} props.handleLoadClick - Open a shipment slide-over or details view; called with (shipment, options).
+ * @param {function(Object,string,string):void} props.handleFieldUpdate - Persist a simple field update on a shipment; called with (shipment, field, value).
+ * @param {function(Object,string,any):void} props.handleMetadataUpdate - Persist metadata-level updates (e.g., truckType, customerRate, notes); called with (shipment, key, value).
+ * @param {function(Object,string,any):void} props.handleDriverFieldUpdate - Persist driver-related fields (e.g., trailer, driverPhone, carrierEmail); called with (shipment, key, value).
+ * @param {function(string):Promise<void>} props.handleDeleteLoad - Delete a load by EFJ identifier; used by the delete confirmation modal.
+ * @param {Object<string, Object>} props.repProfiles - Map of rep profile metadata (e.g., avatar_url) keyed by rep name.
+ * @param {function():void} [props.onProfileUpdate] - Optional callback invoked after a rep profile/avatar upload completes.
+ * @param {Object<string, Object>} props.trackingSummary - Map of EFJ/container -> tracking metadata used for MP/terminal badges.
+ * @param {Object<string, Object>} props.docSummary - Map of EFJ -> document metadata (pod presence, etc.) used by indicators and filters.
+ * @param {Array<Object>} props.inboxThreads - List of inbox threads used to compute needs-reply and rate-response counts and to link into the inbox.
+ * @param {function(string, string=):void} props.onNavigateInbox - Navigate to the inbox; called with (viewKey, filter?).
+ * @param {function():void} [props.onAddLoad] - Optional callback to create a new load.
+ * @param {function():void} [props.onRefresh] - Optional callback to refresh dashboard data.
+ *
+ * @returns {JSX.Element} The rendered RepDashboardView React element.
+ */
+export default function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, handleDeleteLoad, repProfiles, onProfileUpdate, trackingSummary, docSummary, inboxThreads, onNavigateInbox, onAddLoad, onRefresh }) {
   const highlightedEfj = useAppStore(s => s.highlightedEfj);
   const [expandedAccount, setExpandedAccount] = useState(null);
   const [bovietTab, setBovietTab] = useState("All");
@@ -34,6 +58,8 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   const [needsReplyOpen, setNeedsReplyOpen] = useState(false);
   const [puDateFilter, setPuDateFilter] = useState("");
   const [delDateFilter, setDelDateFilter] = useState("");
+  const [deleteConfirmEfj, setDeleteConfirmEfj] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Auto-default to FTL view for Boviet/Tolead
   useEffect(() => {
@@ -196,6 +222,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   });
   const opsActive = opsBase.filter(s => !isPostDelivery(s.status));
   const opsTableShips = !isOps ? [] :
+    opsTableFilter === "active" ? opsActive :
     opsTableFilter === "behind" ? opsBehind :
     opsTableFilter === "on_schedule" ? opsBase.filter(s => !isPostDelivery(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))) :
     opsTableFilter === "in_transit" ? opsBase.filter(s => ["in_transit", "out_for_delivery"].includes(s.status)) :
@@ -206,7 +233,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
     opsTableFilter === "needs_driver" ? needsDriver :
     opsTableFilter === "awaiting_pod" ? awaitingPod :
     [...STATUSES, ...FTL_STATUSES].some(st => st.key === opsTableFilter && st.key !== "all") ? opsBase.filter(s => s.status === opsTableFilter) :
-    opsActive;
+    opsBase;
   // Apply date picker filters to ops table
   const opsTableShipsDateFiltered = opsTableShips.filter(s => {
     if (puDateFilter) {
@@ -295,6 +322,29 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   };
 
   // ── FTL Dispatch Table (shared by master + ops in FTL view) ──
+  const renderRowActions = (s, extraTdStyle) => (
+    <td style={{ padding: "5px 4px", width: 52, textAlign: "center", ...extraTdStyle }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}>
+        <button onClick={() => handleLoadClick(s)} title="Open details"
+          style={{ background: "rgba(0,184,212,0.06)", border: "1px solid rgba(0,184,212,0.12)", color: "#00b8d4", cursor: "pointer", padding: "3px 5px", borderRadius: 6, lineHeight: 1, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+          onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,184,212,0.18)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.4)"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,184,212,0.06)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.12)"; }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M14 9l3 3-3 3" />
+          </svg>
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmEfj(s.efj); }} title="Delete load"
+          style={{ background: "transparent", border: "1px solid transparent", color: "#EF4444", cursor: "pointer", padding: "3px 4px", borderRadius: 6, lineHeight: 1, opacity: 0.35, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+          onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.1)"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.opacity = "1"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.opacity = "0.35"; }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          </svg>
+        </button>
+      </div>
+    </td>
+  );
+
   const renderFTLTable = (ships) => {
     const ftlCols = ["", "EFJ #", "Status", "Container/Load #", "MP Status", "Pickup", "Origin", "Destination", "Delivery", "Truck", "Trailer #", "Driver Phone", "Carrier Email", "Rate", "Notes"];
     const filteredShips = applyColFilters(ships, repColumnFilters, trackingSummary);
@@ -326,12 +376,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 return (
                   <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
                     style={{ cursor: "default", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : rowBg }}>
-                    {/* Open slide-over button */}
-                    <td style={{ ...tdBase, padding: "5px 4px", width: 24, textAlign: "center" }}>
-                      <button onClick={() => handleLoadClick(s)} title="Open details"
-                        style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
-                        onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
-                    </td>
+                    {renderRowActions(s, { borderBottom: tdBase.borderBottom, borderRight: tdBase.borderRight })}
                     {/* EFJ # (inline-editable) */}
                     <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("efj"); setInlineEditValue(s.efj || ""); }}>
                       {isEditing && inlineEditField === "efj" ? (
@@ -565,7 +610,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
               })}
             </tbody>
           </table>
-          {ships.length === 0 && (
+          {filteredShips.length === 0 && (
             <div style={{ textAlign: "center", padding: 40, color: "#3D4557" }}>
               <div style={{ fontSize: 11, fontWeight: 600 }}>No FTL loads found</div>
             </div>
@@ -638,7 +683,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
         const filterState = isOps ? opsTableFilter : masterTableFilter;
         const setFilter = isOps ? setOpsTableFilter : (f) => setMasterTableFilter(masterTableFilter === f ? "all" : f);
         const pills = [
-          { label: "Active", value: actionActive.length, c: "#3B82F6", filter: isOps ? "all" : "active" },
+          { label: "Active", value: actionActive.length, c: "#3B82F6", filter: "active" },
           { label: "PU Today", value: actionPuToday.length, c: "#F59E0B", filter: "pu_today" },
           { label: "PU Tmrw", value: actionPuTmrw.length, c: "#00A8CC", filter: "pu_tomorrow" },
           { label: "DEL Today", value: actionDelToday.length, c: "#22C55E", filter: "del_today" },
@@ -872,10 +917,15 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
 
       {/* ── Dray View: Operations Dashboard — Boviet/Tolead ── */}
       {repViewMode === "dray" && isOps && (<>
-        <div className="dash-panel" style={{ overflow: "hidden" }}>
+        {/* FTL loads use the same FTL dispatch table as FTL view for uniform columns */}
+        {(() => { const ftlLoads = opsDataFiltered.filter(s => s.moveType === "FTL"); return ftlLoads.length > 0 ? renderFTLTable(ftlLoads) : null; })()}
+
+        {/* Non-FTL (dray) loads use dray-oriented columns */}
+        {(() => { const drayLoads = opsDataFiltered.filter(s => s.moveType !== "FTL"); return drayLoads.length > 0 ? (
+        <div className="dash-panel" style={{ overflow: "hidden", marginTop: opsDataFiltered.some(s => s.moveType === "FTL") ? 14 : 0 }}>
           <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span className="dash-panel-title">
-              {isBoviet ? (bovietTab === "All" ? "All Projects" : bovietTab) : (toleadHub === "All" ? "All Hubs" : `${toleadHub} Hub`)} {"\u2014"} {opsDataFiltered.length} {opsDataFiltered.length === 1 ? "Load" : "Loads"}
+              {isBoviet ? (bovietTab === "All" ? "All Projects" : bovietTab) : (toleadHub === "All" ? "All Hubs" : `${toleadHub} Hub`)} {"\u2014"} {drayLoads.length} Dray {drayLoads.length === 1 ? "Load" : "Loads"}
             </span>
             {opsTableFilter !== "all" && (
               <button onClick={() => setOpsTableFilter("all")}
@@ -892,7 +942,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 </tr>
               </thead>
               <tbody>
-                {opsDataFiltered.map((s) => {
+                {drayLoads.map((s) => {
                   const sc = STATUS_COLORS[s.status] || { main: "#94a3b8" };
                   const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
                   const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
@@ -904,12 +954,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                   return (
                     <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
                       style={{ cursor: "default", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : (repDrayMarginPct !== null && repDrayMarginPct < 10 ? "rgba(239,68,68,0.10)" : undefined) }}>
-                      {/* Open slide-over button */}
-                      <td style={{ padding: "5px 4px", width: 24, textAlign: "center" }}>
-                        <button onClick={() => handleLoadClick(s)} title="Open details"
-                          style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
-                          onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
-                      </td>
+                      {renderRowActions(s)}
                       <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("efj"); setInlineEditValue(s.efj || ""); }}>
                         {isEditing && inlineEditField === "efj" ? (
                           <input autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
@@ -1080,21 +1125,40 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 })}
               </tbody>
             </table>
-            {opsTableShipsDateFiltered.length === 0 && (
+            {drayLoads.length === 0 && (
               <div style={{ textAlign: "center", padding: 40, color: "#3D4557" }}>
-                <div style={{ fontSize: 11, fontWeight: 600 }}>No loads found</div>
+                <div style={{ fontSize: 11, fontWeight: 600 }}>No dray loads found</div>
               </div>
             )}
           </div>
         </div>
+        ) : null; })()}
+        {/* Show empty state only when no loads at all */}
+        {opsDataFiltered.length === 0 && (
+          <div className="dash-panel" style={{ overflow: "hidden" }}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              <span className="dash-panel-title">
+                {isBoviet ? (bovietTab === "All" ? "All Projects" : bovietTab) : (toleadHub === "All" ? "All Hubs" : `${toleadHub} Hub`)} {"\u2014"} 0 Loads
+              </span>
+            </div>
+            <div style={{ textAlign: "center", padding: 40, color: "#3D4557" }}>
+              <div style={{ fontSize: 11, fontWeight: 600 }}>No loads found</div>
+            </div>
+          </div>
+        )}
       </>)}
 
       {/* ── Dray View: Shipment table — master reps ── */}
-      {repViewMode === "dray" && isMaster && (
-      <div className="dash-panel" style={{ overflow: "hidden" }}>
+      {repViewMode === "dray" && isMaster && (<>
+      {/* FTL loads use uniform FTL dispatch table */}
+      {(() => { const masterFtlLoads = displayDataFiltered.filter(s => s.moveType === "FTL"); return masterFtlLoads.length > 0 ? renderFTLTable(masterFtlLoads) : null; })()}
+
+      {/* Non-FTL (dray) loads */}
+      {(() => { const masterDrayLoads = displayDataFiltered.filter(s => s.moveType !== "FTL"); return masterDrayLoads.length > 0 ? (
+      <div className="dash-panel" style={{ overflow: "hidden", marginTop: displayDataFiltered.some(s => s.moveType === "FTL") ? 14 : 0 }}>
         <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span className="dash-panel-title">
-            {expandedAccount || "All Accounts"} {"\u2014"} {displayDataFiltered.length} loads
+            {expandedAccount || "All Accounts"} {"\u2014"} {masterDrayLoads.length} Dray {masterDrayLoads.length === 1 ? "Load" : "Loads"}
           </span>
           {masterTableFilter !== "all" && (
             <button onClick={() => setMasterTableFilter("all")}
@@ -1114,7 +1178,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 </tr>
               </thead>
               <tbody>
-                {displayDataFiltered.map((s) => {
+                {masterDrayLoads.map((s) => {
                   const sc = STATUS_COLORS[s.status] || { main: "#94a3b8" };
                   const efjBare = (s.efj || "").replace(/^EFJ\s*/i, "");
                   const docs = docSummary?.[efjBare] || docSummary?.[s.efj];
@@ -1126,12 +1190,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                   return (
                     <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
                       style={{ cursor: "default", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : (repFtlMarginPct !== null && repFtlMarginPct < 10 ? "rgba(239,68,68,0.10)" : undefined) }}>
-                      {/* Open slide-over button */}
-                      <td style={{ padding: "5px 4px", width: 24, textAlign: "center" }}>
-                        <button onClick={() => handleLoadClick(s)} title="Open details"
-                          style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
-                          onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
-                      </td>
+                      {renderRowActions(s)}
                       {/* EFJ (inline-editable) */}
                       <td style={{ padding: "8px 14px" }}
                         onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("efj"); setInlineEditValue(s.efj || ""); }}>
@@ -1318,13 +1377,49 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
             </table>
             );
           })()}
-          {displayShips.length === 0 && (
+          {masterDrayLoads.length === 0 && (
             <div style={{ textAlign: "center", padding: 40, color: "#3D4557" }}>
-              <div style={{ fontSize: 11, fontWeight: 600 }}>No loads found</div>
+              <div style={{ fontSize: 11, fontWeight: 600 }}>No dray loads found</div>
             </div>
           )}
         </div>
       </div>
+      ) : null; })()}
+      {displayDataFiltered.length === 0 && (
+        <div className="dash-panel" style={{ overflow: "hidden" }}>
+          <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+            <span className="dash-panel-title">{expandedAccount || "All Accounts"} {"\u2014"} 0 Loads</span>
+          </div>
+          <div style={{ textAlign: "center", padding: 40, color: "#3D4557" }}>
+            <div style={{ fontSize: 11, fontWeight: 600 }}>No loads found</div>
+          </div>
+        </div>
+      )}
+      </>)}
+
+      {/* Delete confirmation modal */}
+      {deleteConfirmEfj && (
+        <div style={{ position: "fixed", inset: 0, zIndex: Z.panel + 20, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onKeyDown={e => { if (e.key === "Escape") setDeleteConfirmEfj(null); }}>
+          <div onClick={() => setDeleteConfirmEfj(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)" }} aria-hidden="true" />
+          <div role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-desc"
+            style={{ position: "relative", background: "#1A2236", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 14, padding: "24px 28px", maxWidth: 380, width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
+            <div id="delete-dialog-title" style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5", marginBottom: 8 }}>Delete Load?</div>
+            <div id="delete-dialog-desc" style={{ fontSize: 12, color: "#8B95A8", marginBottom: 18, lineHeight: 1.5 }}>
+              Are you sure you want to delete <span style={{ color: "#F0F2F5", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{deleteConfirmEfj}</span>? This will remove it from the dashboard and Google Sheet.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button autoFocus onClick={() => setDeleteConfirmEfj(null)} disabled={deleteLoading}
+                style={{ flex: 1, padding: "9px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.04)", color: "#8B95A8", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                Cancel
+              </button>
+              <button onClick={async () => { setDeleteLoading(true); try { await handleDeleteLoad(deleteConfirmEfj); setDeleteConfirmEfj(null); } catch (err) { alert(`Delete failed: ${err.message}`); } setDeleteLoading(false); }} disabled={deleteLoading}
+                style={{ flex: 1, padding: "9px", borderRadius: 8, border: "none", background: deleteLoading ? "#7f1d1d" : "#EF4444", color: "#fff", fontSize: 12, fontWeight: 700, cursor: deleteLoading ? "wait" : "pointer", fontFamily: "inherit" }}>
+                {deleteLoading ? "Deleting..." : "Yes, Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

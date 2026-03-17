@@ -258,8 +258,8 @@ export const TRUCK_TYPES = ["", "53' Solo", "53' Team", "Flat Bed", "26' Box"];
 
 export const DRAY_EQUIPMENT = ["", "20'", "40' Standard", "40' HC", "40' HC Reefer", "Flatrack", "Flatrack OOG", "LCL"];
 export const FTL_EQUIPMENT = ["", "53' Van", "53' Team", "Box Truck", "Sprinter Van", "53' Reefer", "48ft Flatbed", "48ft Flatbed (Tarps)", "53' Flatbed", "53' Flatbed (Tarps)", "Flatbed Hotshot"];
-export const DOC_TYPES_ADD = ["customer_rate", "carrier_rate", "pod", "bol", "carrier_invoice", "packing_list", "email", "other"];
-export const DOC_TYPE_LABELS = { customer_rate: "CX Rate", carrier_rate: "RC", pod: "POD", bol: "BOL", carrier_invoice: "Carrier Inv", packing_list: "Packing List", email: "Email", other: "Other" };
+export const DOC_TYPES_ADD = ["customer_rate", "carrier_rate", "pod", "bol", "carrier_invoice", "packing_list", "msds", "email", "other"];
+export const DOC_TYPE_LABELS = { customer_rate: "CX Rate", carrier_rate: "RC", pod: "POD", bol: "BOL", carrier_invoice: "Carrier Inv", packing_list: "Packing List", msds: "MSDS", email: "Email", other: "Other" };
 
 export const ALERT_TYPES = {
   STATUS_CHANGE: "status_change",
