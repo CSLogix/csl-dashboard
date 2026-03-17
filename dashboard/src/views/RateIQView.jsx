@@ -908,8 +908,19 @@ export default function RateIQView() {
     setLaneSearching(false);
   }, [searchOrigin, searchDest, moveTypeFilter, fetchMarketBenchmark]);
 
-  // Re-search when move type filter changes (if there's an active search)
-  useEffect(() => { if (searchOrigin || searchDest) searchLanes(); }, [moveTypeFilter, searchLanes]);
+  // Debounced auto-search: fires 400ms after user stops typing
+  useEffect(() => {
+    if (!searchOrigin && !searchDest) {
+      // User cleared both fields — reset results immediately
+      setLaneResults([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      searchLanes();
+      if (searchOrigin && searchDest) saveRecent(searchOrigin, searchDest);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchOrigin, searchDest, moveTypeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── API: Manual intake — paste email text OR upload file, AI extracts rate ──
   const handleManualIntake = useCallback(async (file) => {
@@ -1086,8 +1097,7 @@ export default function RateIQView() {
               <label style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 }}>Origin / Port</label>
               <input value={searchOrigin} onChange={e => setSearchOrigin(e.target.value)} placeholder="e.g. Houston, NYNJ, Savannah..."
                 style={{ width: "100%", padding: "10px 16px", borderRadius: 10, border: `1px solid ${originFocused ? "rgba(0,212,170,0.3)" : "rgba(255,255,255,0.08)"}`, background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
-                onFocus={() => setOriginFocused(true)} onBlur={() => setTimeout(() => setOriginFocused(false), 150)}
-                onKeyDown={e => e.key === "Enter" && searchLanes()} />
+                onFocus={() => setOriginFocused(true)} onBlur={() => setTimeout(() => setOriginFocused(false), 150)} />
               {originFocused && originSuggestions.length > 0 && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50, marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "#151922", boxShadow: "0 12px 32px rgba(0,0,0,0.5)", overflow: "hidden" }}>
                   {originSuggestions.map((s, i) => (
@@ -1107,8 +1117,7 @@ export default function RateIQView() {
               <label style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 }}>Destination</label>
               <input value={searchDest} onChange={e => setSearchDest(e.target.value)} placeholder="e.g. Dallas, Chicago..."
                 style={{ width: "100%", padding: "10px 16px", borderRadius: 10, border: `1px solid ${destFocused ? "rgba(0,212,170,0.3)" : "rgba(255,255,255,0.08)"}`, background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
-                onFocus={() => setDestFocused(true)} onBlur={() => setTimeout(() => setDestFocused(false), 150)}
-                onKeyDown={e => e.key === "Enter" && searchLanes()} />
+                onFocus={() => setDestFocused(true)} onBlur={() => setTimeout(() => setDestFocused(false), 150)} />
               {destFocused && destSuggestions.length > 0 && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50, marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "#151922", boxShadow: "0 12px 32px rgba(0,0,0,0.5)", overflow: "hidden" }}>
                   {destSuggestions.map((s, i) => (
@@ -1125,17 +1134,8 @@ export default function RateIQView() {
                 </div>
               )}
             </div>
-            <button onClick={() => { searchLanes(); if (searchOrigin && searchDest) saveRecent(searchOrigin, searchDest); }} disabled={laneSearching}
-              style={{ padding: "10px 28px", borderRadius: 10, border: "none", background: grad, color: "#0A0F1C", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: laneSearching ? 0.6 : 1, whiteSpace: "nowrap" }}>
-              {laneSearching ? "Searching..." : "Search"}
-            </button>
-            {(searchOrigin || searchDest || laneResults.length > 0) && (
-              <button onClick={() => { setSearchOrigin(""); setSearchDest(""); setLaneResults([]); setSelectedLane(null); setView("browse"); }}
-                style={{ padding: "10px 16px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "#8B95A8", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.15s" }}
-                onMouseEnter={e => { e.currentTarget.style.color = "#F0F2F5"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)"; }}
-                onMouseLeave={e => { e.currentTarget.style.color = "#8B95A8"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}>
-                Clear
-              </button>
+            {laneSearching && (
+              <div style={{ padding: "10px 0", color: "#5A6478", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>Searching...</div>
             )}
           </div>
 
