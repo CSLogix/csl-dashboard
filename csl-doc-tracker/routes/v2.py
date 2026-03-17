@@ -503,6 +503,42 @@ async def api_v2_update_field(efj: str, request: Request, background_tasks: Back
     return {"ok": True, "shipment": _shipment_row_to_dict(row)}
 
 
+@router.delete("/api/v2/load/{efj}")
+async def api_v2_delete_load(efj: str, background_tasks: BackgroundTasks):
+    """Delete a shipment from Postgres and remove its row from Google Sheet."""
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            # Fetch account before deleting (needed for sheet cleanup)
+            cur.execute("SELECT account, hub FROM shipments WHERE efj = %s", (efj,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, f"Shipment {efj} not found")
+            account = row["account"] or ""
+            hub = row.get("hub") or ""
+
+            # Delete related records first (ignore if table doesn't exist)
+            for table in ("load_documents", "load_notes", "tracking_events",
+                          "driver_contacts", "rate_quotes"):
+                try:
+                    cur.execute(f"DELETE FROM {table} WHERE efj = %s", (efj,))
+                except Exception:
+                    pass  # Table may not exist in all environments
+            cur.execute("DELETE FROM shipments WHERE efj = %s", (efj,))
+
+    # Fire-and-forget: remove row from Google Sheet
+    if account and account not in _SHARED_SHEET_ACCOUNTS:
+        background_tasks.add_task(_delete_load_from_master_sheet, efj, account)
+
+    # Clean up uploaded files
+    upload_dir = f"/root/csl-bot/csl-doc-tracker/uploads/{efj}"
+    import shutil
+    if os.path.isdir(upload_dir):
+        background_tasks.add_task(shutil.rmtree, upload_dir, True)
+
+    log.info("Deleted load %s (account=%s)", efj, account)
+    return {"ok": True}
+
+
 @router.post("/api/v2/load/add")
 async def api_v2_add_shipment(request: Request, background_tasks: BackgroundTasks):
     """Insert a new shipment into Postgres. Write to Google Sheet."""
@@ -580,6 +616,15 @@ def _add_load_to_master_sheet(efj: str, account: str, body: dict):
         sheet_add_row(efj, account, body)
     except Exception as e:
         log.warning("Sheet add-row failed for %s [%s]: %s (PG insert succeeded)", efj, account, e)
+
+
+def _delete_load_from_master_sheet(efj: str, account: str):
+    """Background task: remove a dashboard-deleted load from Master Sheet."""
+    try:
+        from csl_sheet_writer import sheet_delete_row
+        sheet_delete_row(efj, account)
+    except Exception as e:
+        log.warning("Sheet delete-row failed for %s [%s]: %s (PG delete succeeded)", efj, account, e)
 
 
 # ═══ Tracking Events Persistence ═══════════════════════════════════════════

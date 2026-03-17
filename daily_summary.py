@@ -90,7 +90,7 @@ BOVIET_SKIP_STATUSES = {"delivered", "completed", "canceled", "cancelled", "read
 BOVIET_HYPERLINK_COL = 0
 BOVIET_TAB_CONFIGS = {
     "Piedra":          {"efj_col": 0, "load_id_col": 2, "pickup_col": 5, "delivery_col": 6, "status_col": 7, "start_row": 45},
-    "Hanson":          {"efj_col": 0, "load_id_col": 1, "pickup_col": 4, "delivery_col": 5, "status_col": 6},
+    "Hanson":          {"efj_col": 0, "load_id_col": 2, "pickup_col": 6, "delivery_col": 7, "status_col": 8},
 }
 
 # Tolead config — all 4 hubs

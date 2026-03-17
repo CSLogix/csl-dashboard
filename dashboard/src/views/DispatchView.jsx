@@ -65,6 +65,23 @@ export default function DispatchView({
   const [openFilterCol, setOpenFilterCol] = useState(null);
   const [showColPicker, setShowColPicker] = useState(false);
 
+  // Delete load state
+  const [deleteConfirmEfj, setDeleteConfirmEfj] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const handleDeleteLoad = async (efj) => {
+    setDeleteLoading(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/v2/load/${efj}`, { method: "DELETE" });
+      if (!res.ok) { const txt = await res.text(); throw new Error(txt); }
+      addSheetLog(`Deleted load | ${efj}`);
+      setShipments(prev => prev.filter(s => s.efj !== efj));
+      setDeleteConfirmEfj(null);
+    } catch (err) {
+      alert(`Delete failed: ${err.message}`);
+    }
+    setDeleteLoading(false);
+  };
+
   // Column visibility — persisted to localStorage
   const DEFAULT_HIDDEN = ["carrierEmail", "trailer", "margin"];
   const [hiddenCols, setHiddenCols] = useState(() => {
@@ -477,11 +494,19 @@ export default function DispatchView({
                   {s.playbookLaneCode && <span title={`Playbook: ${s.playbookLaneCode}`} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: 3, background: "rgba(0,212,170,0.15)" }}><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#00D4AA" strokeWidth="2.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>}
                   <span style={{ fontSize: 11, fontWeight: 600, color: "#F0F2F5" }}>{s.account}</span>
                 </div>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 10, fontSize: 8, fontWeight: 700,
-                  color: sc.main, background: `${sc.main}0D`, border: `1px solid ${sc.main}18`, textTransform: "uppercase" }}>
-                  <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
-                  {resolveStatusLabel(s)}
-                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 10, fontSize: 8, fontWeight: 700,
+                    color: sc.main, background: `${sc.main}0D`, border: `1px solid ${sc.main}18`, textTransform: "uppercase" }}>
+                    <span style={{ width: 4, height: 4, borderRadius: "50%", background: sc.main }} />
+                    {resolveStatusLabel(s)}
+                  </span>
+                  <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmEfj(s.efj); }} title="Delete load"
+                    style={{ background: "transparent", border: "none", color: "#5A6478", cursor: "pointer", padding: "2px", lineHeight: 1, opacity: 0.5 }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </button>
+                </div>
               </div>
               <div style={{ fontSize: 11, color: "#8B95A8", marginBottom: 4 }}>
                 {s.origin || "\u2014"} {"\u2192"} {s.destination || "\u2014"}
@@ -586,15 +611,25 @@ export default function DispatchView({
               return (
                 <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
                   style={{ cursor: "default", background: highlightedEfj === s.efj ? undefined : rowBg }}>
-                  <td style={{ padding: "5px 4px", width: 30, textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                    <button onClick={() => handleLoadClick(s)} title="Open details"
-                      style={{ background: "rgba(0,184,212,0.06)", border: "1px solid rgba(0,184,212,0.12)", color: "#00b8d4", cursor: "pointer", padding: "3px 5px", borderRadius: 6, lineHeight: 1, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,184,212,0.18)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.4)"; e.currentTarget.style.transform = "scale(1.1)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,184,212,0.06)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.12)"; e.currentTarget.style.transform = "scale(1)"; }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M14 9l3 3-3 3" />
-                      </svg>
-                    </button>
+                  <td style={{ padding: "5px 4px", width: 54, textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 2, justifyContent: "center" }}>
+                      <button onClick={() => handleLoadClick(s)} title="Open details"
+                        style={{ background: "rgba(0,184,212,0.06)", border: "1px solid rgba(0,184,212,0.12)", color: "#00b8d4", cursor: "pointer", padding: "3px 5px", borderRadius: 6, lineHeight: 1, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,184,212,0.18)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.4)"; e.currentTarget.style.transform = "scale(1.1)"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,184,212,0.06)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.12)"; e.currentTarget.style.transform = "scale(1)"; }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M14 9l3 3-3 3" />
+                        </svg>
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmEfj(s.efj); }} title="Delete load"
+                        style={{ background: "transparent", border: "1px solid transparent", color: "#5A6478", cursor: "pointer", padding: "3px 4px", borderRadius: 6, lineHeight: 1, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: 0.5 }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.1)"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.color = "#EF4444"; e.currentTarget.style.opacity = "1"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.color = "#5A6478"; e.currentTarget.style.opacity = "0.5"; }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                      </button>
+                    </div>
                   </td>
                   {isColVisible("account") && <td style={{ ...cellStyleFor("account"), color: "#F0F2F5", fontSize: 11, fontWeight: 600 }}
                     onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("account"); setInlineEditValue(s.account || ""); }}>
@@ -844,6 +879,29 @@ export default function DispatchView({
       {/* Dead code blocks — old slide-over and preview modal now handled by LoadSlideOver */}
       {false && selectedShipment && (<></>)}
       {false && previewDoc && (<></>)}
+
+      {/* Delete confirmation modal */}
+      {deleteConfirmEfj && (
+        <div style={{ position: "fixed", inset: 0, zIndex: Z.panel + 20, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div onClick={() => setDeleteConfirmEfj(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)" }} />
+          <div style={{ position: "relative", background: "#1A2236", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 14, padding: "24px 28px", maxWidth: 380, width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5", marginBottom: 8 }}>Delete Load?</div>
+            <div style={{ fontSize: 12, color: "#8B95A8", marginBottom: 18, lineHeight: 1.5 }}>
+              Are you sure you want to delete <span style={{ color: "#F0F2F5", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{deleteConfirmEfj}</span>? This will remove it from the dashboard and Google Sheet.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setDeleteConfirmEfj(null)} disabled={deleteLoading}
+                style={{ flex: 1, padding: "9px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.04)", color: "#8B95A8", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                Cancel
+              </button>
+              <button onClick={() => handleDeleteLoad(deleteConfirmEfj)} disabled={deleteLoading}
+                style={{ flex: 1, padding: "9px", borderRadius: 8, border: "none", background: deleteLoading ? "#7f1d1d" : "#EF4444", color: "#fff", fontSize: 12, fontWeight: 700, cursor: deleteLoading ? "wait" : "pointer", fontFamily: "inherit" }}>
+                {deleteLoading ? "Deleting..." : "Yes, Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
