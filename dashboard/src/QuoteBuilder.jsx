@@ -58,7 +58,7 @@ function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, te
   const flatMarkup = marginType === "flat" ? parseNum(marginPct) : 0;
   const isRoundTrip = shipmentType === "Dray";
 
-  // Route info rows (only show rows that have values — keeps it tight)
+  // Route info rows
   const routeRows = [];
   routeRows.push({ label: isRoundTrip ? "POD" : "Port / Origin", value: route.pod || "—" });
   routeRows.push({ label: "Delivery Destination", value: route.finalDelivery || "—" });
@@ -101,51 +101,48 @@ function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, te
   const accTotal = accessorials.filter(a => a.checked).reduce((sum, a) => sum + parseNum(a.amount), 0);
   const total = sellSubtotal + accTotal;
 
-  // ── Styles (CSL brand: dark bg, green/teal accents, tight & clean for screenshots) ──
-  const borderColor = "rgba(255,255,255,0.06)";
-  const cellBorder = `1px solid ${borderColor}`;
-  const accentGreen = "#00D4AA";
-
-  const routeLabel = { padding: "7px 18px", fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.55)", borderBottom: cellBorder, width: "55%" };
-  const routeValue = { padding: "7px 18px", fontSize: 13, fontWeight: 700, color: "#F0F2F5", textAlign: "right", borderBottom: cellBorder };
-  const sectionHeaderL = { padding: "8px 18px", fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", backgroundClip: "text", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundImage: grad, background: grad, borderBottom: cellBorder, borderTop: `2px solid`, borderImage: grad + " 1" };
-  const sectionHeaderR = { padding: "8px 18px", fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", textAlign: "right", backgroundClip: "text", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundImage: grad, background: grad, borderBottom: cellBorder, borderTop: `2px solid`, borderImage: grad + " 1" };
-  const chargeL = { padding: "6px 18px", fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.7)", borderBottom: cellBorder };
-  const chargeR = { padding: "6px 18px", fontSize: 13, fontWeight: 700, color: "#F0F2F5", textAlign: "right", fontVariantNumeric: "tabular-nums", borderBottom: cellBorder };
+  // ── Styles (clean table format — CSL dark brand with visible borders) ──
+  const borderClr = "rgba(255,255,255,0.15)";
+  const cellBorder = `1px solid ${borderClr}`;
 
   return (
     <div id="quote-preview-card" style={{ width: "100%", maxWidth: 520 }}>
-      <table cellPadding={0} cellSpacing={0} style={{ fontFamily: "'Segoe UI', -apple-system, sans-serif", width: "100%", background: "#0f1215", borderRadius: 10, overflow: "hidden", borderCollapse: "collapse", color: "#fff" }}>
+      <table cellPadding={0} cellSpacing={0} style={{ fontFamily: "'Segoe UI', -apple-system, sans-serif", width: "100%", background: "#0f1215", borderRadius: 10, overflow: "hidden", borderCollapse: "collapse", color: "#fff", border: `1px solid ${borderClr}` }}>
         <tbody>
-          {/* ── Header: CSL branding ── */}
+          {/* ── Header: CSL branding (centered, clean) ── */}
           <tr>
-            <td colSpan={2} style={{ padding: "14px 18px", borderBottom: `2px solid`, borderImage: grad + " 1" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <img src="/logo.svg" alt="CSL" style={{ height: 52, width: 52, objectFit: "contain", flexShrink: 0 }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: "#F0F2F5", letterSpacing: "0.01em" }}>Common Sense Logistics</div>
-                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontWeight: 600, marginTop: 1 }}>Evans Delivery Company</div>
+            <td colSpan={2} style={{ padding: "18px 18px 14px", textAlign: "center", borderBottom: cellBorder }}>
+              <img src="/logo.svg" alt="CSL" style={{ height: 56, width: 56, objectFit: "contain", marginBottom: 6 }} />
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#F0F2F5", letterSpacing: "0.02em" }}>Common Sense Logistics</div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: 600, marginTop: 2 }}>Evans Delivery Company</div>
+              {quoteNumber && (
+                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontWeight: 600, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>
+                  {quoteNumber}
                 </div>
-                {quoteNumber && (
-                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 600, textAlign: "right", fontFamily: "'JetBrains Mono', monospace" }}>
-                    {quoteNumber}
-                  </div>
-                )}
-              </div>
+              )}
             </td>
           </tr>
 
-          {/* ── Route Info ── */}
+          {/* ── Route Info (bold labels, right-aligned values) ── */}
           {routeRows.map((row, i) => (
-            <tr key={i}><td style={routeLabel}>{row.label}</td><td style={routeValue}>{row.value}</td></tr>
+            <tr key={i}>
+              <td style={{ padding: "8px 16px", fontSize: 13, fontWeight: 700, color: "#F0F2F5", borderBottom: cellBorder, borderRight: cellBorder }}>{row.label}</td>
+              <td style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, color: "#F0F2F5", textAlign: "right", borderBottom: cellBorder }}>{row.value}</td>
+            </tr>
           ))}
 
           {/* ── Charges sections ── */}
           {Object.entries(lhBySection).map(([title, rows]) => (
             <Fragment key={title}>
-              <tr><td style={sectionHeaderL}>{title}</td><td style={sectionHeaderR}>Rate</td></tr>
+              <tr style={{ background: "rgba(0,212,170,0.08)" }}>
+                <td style={{ padding: "8px 16px", fontSize: 12, fontWeight: 800, color: "#00D4AA", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: `2px solid #00D4AA`, borderRight: cellBorder, textDecoration: "underline", textUnderlineOffset: 4 }}>{title}</td>
+                <td style={{ padding: "8px 16px", fontSize: 12, fontWeight: 800, color: "#00D4AA", textAlign: "right", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: `2px solid #00D4AA`, textDecoration: "underline", textUnderlineOffset: 4 }}>Rate</td>
+              </tr>
               {rows.map((row, ri) => (
-                <tr key={ri}><td style={chargeL}>{row.desc}</td><td style={chargeR}>{fmt(row.rate)}</td></tr>
+                <tr key={ri}>
+                  <td style={{ padding: "7px 16px", fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.8)", borderBottom: cellBorder, borderRight: cellBorder }}>{row.desc}</td>
+                  <td style={{ padding: "7px 16px", fontSize: 13, fontWeight: 700, color: "#F0F2F5", textAlign: "right", fontVariantNumeric: "tabular-nums", borderBottom: cellBorder }}>{fmt(row.rate)}</td>
+                </tr>
               ))}
             </Fragment>
           ))}
@@ -153,25 +150,28 @@ function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, te
           {/* ── Accessorial Charges ── */}
           {accRows.length > 0 && (
             <Fragment>
-              <tr><td style={sectionHeaderL}>Accessorial Charges</td><td style={sectionHeaderR}>Rate</td></tr>
+              <tr style={{ background: "rgba(0,212,170,0.08)" }}>
+                <td style={{ padding: "8px 16px", fontSize: 12, fontWeight: 800, color: "#00D4AA", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: `2px solid #00D4AA`, borderRight: cellBorder, textDecoration: "underline", textUnderlineOffset: 4 }}>Accessorial Charges</td>
+                <td style={{ padding: "8px 16px", fontSize: 12, fontWeight: 800, color: "#00D4AA", textAlign: "right", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: `2px solid #00D4AA`, textDecoration: "underline", textUnderlineOffset: 4 }}>Rate</td>
+              </tr>
               {accRows.map((row, ri) => (
-                <tr key={ri}><td style={chargeL}>{row.desc}</td><td style={chargeR}>{fmt(row.rate)}</td></tr>
+                <tr key={ri}>
+                  <td style={{ padding: "7px 16px", fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.8)", borderBottom: cellBorder, borderRight: cellBorder }}>{row.desc}</td>
+                  <td style={{ padding: "7px 16px", fontSize: 13, fontWeight: 700, color: "#F0F2F5", textAlign: "right", fontVariantNumeric: "tabular-nums", borderBottom: cellBorder }}>{fmt(row.rate)}</td>
+                </tr>
               ))}
             </Fragment>
           )}
 
-          {/* ── Estimate Invoice Total ── */}
-          <tr>
-            <td style={{ padding: "14px 18px", fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", borderTop: "2px solid", borderImage: grad + " 1", backgroundClip: "text", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundImage: grad, verticalAlign: "middle" }}>
-              Estimate Invoice
+          {/* ── Estimated Invoice Total ── */}
+          <tr style={{ background: "rgba(0,212,170,0.12)" }}>
+            <td style={{ padding: "12px 16px", fontSize: 13, fontWeight: 800, color: "#00D4AA", textTransform: "uppercase", letterSpacing: "0.05em", borderTop: `2px solid #00D4AA`, borderRight: cellBorder }}>
+              Estimated Invoice
             </td>
-            <td style={{ padding: "14px 18px", fontSize: 24, fontWeight: 800, textAlign: "right", borderTop: "2px solid", borderImage: grad + " 1", fontVariantNumeric: "tabular-nums", backgroundClip: "text", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundImage: grad, verticalAlign: "middle" }}>
+            <td style={{ padding: "12px 16px", fontSize: 22, fontWeight: 800, textAlign: "right", color: "#00D4AA", fontVariantNumeric: "tabular-nums", borderTop: `2px solid #00D4AA` }}>
               {fmt(total)}
             </td>
           </tr>
-
-          {/* ── Footer gradient bar ── */}
-          <tr><td colSpan={2} style={{ height: 3, background: grad }} /></tr>
         </tbody>
       </table>
     </div>
@@ -1451,8 +1451,7 @@ export default function QuoteBuilder({ prefill } = {}) {
       </div>
 
       {/* ═══ RIGHT: Live Preview ═══ */}
-      <div style={{ width: 560, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", overflowY: "auto", padding: "0 20px", position: "relative" }}>
-        <img src="/rateiq-bot.png" alt="" style={{ width: "100%", maxWidth: 520, pointerEvents: "none", userSelect: "none", borderRadius: 12, marginBottom: 20 }} />
+      <div style={{ width: 560, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", overflowY: "auto", padding: "24px 20px 0", position: "relative" }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 16, textAlign: "center" }}>
           Customer Preview {quoteNumber && `— ${quoteNumber}`}
         </div>
