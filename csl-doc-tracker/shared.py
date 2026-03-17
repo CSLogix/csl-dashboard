@@ -408,13 +408,13 @@ def _shorten_address(addr):
         return addr
     addr = re.sub(r'^\(\w+\)\s*', '', addr).strip()
     addr = re.sub(r'\s*\([^)]*\)\s*$', '', addr).strip()
-    m = re.search(r'([A-Za-z][A-Za-z .]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$', addr)
+    m = re.search(r"([A-Za-z][A-Za-z .'-]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$", addr)
     if m:
         return f"{m.group(1).strip()}, {m.group(2)} {m.group(3)}"
-    m = re.search(r'([A-Za-z][A-Za-z .]+),\s*([A-Z]{2})\s*$', addr)
+    m = re.search(r"([A-Za-z][A-Za-z .'-]+),\s*([A-Z]{2})\s*$", addr)
     if m:
         return f"{m.group(1).strip()}, {m.group(2)}"
-    m = re.search(r'([A-Za-z][A-Za-z .]+)\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$', addr)
+    m = re.search(r"([A-Za-z][A-Za-z .'-]+)\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$", addr)
     if m:
         return f"{m.group(1).strip()}, {m.group(2)} {m.group(3)}"
     return addr
