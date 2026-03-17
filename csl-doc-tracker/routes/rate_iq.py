@@ -901,21 +901,136 @@ async def post_manual_intake(request: Request):
     extracted["origin"] = origin
     extracted["destination"] = destination
 
-    # Save to rate_quotes
+    # Parse accessorials from extracted data
+    carrier_email = (extracted.get("carrier_email") or extracted.get("email") or "").strip() or None
+    carrier_mc = (extracted.get("carrier_mc") or "").strip() or None
+    linehaul_items = extracted.get("linehaul_items") or []
+    accessorial_list = extracted.get("accessorials") or []
+
+    # Build accessorials JSONB and extract known fields for lane_rates
+    accessorials_jsonb = accessorial_list if accessorial_list else None
+    linehaul_amount = None
+    fsc_amount = None
+    acc_fields = {}  # for lane_rates columns
+
+    for item in linehaul_items:
+        charge = (item.get("description") or "").lower()
+        try:
+            val = float(str(item.get("rate", "0")).replace(",", "").replace("$", ""))
+        except (ValueError, TypeError):
+            continue
+        if "fuel" in charge or "fsc" in charge:
+            fsc_amount = val
+        elif "linehaul" in charge or "line haul" in charge or "base" in charge:
+            linehaul_amount = val
+
+    for acc in accessorial_list:
+        charge = (acc.get("charge") or "").lower()
+        try:
+            val = float(str(acc.get("rate", "0")).replace(",", "").replace("$", ""))
+        except (ValueError, TypeError):
+            continue
+        if "chassis" in charge and "split" not in charge:
+            acc_fields["chassis_per_day"] = val
+        elif "chassis" in charge and "split" in charge:
+            acc_fields["chassis_split"] = val
+        elif "prepull" in charge or "pre-pull" in charge:
+            acc_fields["prepull"] = val
+        elif "storage" in charge:
+            acc_fields["storage_per_day"] = val
+        elif "detention" in charge:
+            acc_fields["detention"] = str(val)
+        elif "overweight" in charge:
+            acc_fields["overweight"] = val
+        elif "toll" in charge:
+            acc_fields["tolls"] = val
+        elif "hazmat" in charge or "haz" in charge:
+            acc_fields["hazmat"] = val
+        elif "reefer" in charge:
+            acc_fields["reefer"] = val
+        elif "triaxle" in charge or "tri-axle" in charge:
+            acc_fields["triaxle"] = val
+        elif "bond" in charge:
+            acc_fields["bond_fee"] = val
+        elif "residential" in charge:
+            acc_fields["residential"] = val
+
+    # Save to rate_quotes (with accessorials)
     from datetime import date as _date
+    import json as _json
     try:
         with db.get_conn() as conn:
             with db.get_cursor(conn) as cur:
                 cur.execute(
                     "INSERT INTO rate_quotes "
-                    "(origin, destination, lane, carrier_name, rate_amount, rate_unit, "
-                    " move_type, quote_date, status, source) "
-                    "VALUES (%s,%s,%s,%s,%s,'flat',%s,%s,'quoted','manual') "
+                    "(origin, destination, lane, carrier_name, carrier_email, rate_amount, rate_unit, "
+                    " move_type, quote_date, status, source, linehaul, chassis_per_day, accessorials) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,'flat',%s,%s,'quoted','manual',%s,%s,%s) "
                     "ON CONFLICT DO NOTHING",
-                    (origin, destination, lane, carrier_name, rate_amount, shipment_type, _date.today())
+                    (origin, destination, lane, carrier_name, carrier_email, rate_amount,
+                     shipment_type, _date.today(), linehaul_amount,
+                     acc_fields.get("chassis_per_day"),
+                     _json.dumps(accessorials_jsonb) if accessorials_jsonb else None)
                 )
     except Exception as e:
         log.warning("rate_quotes insert failed: %s", e)
+
+    # Also save to lane_rates for carrier rate table display (with full accessorial breakdown)
+    # Dedup: skip if same carrier+origin+dest+total already exists
+    if carrier_name and rate_amount:
+        try:
+            with db.get_conn() as conn:
+                with db.get_cursor(conn) as cur:
+                    cur.execute(
+                        "SELECT id FROM lane_rates WHERE LOWER(carrier_name) = LOWER(%s) AND LOWER(port) = LOWER(%s) AND LOWER(destination) = LOWER(%s) AND total = %s LIMIT 1",
+                        (carrier_name, origin, destination, rate_amount)
+                    )
+                    if not cur.fetchone():
+                        cur.execute(
+                            """INSERT INTO lane_rates
+                            (port, destination, carrier_name, dray_rate, fsc, total,
+                             chassis_per_day, prepull, storage_per_day, detention, chassis_split,
+                             overweight, tolls, hazmat, reefer, triaxle, bond_fee, residential,
+                             move_type, source)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'email_intake')""",
+                            (origin, destination, carrier_name,
+                             linehaul_amount, str(fsc_amount) if fsc_amount else None, rate_amount,
+                             acc_fields.get("chassis_per_day"), acc_fields.get("prepull"),
+                             acc_fields.get("storage_per_day"), acc_fields.get("detention"),
+                             acc_fields.get("chassis_split"), acc_fields.get("overweight"),
+                             acc_fields.get("tolls"), acc_fields.get("hazmat"),
+                             acc_fields.get("reefer"), acc_fields.get("triaxle"),
+                             acc_fields.get("bond_fee"), acc_fields.get("residential"),
+                             shipment_type)
+                        )
+        except Exception as e:
+            log.warning("lane_rates insert failed: %s", e)
+
+    # Update carrier directory with MC# and email if found
+    if carrier_name and (carrier_mc or carrier_email):
+        try:
+            with db.get_conn() as conn:
+                with db.get_cursor(conn) as cur:
+                    cur.execute("SELECT id FROM carriers WHERE LOWER(carrier_name) = LOWER(%s)", (carrier_name,))
+                    row = cur.fetchone()
+                    if row:
+                        updates, params = [], []
+                        if carrier_mc:
+                            updates.append("mc_number = COALESCE(mc_number, %s)")
+                            params.append(carrier_mc)
+                        if carrier_email:
+                            updates.append("contact_email = COALESCE(contact_email, %s)")
+                            params.append(carrier_email)
+                        if updates:
+                            params.append(row["id"])
+                            cur.execute(f"UPDATE carriers SET {', '.join(updates)} WHERE id = %s", params)
+                    else:
+                        cur.execute(
+                            "INSERT INTO carriers (carrier_name, mc_number, contact_email, source) VALUES (%s,%s,%s,'email_intake')",
+                            (carrier_name, carrier_mc, carrier_email)
+                        )
+        except Exception as e:
+            log.warning("carrier directory update failed: %s", e)
 
     return {"ok": True, "extracted": extracted}
 
@@ -1229,3 +1344,41 @@ async def delete_market_rate(rate_id: int):
             if cur.rowcount == 0:
                 return JSONResponse(status_code=404, content={"error": "Rate not found"})
     return {"ok": True}
+
+
+# ── Rate accuracy feedback ────────────────────────────────────────────
+
+@router.post("/api/rate-iq/feedback")
+async def post_rate_feedback(request: Request):
+    """Record user feedback on market rate accuracy for a lane."""
+    body = await request.json()
+    lane = body.get("lane", "")
+    rating = body.get("rating", "")  # 'accurate' or 'inaccurate'
+    avg_rate = body.get("avg_rate")
+    count = body.get("count")
+
+    if not lane or not rating:
+        return JSONResponse(status_code=400, content={"error": "lane and rating required"})
+
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute(
+                    """CREATE TABLE IF NOT EXISTS rate_feedback (
+                        id SERIAL PRIMARY KEY,
+                        lane TEXT NOT NULL,
+                        rating TEXT NOT NULL,
+                        avg_rate NUMERIC,
+                        data_points INTEGER,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )"""
+                )
+                cur.execute(
+                    "INSERT INTO rate_feedback (lane, rating, avg_rate, data_points) VALUES (%s,%s,%s,%s)",
+                    (lane, rating, avg_rate, count)
+                )
+    except Exception as e:
+        log.warning("rate feedback insert failed: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+    return {"ok": True, "lane": lane, "rating": rating}
