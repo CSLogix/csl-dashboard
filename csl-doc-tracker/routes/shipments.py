@@ -232,8 +232,8 @@ async def api_tracking_summary():
                     "trailer": (row["trailer_number"] or "").strip(),
                     "carrierEmail": (row["carrier_email"] or "").strip(),
                 }
-    except Exception:
-        pass  # PG unavailable — fall back to cache-only
+    except Exception as e:
+        log.debug("driver_contacts bulk load failed, using cache-only: %s", e)
 
     result = {}
     for efj, entry in cache.items():

@@ -206,13 +206,23 @@ def _a1(row_1based, col_0based):
 
 def _batch_writeback(ws, updates):
     """
-    Write cells back to a gspread worksheet.
+    Write cells back to a gspread worksheet with retry on quota errors.
     updates: list of (row_1based, col_0based, value)
     """
     if not updates:
         return
     payload = [{"range": _a1(r, c), "values": [[v]]} for r, c, v in updates]
-    ws.batch_update(payload)
+    for attempt in range(5):
+        try:
+            ws.batch_update(payload)
+            return
+        except gspread.exceptions.APIError as e:
+            if e.response.status_code == 429 and attempt < 4:
+                wait = 2 ** attempt
+                log.warning("Sheets 429 on batch_update, retry in %ds...", wait)
+                time.sleep(wait)
+            else:
+                raise
 
 
 # ---------------------------------------------------------------------------
@@ -432,8 +442,8 @@ def sync_tolead(gc, creds):
                                 hub_writebacks.append((ri, cols["phone"], _pg_phone))
                             if _pg_trailer and not trailer_val and cols.get("driver") is not None:
                                 hub_writebacks.append((ri, cols["driver"], _pg_trailer))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug("driver_contacts fetch for %s failed: %s", key, e)
 
                 # Write trailer to driver_contacts (separate from shipments.driver)
                 if trailer_val or driver_phone:

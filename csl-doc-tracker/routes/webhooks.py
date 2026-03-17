@@ -155,8 +155,8 @@ def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload
                             if dc_row:
                                 _init_phone = (dc_row["driver_phone"] or "").strip()
                                 _init_trailer = (dc_row["trailer_number"] or "").strip()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.debug("driver_contacts lookup for %s failed: %s", pg_efj, e)
                         # Create a new cache entry for this load
                         cache[efj_num] = {
                             "efj": pg_efj,
