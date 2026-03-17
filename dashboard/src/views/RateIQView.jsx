@@ -22,9 +22,15 @@ const PORT_CLUSTERS = {
   "san pedro": "LA/LB", "wilmington": "LA/LB", "carson": "LA/LB",
   "ny/nj": "NY/NJ", "ny/nj ports": "NY/NJ", "port newark": "NY/NJ", "pnct": "NY/NJ",
   "elizabeth": "NY/NJ", "bayonne": "NY/NJ", "maher": "NY/NJ", "newark": "NY/NJ",
-  "new york": "NY/NJ", "new york, ny": "NY/NJ",
+  "new york": "NY/NJ", "new york, ny": "NY/NJ", "nynj": "NY/NJ", "nj/ny": "NY/NJ",
+  "port liberty": "NY/NJ", "nyc port": "NY/NJ", "nyc": "NY/NJ", "new york city": "NY/NJ",
+  "bayonne terminal": "NY/NJ", "apmt": "NY/NJ", "global terminal": "NY/NJ",
+  "port liberty, ny": "NY/NJ", "nyc port, ny": "NY/NJ", "nyc, ny": "NY/NJ",
+  "new york city, ny": "NY/NJ", "bayonne, nj": "NY/NJ", "bayonne terminal, nj": "NY/NJ",
+  "elizabeth, nj": "NY/NJ", "newark, nj": "NY/NJ", "port newark, nj": "NY/NJ",
   "savannah": "Savannah", "savannah ports": "Savannah", "garden city": "Savannah",
-  "houston": "Houston", "houston ports": "Houston", "barbours cut": "Houston", "bayport": "Houston",
+  "houston": "Houston", "houston ports": "Houston", "barbours cut": "Houston", "barbour's cut": "Houston", "bayport": "Houston",
+  "houston, tx": "Houston", "houston tx": "Houston",
   "charleston": "Charleston", "wando welch": "Charleston",
   "norfolk": "Norfolk", "virginia": "Norfolk", "portsmouth": "Norfolk", "nit": "Norfolk",
   "oakland": "Oakland",
@@ -66,6 +72,9 @@ function normalizePort(text) {
   const noZip = lower.replace(/\s+\d{5}(-\d{4})?$/, "").trim();
   if (PORT_CLUSTERS[noZip]) return PORT_CLUSTERS[noZip];
   if (PORT_CLUSTERS[lower]) return PORT_CLUSTERS[lower];
+  // Try without state suffix: "houston, tx" → "houston", "port liberty, ny" → "port liberty"
+  const noState = noZip.replace(/,\s*[a-z]{2}$/i, "").trim();
+  if (noState !== noZip && PORT_CLUSTERS[noState]) return PORT_CLUSTERS[noState];
   // Substring match — but skip if text contains a US state suffix (e.g. "Wilmington, MA" is NOT a port)
   const hasStateSuffix = /,\s*[A-Za-z]{2,}\s*(\d{5}(-\d{4})?)?$/.test(text.trim()) || Object.keys(STATE_ABBREVS).some(st => noZip.includes(`, ${st}`));
   if (!hasStateSuffix) {
@@ -76,6 +85,25 @@ function normalizePort(text) {
   }
   return normalizeLocation(text);
 }
+
+// For lane grouping: strip state suffix so "Baltimore, MD" groups with "Baltimore"
+// Handles both "City, ST" and "City ST" patterns
+function normalizeLaneCity(text) {
+  const port = normalizePort(text);
+  // If normalizePort already resolved to a cluster (LA/LB, NY/NJ, Houston, etc.), use that
+  const portLower = port.toLowerCase();
+  if (Object.values(PORT_CLUSTERS).some(c => c.toLowerCase() === portLower)) return port;
+  // Strip "City, ST" format
+  const noCommaState = port.replace(/,\s*[A-Z]{2}$/, "").trim();
+  if (noCommaState && noCommaState !== port) return noCommaState;
+  // Strip "City ST" format (no comma, e.g. "Tyler TX" → "Tyler") — only if the suffix is a real US state
+  const US_STATES = new Set(Object.values(STATE_ABBREVS));
+  const spaceMatch = port.match(/^(.+?)\s+([A-Z]{2})$/);
+  if (spaceMatch && US_STATES.has(spaceMatch[2]) && spaceMatch[1].length >= 3) return spaceMatch[1];
+  return port;
+}
+// Backwards compat alias
+const normalizeOrigin = normalizeLaneCity;
 
 // ── History Tab Content (rate history by port group) ──
 function HistoryTabContent({ rateHistory, historyLoading, onLoad }) {
@@ -499,9 +527,7 @@ function LaneCard({ lane, onClick, onQuickQuote, onReclassify, rateIds }) {
     : volume >= 5 ? { label: "Active", color: "#3B82F6", bg: "rgba(59,130,246,0.15)", border: "rgba(59,130,246,0.35)" }
     : { label: "Low Volume", color: "#5A6478", bg: "rgba(90,100,120,0.08)", border: "rgba(90,100,120,0.15)" };
   const avgRate = lane.avg_rate || lane.average || 0;
-  const isDray = (lane.move_type || "dray").toLowerCase() === "dray";
-  const miles = lane.miles ? (isDray ? lane.miles * 2 : lane.miles) : null;
-  const rpm = (avgRate > 0 && miles > 0) ? (avgRate / miles).toFixed(2) : null;
+  const miles = lane.miles || null;
 
   return (
     <div onClick={onClick} draggable className="glass" style={{ borderRadius: 12, padding: "18px 20px", cursor: "pointer", border: "1px solid rgba(255,255,255,0.06)", transition: "all 0.2s", position: "relative" }}
@@ -515,8 +541,7 @@ function LaneCard({ lane, onClick, onQuickQuote, onReclassify, rateIds }) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
             <span style={{ fontSize: 11, color: "#5A6478" }}>{volume} rate{volume !== 1 ? "s" : ""} on file</span>
-            {miles && <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{miles.toLocaleString()} mi{isDray ? " RT" : ""}</span>}
-            {rpm && <span style={{ fontSize: 11, fontWeight: 700, color: "#60a5fa", fontFamily: "'JetBrains Mono', monospace" }}>${rpm}/mi</span>}
+            {miles && <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{miles.toLocaleString()} mi</span>}
           </div>
           {(lane.origin_zip || lane.dest_zip) && (
             <div style={{ fontSize: 11, color: "#5A6478", marginTop: 2, fontFamily: "'JetBrains Mono', monospace" }}>
@@ -691,6 +716,7 @@ export default function RateIQView() {
   const [laneResults, setLaneResults] = useState([]);
   const [laneSearching, setLaneSearching] = useState(false);
   const [moveTypeFilter, setMoveTypeFilter] = useState("dray"); // all | dray | ftl | transload
+  const [laneMiles, setLaneMiles] = useState({}); // "origin|dest" → { miles, loading }
   const [editingLaneRateId, setEditingLaneRateId] = useState(null);
   const [editingLaneField, setEditingLaneField] = useState(null);
   const [editingLaneValue, setEditingLaneValue] = useState("");
@@ -711,6 +737,22 @@ export default function RateIQView() {
       return next;
     });
   }, []);
+  const fetchLaneMiles = useCallback(async (origin, destination, rawOrigin, rawDest) => {
+    const key = `${origin}|${destination}`;
+    setLaneMiles(prev => {
+      if (prev[key]) return prev; // already fetched or loading
+      return { ...prev, [key]: { miles: null, loading: true } };
+    });
+    try {
+      // Use raw (un-normalized) values for accurate geocoding
+      const o = encodeURIComponent(rawOrigin || origin);
+      const d = encodeURIComponent(rawDest || destination);
+      const res = await apiFetch(`${API_BASE}/api/quotes/distance?origin=${o}&destination=${d}`).then(r => r.json());
+      setLaneMiles(prev => ({ ...prev, [key]: { miles: res.one_way_miles, loading: false } }));
+    } catch {
+      setLaneMiles(prev => ({ ...prev, [key]: { miles: null, loading: false } }));
+    }
+  }, []);
   const originSuggestions = useMemo(() => {
     if (!searchOrigin || searchOrigin.length < 2) return [];
     const q = searchOrigin.toLowerCase();
@@ -720,17 +762,17 @@ export default function RateIQView() {
     return rateLaneSummaries
       .filter(ls => {
         const p = (ls.port || "").toLowerCase();
-        const matches = p.includes(q) || (clusterMatch && normalizePort(ls.port) === clusterMatch);
+        const matches = p.includes(q) || (clusterMatch && normalizeOrigin(ls.port) === clusterMatch);
         // Group by normalized port name
-        const normP = normalizePort(ls.port || "").toLowerCase();
+        const normP = normalizeOrigin(ls.port || "").toLowerCase();
         if (!matches || seen.has(normP)) return false;
         seen.add(normP);
         return true;
       })
       .slice(0, 6)
       .map(ls => {
-        const normP = normalizePort(ls.port || "");
-        const matching = rateLaneSummaries.filter(l => normalizePort(l.port || "") === normP);
+        const normP = normalizeOrigin(ls.port || "");
+        const matching = rateLaneSummaries.filter(l => normalizeOrigin(l.port || "") === normP);
         const totalRates = matching.reduce((s, l) => s + l.load_count, 0);
         const avgAll = matching.length > 0 ? Math.round(matching.reduce((s, l) => s + l.avg_rate * l.load_count, 0) / totalRates) : 0;
         return { port: normP, lanes: matching.length, avg: avgAll };
@@ -744,16 +786,16 @@ export default function RateIQView() {
     return rateLaneSummaries
       .filter(ls => {
         const d = (ls.destination || "").toLowerCase();
-        const matches = d.includes(q) || (clusterMatch && normalizePort(ls.destination) === clusterMatch);
-        const normD = normalizePort(ls.destination || "").toLowerCase();
+        const matches = d.includes(q) || (clusterMatch && normalizeLaneCity(ls.destination) === clusterMatch);
+        const normD = normalizeLaneCity(ls.destination || "").toLowerCase();
         if (!matches || seen.has(normD)) return false;
         seen.add(normD);
         return true;
       })
       .slice(0, 6)
       .map(ls => {
-        const normD = normalizePort(ls.destination || "");
-        const matching = rateLaneSummaries.filter(l => normalizePort(l.destination || "") === normD);
+        const normD = normalizeLaneCity(ls.destination || "");
+        const matching = rateLaneSummaries.filter(l => normalizeLaneCity(l.destination || "") === normD);
         const totalRates = matching.reduce((s, l) => s + l.load_count, 0);
         const avgAll = matching.length > 0 ? Math.round(matching.reduce((s, l) => s + l.avg_rate * l.load_count, 0) / totalRates) : 0;
         return { destination: normD, lanes: matching.length, avg: avgAll, origin: searchOrigin || matching[0]?.port || "" };
@@ -836,8 +878,8 @@ export default function RateIQView() {
   const groupedLanes = useMemo(() => {
     const map = {};
     (Array.isArray(laneResults) ? laneResults : []).forEach(r => {
-      const normOrigin = normalizePort(r.port || "");
-      const normDest = normalizePort(r.destination || "");
+      const normOrigin = normalizeLaneCity(r.port || "");
+      const normDest = normalizeLaneCity(r.destination || "");
       // Bidirectional key: sort endpoints alphabetically so A→B and B→A share a key
       const endpoints = [normOrigin, normDest].sort();
       const biKey = `${endpoints[0]} ↔ ${endpoints[1]}`;
@@ -896,7 +938,7 @@ export default function RateIQView() {
     const filtered = rateLaneSummaries.filter(ls => moveTypeFilter === "all" || ls.move_type === moveTypeFilter);
     const map = {};
     filtered.forEach(ls => {
-      const origin = normalizePort(ls.port || ls.origin_city || "Unknown");
+      const origin = normalizeOrigin(ls.port || ls.origin_city || "Unknown");
       if (!map[origin]) map[origin] = { origin, lanes: [], totalRate: 0, rateCount: 0, totalLoads: 0 };
       map[origin].lanes.push(ls);
       map[origin].totalLoads += (ls.load_count || 0);
@@ -1046,10 +1088,10 @@ export default function RateIQView() {
       const thirtyDaysAgo = now - 30 * 86400000;
       const laneMap = {};
       allRates.forEach(r => {
-        const normPort = normalizePort(r.port || "");
-        const normDest = normalizePort(r.destination || "");
+        const normPort = normalizeLaneCity(r.port || "");
+        const normDest = normalizeLaneCity(r.destination || "");
         const key = `${normPort}|${normDest}`;
-        if (!laneMap[key]) laneMap[key] = { port: normPort, destination: normDest, count: 0, totalRate: 0, carriers: new Set(), rawRates: [], recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
+        if (!laneMap[key]) laneMap[key] = { port: normPort, destination: normDest, rawPort: r.port || "", rawDest: r.destination || "", count: 0, totalRate: 0, carriers: new Set(), rawRates: [], recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
         laneMap[key].rawRates.push(r);
         if (!laneMap[key].miles && r.miles) laneMap[key].miles = r.miles;
         if (!laneMap[key].origin_zip && r.origin_zip) laneMap[key].origin_zip = r.origin_zip;
@@ -1076,7 +1118,7 @@ export default function RateIQView() {
           // Determine primary move type (most common across rates for this lane)
           const mtEntries = Object.entries(l.moveTypes);
           const primary_move_type = mtEntries.length > 0 ? mtEntries.sort((a, b) => b[1] - a[1])[0][0] : "dray";
-          return { port: l.port, destination: l.destination, load_count: l.count, avg_rate, carrier_count: l.carriers.size, trend_pct, miles: l.miles, origin_zip: l.origin_zip, dest_zip: l.dest_zip, move_type: primary_move_type, rawRates: l.rawRates };
+          return { port: l.port, destination: l.destination, rawPort: l.rawPort, rawDest: l.rawDest, load_count: l.count, avg_rate, carrier_count: l.carriers.size, trend_pct, miles: l.miles, origin_zip: l.origin_zip, dest_zip: l.dest_zip, move_type: primary_move_type, rawRates: l.rawRates };
         })
         .sort((a, b) => b.load_count - a.load_count);
       setRateLaneSummaries(summaries);
@@ -1458,7 +1500,21 @@ export default function RateIQView() {
                 return (
                   <div key={group.origin} className="glass" style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
                     {/* Origin header row */}
-                    <div onClick={() => setExpandedOrigins(prev => ({ ...prev, [group.origin]: !prev[group.origin] }))}
+                    <div onClick={() => {
+                        const wasOpen = !!expandedOrigins[group.origin];
+                        setExpandedOrigins(prev => ({ ...prev, [group.origin]: !prev[group.origin] }));
+                        if (!wasOpen) {
+                          group.lanes.forEach(ls => {
+                            if (!ls.miles && ls.destination) {
+                              // Use raw (un-normalized) values for accurate distance lookup
+                              const rawO = ls.rawPort || group.origin;
+                              const rawD = ls.rawDest || ls.destination;
+                              const key = `${group.origin}|${ls.destination}`;
+                              if (!laneMiles[key]) fetchLaneMiles(group.origin, ls.destination, rawO, rawD);
+                            }
+                          });
+                        }
+                      }}
                       style={{ padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", transition: "background 0.15s" }}
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
                       onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
@@ -1498,7 +1554,13 @@ export default function RateIQView() {
                                   <span style={{ padding: "1px 8px", borderRadius: 10, fontSize: 10, fontWeight: 700, background: mtStyle.bg, color: mtStyle.color, border: `1px solid ${mtStyle.border}` }}>{mtStyle.label}</span>
                                   <span style={{ fontSize: 11, color: "#5A6478" }}>{ls.load_count || 0} rate{(ls.load_count || 0) !== 1 ? "s" : ""}</span>
                                   {ls.carrier_count > 0 && <span style={{ fontSize: 11, color: "#5A6478" }}>{ls.carrier_count} carrier{ls.carrier_count !== 1 ? "s" : ""}</span>}
-                                  {ls.miles > 0 && <span style={{ fontSize: 11, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{(ls.miles * ((ls.move_type || "dray") === "dray" ? 2 : 1)).toLocaleString()} mi</span>}
+                                  {(() => {
+                                    const mKey = `${group.origin}|${ls.destination}`;
+                                    const m = ls.miles || (laneMiles[mKey] && laneMiles[mKey].miles);
+                                    if (m > 0) return <span style={{ fontSize: 11, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{m.toLocaleString()} mi</span>;
+                                    if (laneMiles[mKey]?.loading) return <span style={{ fontSize: 11, color: "#5A6478" }}>...</span>;
+                                    return null;
+                                  })()}
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                                   {ls.trend_pct != null && Math.abs(ls.trend_pct) > 2 && (

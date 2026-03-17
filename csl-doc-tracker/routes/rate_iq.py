@@ -46,6 +46,26 @@ PORT_CLUSTERS = {
     "bayonne": "NY/NJ",
     "maher": "NY/NJ",
     "newark": "NY/NJ",
+    "nynj": "NY/NJ",
+    "nj/ny": "NY/NJ",
+    "port liberty": "NY/NJ",
+    "nyc port": "NY/NJ",
+    "nyc": "NY/NJ",
+    "new york city": "NY/NJ",
+    "new york": "NY/NJ",
+    "bayonne terminal": "NY/NJ",
+    "apmt": "NY/NJ",
+    "global terminal": "NY/NJ",
+    "port liberty, ny": "NY/NJ",
+    "nyc port, ny": "NY/NJ",
+    "nyc, ny": "NY/NJ",
+    "new york city, ny": "NY/NJ",
+    "new york, ny": "NY/NJ",
+    "bayonne, nj": "NY/NJ",
+    "bayonne terminal, nj": "NY/NJ",
+    "elizabeth, nj": "NY/NJ",
+    "newark, nj": "NY/NJ",
+    "port newark, nj": "NY/NJ",
     # Savannah
     "savannah": "Savannah",
     "savannah ports": "Savannah",
@@ -55,7 +75,10 @@ PORT_CLUSTERS = {
     "houston": "Houston",
     "houston ports": "Houston",
     "barbours cut": "Houston",
+    "barbour's cut": "Houston",
     "bayport": "Houston",
+    "houston, tx": "Houston",
+    "houston tx": "Houston",
     # Charleston
     "charleston": "Charleston",
     "wando welch": "Charleston",
@@ -82,10 +105,18 @@ def _normalize_port(text: str) -> str:
     # Exact match
     if lower in PORT_CLUSTERS:
         return PORT_CLUSTERS[lower]
+    # Try without state suffix: "houston, tx" → "houston"
+    no_state = re.sub(r',\s*[a-z]{2}$', '', lower).strip()
+    if no_state != lower and no_state in PORT_CLUSTERS:
+        return PORT_CLUSTERS[no_state]
     # Substring match (e.g. "Long Beach Container Terminal" contains "long beach")
     for alias, cluster in sorted(PORT_CLUSTERS.items(), key=lambda x: -len(x[0])):
         if alias in lower:
             return cluster
+    # Strip state suffix for general city grouping: "Dallas, TX" → "Dallas"
+    if no_state != lower:
+        # Title case the city name
+        return no_state.title()
     return text.strip()
 
 
