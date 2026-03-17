@@ -5,6 +5,7 @@ export default function DocIndicators({ docs }) {
   if (docs.pod) icons.push({ icon: "\u{1F4F8}", label: "POD", key: "pod" });
   if (docs.customer_rate || docs.carrier_rate) icons.push({ icon: "\u{1F4B0}", label: "Rate", key: "rate" });
   if (docs.carrier_invoice) icons.push({ icon: "\u{1F9FE}", label: "Invoice", key: "inv" });
+  if (docs.msds) icons.push({ icon: "\u2623\uFE0F", label: "MSDS", key: "msds" });
   if (icons.length === 0) icons.push({ icon: "\u{1F4C4}", label: `${Object.values(docs).reduce((a, b) => a + b, 0)} docs`, key: "other" });
   return (
     <span style={{ display: "inline-flex", gap: 2, marginLeft: 4 }}>

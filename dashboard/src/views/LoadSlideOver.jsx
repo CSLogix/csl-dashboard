@@ -1052,10 +1052,11 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                   { id: "cx_rate", label: "CX Rate", match: t => t === "customer_rate" },
                   { id: "rc", label: "RC", match: t => t === "carrier_rate" },
                   { id: "pod", label: "POD", match: t => t === "pod" },
-                  { id: "bol", label: "BOL", match: t => t === "bol" },
+                  { id: "bol", label: "BOL 1", match: t => t === "bol" },
                   { id: "email", label: "Email", match: t => t === "email" },
                   { id: "carrier_invoice", label: "Carrier Invoice", match: t => t === "carrier_invoice" },
-                  { id: "other", label: "Other", match: t => t !== "customer_rate" && t !== "carrier_rate" && t !== "pod" && t !== "bol" && t !== "email" && t !== "carrier_invoice" },
+                  { id: "msds", label: "MSDS", match: t => t === "msds" },
+                  { id: "other", label: "Other", match: t => !["customer_rate", "carrier_rate", "pod", "bol", "email", "carrier_invoice", "msds"].includes(t) },
                 ].map(tab => {
                   const count = tab.id === "all" ? loadDocs.length : loadDocs.filter(d => tab.match(d.doc_type)).length;
                   return (
@@ -1113,6 +1114,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                                 <option value="bol">BOL</option>
                                 <option value="carrier_invoice">Carrier Invoice</option>
                                 <option value="packing_list">Packing List</option>
+                                <option value="msds">MSDS</option>
                                 <option value="screenshot">Screenshot</option>
                                 <option value="email">Email</option>
                                 <option value="other">Other</option>
@@ -1151,6 +1153,7 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 <option value="bol" style={{ background: "#0D1119" }}>BOL</option>
                 <option value="carrier_invoice" style={{ background: "#0D1119" }}>Carrier Invoice</option>
                 <option value="packing_list" style={{ background: "#0D1119" }}>Packing List</option>
+                <option value="msds" style={{ background: "#0D1119" }}>MSDS</option>
                 <option value="screenshot" style={{ background: "#0D1119" }}>Screenshot</option>
                 <option value="email" style={{ background: "#0D1119" }}>Email</option>
                 <option value="other" style={{ background: "#0D1119" }}>Other</option>

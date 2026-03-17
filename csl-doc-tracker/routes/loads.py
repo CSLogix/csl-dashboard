@@ -462,7 +462,8 @@ async def update_load_document(efj: str, doc_id: int, request: Request):
     new_type = body.get("doc_type", "").strip()
     valid_types = [
         "customer_rate", "carrier_rate", "rate", "unclassified",
-        "pod", "bol", "carrier_invoice", "screenshot", "email", "other",
+        "pod", "bol", "carrier_invoice", "packing_list", "msds",
+        "screenshot", "email", "other",
     ]
     if new_type not in valid_types:
         return JSONResponse(status_code=400, content={"error": f"Invalid doc_type. Must be one of: {valid_types}"})
