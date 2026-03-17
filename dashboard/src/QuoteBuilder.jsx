@@ -498,6 +498,33 @@ export default function QuoteBuilder({ prefill } = {}) {
       finalDelivery: prefill.destination || prev.finalDelivery,
     }));
     if (prefill.carrier) setCarrierName(prefill.carrier);
+    // Auto-fill linehaul rows from carrier rate data
+    if (prefill.linehaul && prefill.linehaul.length > 0) {
+      setLinehaul(prefill.linehaul.map(item => ({
+        description: item.description || "",
+        rate: item.rate || "",
+        section: defaultSection(route.shipmentType),
+      })));
+    }
+    // Auto-check and set accessorial rates from carrier data
+    if (prefill.accessorials) {
+      setAccessorials(prev => prev.map(acc => {
+        const key = acc.charge.toLowerCase().replace(/\s*\(.*\)/, "");
+        if (key.includes("storage") && prefill.accessorials.storage) {
+          return { ...acc, rate: prefill.accessorials.storage, amount: prefill.accessorials.storage, checked: true };
+        }
+        if (key.includes("detention") && prefill.accessorials.detention) {
+          return { ...acc, rate: prefill.accessorials.detention, amount: prefill.accessorials.detention, checked: true };
+        }
+        if (key.includes("chassis") && prefill.accessorials.chassis_split) {
+          return { ...acc, rate: prefill.accessorials.chassis_split, amount: prefill.accessorials.chassis_split, checked: true };
+        }
+        if (key.includes("overweight") && prefill.accessorials.overweight) {
+          return { ...acc, rate: prefill.accessorials.overweight, amount: prefill.accessorials.overweight, checked: true };
+        }
+        return acc;
+      }));
+    }
   }, [prefill]);
 
   // ── Auto-populate mileage when origin + destination both filled ──

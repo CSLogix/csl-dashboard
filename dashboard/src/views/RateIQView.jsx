@@ -254,7 +254,7 @@ function MarketBenchmarkCard({ benchmark, carrierAvg }) {
 }
 
 // ── Carrier Rate Table (simplified — key columns visible, rest expandable) ──
-function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingLaneField, editingLaneValue, setEditingLaneRateId, setEditingLaneField, setEditingLaneValue, handleLaneRateUpdate, laneOrigin, laneDestination }) {
+function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingLaneField, editingLaneValue, setEditingLaneRateId, setEditingLaneField, setEditingLaneValue, handleLaneRateUpdate, laneOrigin, laneDestination, onUseRate }) {
   const [showAllCols, setShowAllCols] = useState(false);
   const [copiedMC, setCopiedMC] = useState(null);
   const [hoveredRow, setHoveredRow] = useState(null);
@@ -272,16 +272,12 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
     navigator.clipboard.writeText(mc).then(() => { setCopiedMC(mc); setTimeout(() => setCopiedMC(null), 1500); });
   };
 
-  const emailRC = (carrier) => {
+  const [copiedEmail, setCopiedEmail] = useState(null);
+  const copyEmail = (carrier) => {
     const caps = carrierCapMap[(carrier.carrier_name || "").toLowerCase()] || {};
     const email = caps.contact_email || carrier.contact_email;
     if (!email) return;
-    const total = carrier.total || carrier.dray_rate || "";
-    const subject = encodeURIComponent(`Rate Confirmation — ${laneOrigin || ""} → ${laneDestination || ""}`);
-    const body = encodeURIComponent(
-      `Hi,\n\nPlease confirm the following rate:\n\nLane: ${laneOrigin || ""} → ${laneDestination || ""}\nCarrier: ${carrier.carrier_name}\nRate: $${total}\n\nThank you`
-    );
-    window.open(`mailto:${email}?subject=${subject}&body=${body}`, "_self");
+    navigator.clipboard.writeText(email).then(() => { setCopiedEmail(email); setTimeout(() => setCopiedEmail(null), 1500); });
   };
 
   return (
@@ -377,16 +373,29 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
                       </td>
                     );
                   })}
-                  {/* Email RC action column */}
-                  <td style={{ padding: "10px 8px", textAlign: "center", verticalAlign: "middle", width: 36 }}>
-                    {isHovered && dispatchEmail && (
-                      <button onClick={e => { e.stopPropagation(); emailRC(cr); }}
-                        title={`Email rate confirmation to ${dispatchEmail}`}
-                        style={{ padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(59,130,246,0.3)", background: "rgba(59,130,246,0.08)", color: "#60a5fa", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.15s" }}
-                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(59,130,246,0.15)"; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(59,130,246,0.08)"; }}>
-                        \u2709 RC
-                      </button>
+                  {/* Actions column: Use Rate + Email RC */}
+                  <td style={{ padding: "10px 8px", textAlign: "center", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    {isHovered && (
+                      <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                        {onUseRate && (cr.total || cr.dray_rate) && (
+                          <button onClick={e => { e.stopPropagation(); onUseRate(cr); }}
+                            title="Use this rate in Quote Builder"
+                            style={{ padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(0,212,170,0.3)", background: "rgba(0,212,170,0.08)", color: "#00D4AA", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.15s" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,212,170,0.15)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,212,170,0.08)"; }}>
+                            Quote
+                          </button>
+                        )}
+                        {dispatchEmail && (
+                          <button onClick={e => { e.stopPropagation(); copyEmail(cr); }}
+                            title={`Copy ${dispatchEmail}`}
+                            style={{ padding: "4px 8px", borderRadius: 5, border: `1px solid ${copiedEmail === dispatchEmail ? "rgba(52,211,153,0.3)" : "rgba(59,130,246,0.3)"}`, background: copiedEmail === dispatchEmail ? "rgba(52,211,153,0.08)" : "rgba(59,130,246,0.08)", color: copiedEmail === dispatchEmail ? "#34d399" : "#60a5fa", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.15s" }}
+                            onMouseEnter={e => { if (copiedEmail !== dispatchEmail) e.currentTarget.style.background = "rgba(59,130,246,0.15)"; }}
+                            onMouseLeave={e => { if (copiedEmail !== dispatchEmail) e.currentTarget.style.background = "rgba(59,130,246,0.08)"; }}>
+                            {copiedEmail === dispatchEmail ? "\u2713 Copied" : "Email"}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -543,6 +552,63 @@ export default function RateIQView() {
   const [marketRateProcessing, setMarketRateProcessing] = useState(false);
   const [marketRateResult, setMarketRateResult] = useState(null);
   const [marketBenchmark, setMarketBenchmark] = useState(null);
+
+  // ── AI Rate Assistant state ──
+  const [aiMessages, setAiMessages] = useState([]); // { role: "user"|"assistant", text }
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiInput, setAiInput] = useState("");
+  const aiChatRef = useRef(null);
+
+  const askAI = useCallback(async (question, laneData) => {
+    if (!question.trim()) return;
+    setAiMessages(prev => [...prev, { role: "user", text: question }]);
+    setAiInput("");
+    setAiLoading(true);
+    try {
+      // Build rich context from lane data
+      const carriers = (laneData?.carriers || []).map(c => ({
+        name: c.carrier_name,
+        rate: c.total || c.dray_rate,
+        fsc: c.fsc,
+        chassis: c.chassis_per_day,
+        prepull: c.prepull,
+        overweight: c.overweight,
+        date: c.created_at,
+      }));
+      const avgRate = laneData?.count > 0 ? Math.round(laneData.total / laneData.count) : null;
+      const context = {
+        lane: `${laneData?.port || ""} → ${laneData?.destination || ""}`,
+        carrier_count: carriers.length,
+        avg_rate: avgRate,
+        floor: laneData?.minRate !== Infinity ? laneData?.minRate : null,
+        ceiling: laneData?.maxRate > 0 ? laneData?.maxRate : null,
+        carriers,
+        market_benchmark: marketBenchmark ? {
+          avg: marketBenchmark.stats?.avg,
+          min: marketBenchmark.stats?.min,
+          max: marketBenchmark.stats?.max,
+          trend_pct: marketBenchmark.stats?.trend_pct,
+        } : null,
+      };
+      const res = await apiFetch(`${API_BASE}/api/ask-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: `You are a dray/freight rate analyst assistant. Answer concisely about this lane.\n\nLane: ${context.lane}\nCarrier rates on file: ${carriers.length}\nAvg rate: $${avgRate || "N/A"}\nFloor: $${context.floor || "N/A"} | Ceiling: $${context.ceiling || "N/A"}\n${context.market_benchmark ? `Market benchmark avg: $${context.market_benchmark.avg}, trend: ${context.market_benchmark.trend_pct > 0 ? "+" : ""}${context.market_benchmark.trend_pct?.toFixed(1) || 0}%` : ""}\n\nCarrier details:\n${carriers.map(c => `- ${c.name}: $${c.rate} (${c.date ? new Date(c.date).toLocaleDateString() : "no date"})`).join("\n")}\n\nUser question: ${question}`,
+          context,
+        }),
+      }).then(r => r.json());
+      const answer = res.answer || res.response || res.text || JSON.stringify(res);
+      setAiMessages(prev => [...prev, { role: "assistant", text: answer }]);
+    } catch (e) {
+      setAiMessages(prev => [...prev, { role: "assistant", text: "Sorry, I couldn't process that request. " + (e.message || "") }]);
+    }
+    setAiLoading(false);
+    setTimeout(() => { if (aiChatRef.current) aiChatRef.current.scrollTop = aiChatRef.current.scrollHeight; }, 50);
+  }, [marketBenchmark]);
+
+  // Reset AI chat when lane changes
+  useEffect(() => { setAiMessages([]); setAiInput(""); }, [selectedLane]);
 
   // ── Lane Search state ──
   const [searchOrigin, setSearchOrigin] = useState("");
@@ -1409,77 +1475,167 @@ export default function RateIQView() {
                 setEditingLaneRateId={setEditingLaneRateId} setEditingLaneField={setEditingLaneField} setEditingLaneValue={setEditingLaneValue}
                 handleLaneRateUpdate={handleLaneRateUpdate}
                 laneOrigin={currentGroup.port} laneDestination={currentGroup.destination}
+                onUseRate={(cr) => {
+                  // Build linehaul items from carrier rate fields
+                  const items = [];
+                  if (cr.dray_rate) items.push({ description: "Linehaul", rate: String(cr.dray_rate) });
+                  if (cr.fsc) items.push({ description: "Fuel Surcharge", rate: String(cr.fsc) });
+                  if (cr.prepull) items.push({ description: "Pre-Pull", rate: String(cr.prepull) });
+                  if (cr.chassis_per_day) items.push({ description: "Chassis", rate: String(cr.chassis_per_day) });
+                  if (cr.overweight) items.push({ description: "Overweight", rate: String(cr.overweight) });
+                  if (cr.tolls) items.push({ description: "Tolls", rate: String(cr.tolls) });
+                  // Build accessorials from optional fields
+                  const accessorials = {};
+                  if (cr.storage_per_day) accessorials.storage = String(cr.storage_per_day);
+                  if (cr.detention) accessorials.detention = String(cr.detention);
+                  if (cr.chassis_split) accessorials.chassis_split = String(cr.chassis_split);
+                  if (cr.hazmat) accessorials.hazmat = String(cr.hazmat);
+                  if (cr.reefer) accessorials.reefer = String(cr.reefer);
+                  if (cr.bond_fee) accessorials.bond = String(cr.bond_fee);
+                  if (cr.triaxle) accessorials.triaxle = String(cr.triaxle);
+                  setSelectedLane({
+                    origin: currentGroup.port,
+                    destination: currentGroup.destination,
+                    carrier: cr.carrier_name,
+                    linehaul: items.length > 0 ? items : undefined,
+                    accessorials: Object.keys(accessorials).length > 0 ? accessorials : undefined,
+                    miles: currentGroup.miles,
+                  });
+                  setView("build-quote");
+                }}
               />
             </div>
 
             {/* Right column — AI Rate Assistant */}
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div className="glass" style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.06)", flex: 1, display: "flex", flexDirection: "column" }}>
+              <div className="glass" style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.06)", flex: 1, display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 200px)" }}>
                 <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(0,212,170,0.12)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🤖</div>
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5" }}>AI Rate Assistant</div>
-                    <div style={{ fontSize: 11, color: "#5A6478" }}>Lane intelligence for {selectedLane?.origin || "—"}</div>
+                    <div style={{ fontSize: 11, color: "#5A6478" }}>Lane intelligence for {selectedLane?.origin || "—"} → {selectedLane?.destination || "—"}</div>
                   </div>
+                  {aiMessages.length > 0 && (
+                    <button onClick={() => setAiMessages([])} title="Clear chat"
+                      style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#5A6478", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                      Clear
+                    </button>
+                  )}
                 </div>
-                <div style={{ padding: "16px 20px", flex: 1, overflowY: "auto" }}>
-                  {/* Rate Insights */}
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#F0F2F5", marginBottom: 10 }}>Rate Insights</div>
-
-                  {/* Trend analysis */}
-                  {currentGroup.count >= 3 && (() => {
+                <div ref={aiChatRef} style={{ padding: "16px 20px", flex: 1, overflowY: "auto" }}>
+                  {/* Auto-generated data insights (always shown) */}
+                  {currentGroup.count >= 2 && (() => {
                     const sorted = [...currentGroup.carriers].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+                    const rates = sorted.map(c => parseFloat(c.total || c.dray_rate || 0)).filter(r => r > 0);
                     const recentAvg = sorted.slice(-3).reduce((s, c) => s + parseFloat(c.total || c.dray_rate || 0), 0) / Math.min(sorted.length, 3);
                     const oldAvg = sorted.slice(0, 3).reduce((s, c) => s + parseFloat(c.total || c.dray_rate || 0), 0) / Math.min(sorted.length, 3);
                     const trend = recentAvg > oldAvg ? "rising" : recentAvg < oldAvg ? "falling" : "stable";
                     const trendColor = trend === "rising" ? "#f87171" : trend === "falling" ? "#34d399" : "#8B95A8";
                     const pctChange = oldAvg > 0 ? Math.abs(((recentAvg - oldAvg) / oldAvg) * 100).toFixed(0) : 0;
+                    // Find cheapest carrier
+                    const cheapest = sorted.reduce((best, c) => {
+                      const r = parseFloat(c.total || c.dray_rate || 0);
+                      return r > 0 && (!best || r < best.rate) ? { name: c.carrier_name, rate: r } : best;
+                    }, null);
+                    // Rate spread
+                    const spread = rates.length >= 2 ? Math.round(Math.max(...rates) - Math.min(...rates)) : 0;
+                    // Freshest rate age
+                    const newest = sorted[sorted.length - 1];
+                    const newestDays = newest?.created_at ? Math.floor((Date.now() - new Date(newest.created_at).getTime()) / 86400000) : null;
+                    // Accessorials present in data
+                    const accPresent = [];
+                    const hasAcc = (field) => sorted.some(c => c[field] && parseFloat(c[field]) > 0);
+                    if (hasAcc("chassis_per_day")) accPresent.push("Chassis");
+                    if (hasAcc("prepull")) accPresent.push("Pre-Pull");
+                    if (hasAcc("storage_per_day")) accPresent.push("Storage");
+                    if (hasAcc("detention")) accPresent.push("Detention");
+                    if (hasAcc("overweight")) accPresent.push("Overweight");
+                    if (hasAcc("hazmat")) accPresent.push("Hazmat");
+                    if (hasAcc("reefer")) accPresent.push("Reefer");
+
                     return (
-                      <div style={{ padding: "10px 14px", borderRadius: 10, background: trendColor + "08", border: `1px solid ${trendColor}20`, marginBottom: 12 }}>
-                        <div style={{ fontSize: 11, color: "#C8D0DC", lineHeight: 1.5 }}>
-                          Rates on this lane are <span style={{ fontWeight: 700, color: trendColor }}>{trend}</span>
-                          {pctChange > 2 && <span> ({pctChange}% {trend === "rising" ? "increase" : "decrease"})</span>}.
-                          {trend === "rising" && " Consider locking in rates soon."}
-                          {trend === "falling" && " Good opportunity to negotiate."}
+                      <div style={{ marginBottom: 16 }}>
+                        {/* Trend */}
+                        <div style={{ padding: "10px 14px", borderRadius: 10, background: trendColor + "08", border: `1px solid ${trendColor}20`, marginBottom: 10 }}>
+                          <div style={{ fontSize: 11, color: "#C8D0DC", lineHeight: 1.5 }}>
+                            Rates are <span style={{ fontWeight: 700, color: trendColor }}>{trend}</span>
+                            {pctChange > 2 && <span> ({pctChange}% {trend === "rising" ? "increase" : "decrease"})</span>}.
+                            {trend === "rising" && " Consider locking in rates soon."}
+                            {trend === "falling" && " Good opportunity to negotiate."}
+                          </div>
+                        </div>
+                        {/* Key metrics */}
+                        <div style={{ fontSize: 11, color: "#C8D0DC", lineHeight: 1.8, padding: "0 4px" }}>
+                          {cheapest && <div><span style={{ color: "#5A6478" }}>Best rate:</span> <span style={{ fontWeight: 700, color: "#34d399" }}>{fmt(cheapest.rate)}</span> ({cheapest.name})</div>}
+                          {spread > 50 && <div><span style={{ color: "#5A6478" }}>Rate spread:</span> <span style={{ fontWeight: 700, color: "#FBBF24" }}>{fmt(spread)}</span> — room to negotiate</div>}
+                          {newestDays !== null && <div><span style={{ color: "#5A6478" }}>Freshest rate:</span> {newestDays === 0 ? "today" : newestDays < 7 ? `${newestDays}d ago` : newestDays < 30 ? `${Math.floor(newestDays / 7)}w ago` : `${Math.floor(newestDays / 30)}mo ago`}{newestDays > 30 && <span style={{ color: "#FBBF24" }}> — consider refreshing</span>}</div>}
+                          {marketBenchmark?.stats?.avg && <div><span style={{ color: "#5A6478" }}>vs Market:</span> {(() => {
+                            const avg = currentGroup.count > 0 ? currentGroup.total / currentGroup.count : 0;
+                            const diff = avg - marketBenchmark.stats.avg;
+                            const pct = marketBenchmark.stats.avg > 0 ? Math.abs(diff / marketBenchmark.stats.avg * 100).toFixed(0) : 0;
+                            return diff > 0
+                              ? <span style={{ color: "#f87171" }}>{pct}% above market avg ({fmt(marketBenchmark.stats.avg)})</span>
+                              : <span style={{ color: "#34d399" }}>{pct}% below market avg ({fmt(marketBenchmark.stats.avg)})</span>;
+                          })()}</div>}
+                          {accPresent.length > 0 && <div><span style={{ color: "#5A6478" }}>Accessorials on file:</span> {accPresent.join(", ")}</div>}
                         </div>
                       </div>
                     );
                   })()}
 
-                  {/* Potential accessorial charges */}
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#C8D0DC", marginTop: 8, marginBottom: 8 }}>Potential Accessorial Charges</div>
-                  {[
-                    { icon: "📦", label: "Chassis fee", desc: "$35-55/day — check carrier terms" },
-                    { icon: "⏱", label: "Detention", desc: "$75-100/hr after free time" },
-                    { icon: "🏗", label: "Pre-pull", desc: "$125-200 if required" },
-                    { icon: "📋", label: "Storage", desc: "$35-55/day at terminal" },
-                    { icon: "⚖", label: "Overweight surcharge", desc: "$100-200 flat" },
-                  ].map((item, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                      <span style={{ fontSize: 12, marginTop: 1 }}>{item.icon}</span>
-                      <div>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "#C8D0DC" }}>{item.label}</div>
-                        <div style={{ fontSize: 11, color: "#5A6478" }}>{item.desc}</div>
+                  {/* Quick-ask buttons */}
+                  {aiMessages.length === 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", marginBottom: 8 }}>Ask about this lane:</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {[
+                          "Which carrier should I use?",
+                          "What's a fair rate for this lane?",
+                          "Compare my rates to market",
+                          "Any red flags on this lane?",
+                        ].map((q, i) => (
+                          <button key={i} onClick={() => askAI(q, currentGroup)}
+                            style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(0,212,170,0.15)", background: "rgba(0,212,170,0.04)", color: "#00D4AA", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}
+                            onMouseEnter={e => e.currentTarget.style.background = "rgba(0,212,170,0.1)"}
+                            onMouseLeave={e => e.currentTarget.style.background = "rgba(0,212,170,0.04)"}>
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Chat messages */}
+                  {aiMessages.map((msg, i) => (
+                    <div key={i} style={{ marginBottom: 12, display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start" }}>
+                      <div style={{
+                        padding: "10px 14px", borderRadius: 12, maxWidth: "90%", fontSize: 12, lineHeight: 1.6,
+                        background: msg.role === "user" ? "rgba(59,130,246,0.12)" : "rgba(0,212,170,0.06)",
+                        border: `1px solid ${msg.role === "user" ? "rgba(59,130,246,0.2)" : "rgba(0,212,170,0.15)"}`,
+                        color: "#C8D0DC", whiteSpace: "pre-wrap",
+                      }}>
+                        {msg.text}
                       </div>
                     </div>
                   ))}
+                  {aiLoading && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0" }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#00D4AA", animation: "pulse 1s infinite" }} />
+                      <span style={{ fontSize: 11, color: "#5A6478" }}>Analyzing lane data...</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* AI Chat Input */}
                 <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <input placeholder="Ask me anything about this lane..."
-                      onKeyDown={e => {
-                        if (e.key === "Enter" && e.target.value.trim()) {
-                          // Dispatch Ask AI with lane context
-                          const query = e.target.value.trim();
-                          e.target.value = "";
-                          document.dispatchEvent(new CustomEvent("openAskAI", { detail: { query: `[Lane: ${laneName}] ${query}` } }));
-                          document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
-                        }
-                      }}
+                    <input value={aiInput} onChange={e => setAiInput(e.target.value)}
+                      placeholder="Ask about rates, carriers, trends..."
+                      onKeyDown={e => { if (e.key === "Enter" && aiInput.trim() && !aiLoading) askAI(aiInput, currentGroup); }}
                       style={{ flex: 1, padding: "8px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#F0F2F5", fontSize: 11, fontFamily: "inherit", outline: "none" }} />
-                    <button style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "rgba(0,212,170,0.12)", color: "#00D4AA", fontSize: 13, cursor: "pointer" }}>→</button>
+                    <button onClick={() => { if (aiInput.trim() && !aiLoading) askAI(aiInput, currentGroup); }}
+                      disabled={aiLoading || !aiInput.trim()}
+                      style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: aiInput.trim() ? "rgba(0,212,170,0.12)" : "rgba(255,255,255,0.04)", color: aiInput.trim() ? "#00D4AA" : "#3D4654", fontSize: 13, cursor: aiInput.trim() ? "pointer" : "default", transition: "all 0.15s" }}>→</button>
                   </div>
                 </div>
               </div>
