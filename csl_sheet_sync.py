@@ -293,7 +293,7 @@ def sync_tolead(gc, creds):
             hub_rows = hub_ws.get_all_values()
             cols = hub_cfg["cols"]
             hub_start = hub_cfg.get("start_row", 1)
-            lax_writebacks = []  # (row_1based, col_0based, value) — LAX only
+            hub_writebacks = []  # (row_1based, col_0based, value) — PG → sheet
 
             # Fetch hyperlinks for MP URLs from the EFJ column
             hub_links = _get_sheet_hyperlinks(creds, hub_cfg["sheet_id"], hub_cfg["tab"])
@@ -401,21 +401,39 @@ def sync_tolead(gc, creds):
                 else:
                     _merge_master_shipment(pg_row, sheet_data,
                                            syncable_fields=TOLEAD_BOVIET_SYNCABLE_FIELDS)
-                    # LAX is internal-only — write PG dashboard edits back to sheet
-                    if hub_name == "LAX":
-                        _pg_updated = pg_row.get("updated_at")
-                        _pg_synced = pg_row.get("sheet_synced_at")
-                        if _pg_updated and _pg_synced and _pg_updated > _pg_synced:
-                            if pg_row.get("status") and pg_row["status"] != status:
-                                lax_writebacks.append((ri, cols["status"], pg_row["status"]))
-                            _pg_pu = (pg_row.get("pickup_date") or "").strip()
-                            _sh_pu = f"{pickup_date} {pickup_time}".strip() if pickup_date else ""
-                            if _pg_pu and _pg_pu != _sh_pu:
-                                lax_writebacks.append((ri, cols["pickup_date"], _pg_pu))
-                            _pg_del = (pg_row.get("delivery_date") or "").strip()
-                            _sh_del = delivery
-                            if _pg_del and _pg_del != _sh_del:
-                                lax_writebacks.append((ri, cols["delivery"], _pg_del))
+                    # Write PG dashboard/webhook edits back to Tolead sheet
+                    _pg_updated = pg_row.get("updated_at")
+                    _pg_synced = pg_row.get("sheet_synced_at")
+                    if _pg_updated and _pg_synced and _pg_updated > _pg_synced:
+                        if pg_row.get("status") and pg_row["status"] != status:
+                            hub_writebacks.append((ri, cols["status"], pg_row["status"]))
+                        _pg_pu = (pg_row.get("pickup_date") or "").strip()
+                        _sh_pu = f"{pickup_date} {pickup_time}".strip() if pickup_date else ""
+                        if _pg_pu and _pg_pu != _sh_pu:
+                            hub_writebacks.append((ri, cols["pickup_date"], _pg_pu))
+                        _pg_del = (pg_row.get("delivery_date") or "").strip()
+                        _sh_del = delivery
+                        if _pg_del and _pg_del != _sh_del:
+                            hub_writebacks.append((ri, cols["delivery"], _pg_del))
+
+                    # Write phone/trailer from PG (driver_contacts) back to sheet
+                    # if the sheet cell is empty but PG has a value
+                    try:
+                        with db.get_cursor() as _dc_cur:
+                            _dc_cur.execute(
+                                "SELECT driver_phone, trailer_number, carrier_email FROM driver_contacts WHERE efj = %s",
+                                (key,),
+                            )
+                            _dc_row = _dc_cur.fetchone()
+                        if _dc_row:
+                            _pg_phone = (_dc_row["driver_phone"] or "").strip()
+                            _pg_trailer = (_dc_row["trailer_number"] or "").strip()
+                            if _pg_phone and not driver_phone and cols.get("phone") is not None:
+                                hub_writebacks.append((ri, cols["phone"], _pg_phone))
+                            if _pg_trailer and not trailer_val and cols.get("driver") is not None:
+                                hub_writebacks.append((ri, cols["driver"], _pg_trailer))
+                    except Exception:
+                        pass
 
                 # Write trailer to driver_contacts (separate from shipments.driver)
                 if trailer_val or driver_phone:
@@ -425,13 +443,13 @@ def sync_tolead(gc, creds):
                 # immediately (cache is polled every 30s by the dashboard)
                 _update_tracking_cache_contact(key, driver_phone, trailer_val)
 
-            # Flush LAX write-backs (one batch API call per hub cycle)
-            if hub_name == "LAX" and lax_writebacks:
+            # Flush write-backs to sheet (one batch API call per hub cycle)
+            if hub_writebacks:
                 try:
-                    _batch_writeback(hub_ws, lax_writebacks)
-                    log.info("Tolead LAX: wrote back %d cell(s) to sheet", len(lax_writebacks))
+                    _batch_writeback(hub_ws, hub_writebacks)
+                    log.info("Tolead %s: wrote back %d cell(s) to sheet", hub_name, len(hub_writebacks))
                 except Exception as _wb_err:
-                    log.warning("Tolead LAX write-back failed: %s", _wb_err)
+                    log.warning("Tolead %s write-back failed: %s", hub_name, _wb_err)
 
             log.info("Tolead %s: synced", hub_name)
 
