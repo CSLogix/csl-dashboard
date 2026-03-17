@@ -226,12 +226,16 @@ async def api_tracking_summary():
         with db.get_cursor() as cur:
             cur.execute("SELECT efj, driver_phone, trailer_number, carrier_email FROM driver_contacts")
             for row in cur.fetchall():
-                efj_key = (row["efj"] or "").replace("EFJ", "").strip()
-                _dc_map[efj_key] = {
+                _raw_efj = (row["efj"] or "").strip()
+                _dc_entry = {
                     "phone": (row["driver_phone"] or "").strip(),
                     "trailer": (row["trailer_number"] or "").strip(),
                     "carrierEmail": (row["carrier_email"] or "").strip(),
                 }
+                # Index under both raw key ("EFJ106996") and stripped ("106996")
+                # so lookups match regardless of cache key format
+                _dc_map[_raw_efj] = _dc_entry
+                _dc_map[_raw_efj.replace("EFJ", "").strip()] = _dc_entry
     except Exception as e:
         log.debug("driver_contacts bulk load failed, using cache-only: %s", e)
 

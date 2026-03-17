@@ -258,10 +258,10 @@ def _update_tracking_cache_contact(efj, phone="", trailer=""):
 
     entry = cache[matched_key]
     changed = False
-    if phone and not entry.get("driver_phone"):
+    if phone and entry.get("driver_phone") != phone:
         entry["driver_phone"] = phone
         changed = True
-    if trailer and not entry.get("trailer"):
+    if trailer and entry.get("trailer") != trailer:
         entry["trailer"] = trailer
         changed = True
 
@@ -310,6 +310,19 @@ def sync_tolead(gc, creds):
 
             # Get current Postgres state for this hub
             pg_map = _get_pg_shipments("Tolead", hub_name)
+
+            # Bulk-fetch driver_contacts for all EFJs in this hub (avoid N+1 queries)
+            dc_map = {}
+            try:
+                with db.get_cursor() as _dc_bulk_cur:
+                    _dc_bulk_cur.execute(
+                        "SELECT efj, driver_phone, trailer_number, carrier_email FROM driver_contacts WHERE efj = ANY(%s)",
+                        (list(pg_map.keys()),),
+                    )
+                    for _dc_r in _dc_bulk_cur.fetchall():
+                        dc_map[_dc_r["efj"]] = _dc_r
+            except Exception as e:
+                log.debug("driver_contacts bulk fetch for %s failed: %s", hub_name, e)
 
             for ri, row in enumerate(hub_rows[1:], start=2):
                 if ri < hub_start:
@@ -427,23 +440,15 @@ def sync_tolead(gc, creds):
                             hub_writebacks.append((ri, cols["delivery"], _pg_del))
 
                     # Write phone/trailer from PG (driver_contacts) back to sheet
-                    # if the sheet cell is empty but PG has a value
-                    try:
-                        with db.get_cursor() as _dc_cur:
-                            _dc_cur.execute(
-                                "SELECT driver_phone, trailer_number, carrier_email FROM driver_contacts WHERE efj = %s",
-                                (key,),
-                            )
-                            _dc_row = _dc_cur.fetchone()
-                        if _dc_row:
-                            _pg_phone = (_dc_row["driver_phone"] or "").strip()
-                            _pg_trailer = (_dc_row["trailer_number"] or "").strip()
-                            if _pg_phone and not driver_phone and cols.get("phone") is not None:
-                                hub_writebacks.append((ri, cols["phone"], _pg_phone))
-                            if _pg_trailer and not trailer_val and cols.get("driver") is not None:
-                                hub_writebacks.append((ri, cols["driver"], _pg_trailer))
-                    except Exception as e:
-                        log.debug("driver_contacts fetch for %s failed: %s", key, e)
+                    # when PG has a value that differs from the sheet
+                    _dc_row = dc_map.get(key)
+                    if _dc_row:
+                        _pg_phone = (_dc_row["driver_phone"] or "").strip()
+                        _pg_trailer = (_dc_row["trailer_number"] or "").strip()
+                        if _pg_phone and _pg_phone != driver_phone and cols.get("phone") is not None:
+                            hub_writebacks.append((ri, cols["phone"], _pg_phone))
+                        if _pg_trailer and _pg_trailer != trailer_val and cols.get("driver") is not None:
+                            hub_writebacks.append((ri, cols["driver"], _pg_trailer))
 
                 # Write trailer to driver_contacts (separate from shipments.driver)
                 if trailer_val or driver_phone:
