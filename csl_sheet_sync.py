@@ -218,6 +218,50 @@ def _batch_writeback(ws, updates):
 # ---------------------------------------------------------------------------
 # Sync Tolead
 # ---------------------------------------------------------------------------
+TRACKING_CACHE_FILE = "/root/csl-bot/ftl_tracking_cache.json"
+
+
+def _update_tracking_cache_contact(efj, phone="", trailer=""):
+    """Update driver_phone and trailer in the tracking cache (best-effort).
+    This ensures tracking-summary returns these fields in real-time."""
+    if not efj or (not phone and not trailer):
+        return
+    try:
+        with open(TRACKING_CACHE_FILE, "r") as f:
+            cache = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return
+
+    efj_clean = efj.replace("EFJ", "").strip()
+    matched_key = None
+    for key in (efj, efj_clean):
+        if key in cache:
+            matched_key = key
+            break
+    if not matched_key:
+        for key, entry in cache.items():
+            if entry.get("efj") in (efj, efj_clean):
+                matched_key = key
+                break
+    if not matched_key:
+        return
+
+    entry = cache[matched_key]
+    changed = False
+    if phone and not entry.get("driver_phone"):
+        entry["driver_phone"] = phone
+        changed = True
+    if trailer and not entry.get("trailer"):
+        entry["trailer"] = trailer
+        changed = True
+
+    if changed:
+        tmp = TRACKING_CACHE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cache, f, indent=2)
+        os.replace(tmp, TRACKING_CACHE_FILE)
+
+
 def _write_driver_contact(efj, trailer="", phone=""):
     """Write trailer/phone to driver_contacts table (upsert)."""
     if not efj or (not trailer and not phone):
@@ -376,6 +420,10 @@ def sync_tolead(gc, creds):
                 # Write trailer to driver_contacts (separate from shipments.driver)
                 if trailer_val or driver_phone:
                     _write_driver_contact(key, trailer=trailer_val, phone=driver_phone)
+
+                # Also update tracking cache so tracking-summary returns phone/trailer
+                # immediately (cache is polled every 30s by the dashboard)
+                _update_tracking_cache_contact(key, driver_phone, trailer_val)
 
             # Flush LAX write-backs (one batch API call per hub cycle)
             if hub_name == "LAX" and lax_writebacks:
