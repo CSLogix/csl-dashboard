@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from datetime import datetime
 
 import gspread
@@ -22,6 +23,15 @@ from shared import (
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+_EFJ_RE = re.compile(r'^[A-Za-z0-9_-]+$')
+
+
+def _validate_efj(efj: str) -> str:
+    """Validate EFJ identifier to prevent path-traversal or injection."""
+    if not efj or not _EFJ_RE.match(efj):
+        raise HTTPException(400, "Invalid EFJ identifier")
+    return efj
 
 # Shared accounts that still need Google Sheet writes
 _SHARED_SHEET_ACCOUNTS = {"Tolead", "Boviet"}
@@ -178,6 +188,7 @@ async def api_v2_shipments(request: Request, account: str = None, status: str = 
 @router.get("/api/v2/shipments/{efj}")
 async def api_v2_shipment_detail(efj: str, request: Request):
     """Return a single shipment from Postgres."""
+    _validate_efj(efj)
     with db.get_cursor() as cur:
         cur.execute("SELECT * FROM shipments WHERE efj = %s", (efj,))
         row = cur.fetchone()
@@ -320,6 +331,7 @@ async def api_rep_scoreboard(request: Request):
 @router.post("/api/v2/load/{efj}/status")
 async def api_v2_update_status(efj: str, request: Request, background_tasks: BackgroundTasks):
     """Update status in Postgres. Write back to Google Sheet if shared account."""
+    _validate_efj(efj)
     body = await request.json()
     new_status = body.get("status", "").strip()
     if not new_status:
@@ -461,6 +473,7 @@ def _v2_write_status_to_sheet(efj: str, new_status: str, account: str, hub: str 
 @router.post("/api/v2/load/{efj}/update")
 async def api_v2_update_field(efj: str, request: Request, background_tasks: BackgroundTasks):
     """Update any field(s) on a shipment in Postgres + write back to Master Sheet."""
+    _validate_efj(efj)
     body = await request.json()
 
     # Allowed fields to update
@@ -545,8 +558,7 @@ async def api_v2_add_shipment(request: Request, background_tasks: BackgroundTask
     body = await request.json()
     efj = body.get("efj", "").strip()
     account = body.get("account", "").strip()
-    if not efj:
-        raise HTTPException(400, "Missing EFJ #")
+    _validate_efj(efj)
     if not account:
         raise HTTPException(400, "Missing account")
 

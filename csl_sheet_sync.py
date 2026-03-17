@@ -101,6 +101,15 @@ TOLEAD_HUB_CONFIGS = {
 def _shorten_address(addr):
     if not addr:
         return addr
+    addr = re.sub(r'^\(\w+\)\s*', '', addr).strip()
+    addr = re.sub(r'\s*\([^)]*\)\s*$', '', addr).strip()
+    m = re.search(r'([A-Za-z][A-Za-z .]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$', addr)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2)} {m.group(3)}"
+    m = re.search(r'([A-Za-z][A-Za-z .]+),\s*([A-Z]{2})\s*$', addr)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2)}"
+    return addr
 
 
 def _get_sheet_hyperlinks(creds, sheet_id, tab_name):
@@ -125,16 +134,6 @@ def _get_sheet_hyperlinks(creds, sheet_id, tab_name):
     except Exception as e:
         log.warning("Hyperlink fetch failed for %s/%s: %s", sheet_id[:8], tab_name, e)
         return []
-
-    addr = re.sub(r'^\(\w+\)\s*', '', addr).strip()
-    addr = re.sub(r'\s*\([^)]*\)\s*$', '', addr).strip()
-    m = re.search(r'([A-Za-z][A-Za-z .]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$', addr)
-    if m:
-        return f"{m.group(1).strip()}, {m.group(2)} {m.group(3)}"
-    m = re.search(r'([A-Za-z][A-Za-z .]+),\s*([A-Z]{2})\s*$', addr)
-    if m:
-        return f"{m.group(1).strip()}, {m.group(2)}"
-    return addr
 
 
 def _get_pg_shipments(account: str, hub: str = None) -> dict:
