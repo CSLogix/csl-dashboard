@@ -21,7 +21,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   const [expandedAccount, setExpandedAccount] = useState(null);
   const [bovietTab, setBovietTab] = useState("All");
   const [toleadHub, setToleadHub] = useState("All");
-  const [opsTableFilter, setOpsTableFilter] = useState("all");
+  const [opsTableFilter, setOpsTableFilter] = useState("del_today");
   const [masterTableFilter, setMasterTableFilter] = useState("all");
   const [repViewMode, setRepViewMode] = useState("dray"); // "dray" | "ftl"
   const [inlineEditId, setInlineEditId] = useState(null);
@@ -196,6 +196,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   });
   const opsActive = opsBase.filter(s => !isPostDelivery(s.status));
   const opsTableShips = !isOps ? [] :
+    opsTableFilter === "active" ? opsActive :
     opsTableFilter === "behind" ? opsBehind :
     opsTableFilter === "on_schedule" ? opsBase.filter(s => !isPostDelivery(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))) :
     opsTableFilter === "in_transit" ? opsBase.filter(s => ["in_transit", "out_for_delivery"].includes(s.status)) :
@@ -206,7 +207,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
     opsTableFilter === "needs_driver" ? needsDriver :
     opsTableFilter === "awaiting_pod" ? awaitingPod :
     [...STATUSES, ...FTL_STATUSES].some(st => st.key === opsTableFilter && st.key !== "all") ? opsBase.filter(s => s.status === opsTableFilter) :
-    opsActive;
+    opsBase;
   // Apply date picker filters to ops table
   const opsTableShipsDateFiltered = opsTableShips.filter(s => {
     if (puDateFilter) {
@@ -565,7 +566,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
               })}
             </tbody>
           </table>
-          {ships.length === 0 && (
+          {filteredShips.length === 0 && (
             <div style={{ textAlign: "center", padding: 40, color: "#3D4557" }}>
               <div style={{ fontSize: 11, fontWeight: 600 }}>No FTL loads found</div>
             </div>
@@ -638,7 +639,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
         const filterState = isOps ? opsTableFilter : masterTableFilter;
         const setFilter = isOps ? setOpsTableFilter : (f) => setMasterTableFilter(masterTableFilter === f ? "all" : f);
         const pills = [
-          { label: "Active", value: actionActive.length, c: "#3B82F6", filter: isOps ? "all" : "active" },
+          { label: "Active", value: actionActive.length, c: "#3B82F6", filter: "active" },
           { label: "PU Today", value: actionPuToday.length, c: "#F59E0B", filter: "pu_today" },
           { label: "PU Tmrw", value: actionPuTmrw.length, c: "#00A8CC", filter: "pu_tomorrow" },
           { label: "DEL Today", value: actionDelToday.length, c: "#22C55E", filter: "del_today" },
