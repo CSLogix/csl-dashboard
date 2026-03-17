@@ -17,9 +17,10 @@ CSL Bot automates logistics for Evans Delivery / EFJ Operations across Dray Impo
 - [feedback_git_workflow.md](feedback_git_workflow.md) — Git workflow: commit everything, no SCP patches, deploy helpers
 
 ## Git — Mar 16, 2026
-- **Latest**: Mar 16 — Inline editing, open button, slide-over action reorder deployed
+- **Latest**: Mar 16 — CodeRabbit bugfixes (directory bool coercion, rate_iq Decimal zero, carrier update rollback)
 - **Repos**: `CSLogix/CSLogix_Bot` (private, `master`) | `CSLogix/csl-dashboard` (private, `main`)
 - **VPS, GitHub, Local** all in sync as of Mar 16
+- **CodeRabbit** enabled on `csl-dashboard` repo — auto-reviews PRs. First review had 8 actionable + 7 inline comments; 3 were false positives
 - **`.gitignore`**: Excludes `*.bak*`, `*.pre-*`, `*.json` (except package.json), `dist/`, `uploads/`, credentials, `rate-msg-dump/`, one-time scripts
 - **State files** (`ftl_sent_alerts.json`, `last_check.json`, `export_state.json`) are runtime dedup/state — gitignored, live on VPS only
 - **Server deploy helpers**: `csl-deploy` (pull + restart) and `csl-commit` (stage + commit + push) in `~/.bashrc`
@@ -70,6 +71,7 @@ Note: `csl-ftl`, `csl-export`, `csl-webhook` all DISABLED (migrated to cron / ap
 - Status normalization (370+ PG rows), session hardening (fail-closed)
 
 ### Dashboard — All committed Mar 16
+- **CodeRabbit bugfixes**: carrier update rollback on API failure (RateIQView), market rates + directory patches deployed
 - Overview redesign: MyActions merge, dark theme, gradient accents, rep avatars
 - Bulk create mode in AddForm, hub selector for Boviet/Tolead
 - Delete load button + confirmation modal in LoadSlideOver
