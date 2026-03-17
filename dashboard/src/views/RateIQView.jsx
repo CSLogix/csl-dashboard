@@ -22,22 +22,59 @@ const PORT_CLUSTERS = {
   "san pedro": "LA/LB", "wilmington": "LA/LB", "carson": "LA/LB",
   "ny/nj": "NY/NJ", "ny/nj ports": "NY/NJ", "port newark": "NY/NJ", "pnct": "NY/NJ",
   "elizabeth": "NY/NJ", "bayonne": "NY/NJ", "maher": "NY/NJ", "newark": "NY/NJ",
+  "new york": "NY/NJ", "new york, ny": "NY/NJ",
   "savannah": "Savannah", "savannah ports": "Savannah", "garden city": "Savannah",
   "houston": "Houston", "houston ports": "Houston", "barbours cut": "Houston", "bayport": "Houston",
   "charleston": "Charleston", "wando welch": "Charleston",
   "norfolk": "Norfolk", "virginia": "Norfolk", "portsmouth": "Norfolk", "nit": "Norfolk",
   "oakland": "Oakland",
 };
+// US state name → abbreviation for normalizing "Massachusetts" → "MA" etc.
+const STATE_ABBREVS = {
+  alabama:"AL",alaska:"AK",arizona:"AZ",arkansas:"AR",california:"CA",colorado:"CO",connecticut:"CT",
+  delaware:"DE",florida:"FL",georgia:"GA",hawaii:"HI",idaho:"ID",illinois:"IL",indiana:"IN",iowa:"IA",
+  kansas:"KS",kentucky:"KY",louisiana:"LA",maine:"ME",maryland:"MD",massachusetts:"MA",michigan:"MI",
+  minnesota:"MN",mississippi:"MS",missouri:"MO",montana:"MT",nebraska:"NE",nevada:"NV",
+  "new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY","north carolina":"NC",
+  "north dakota":"ND",ohio:"OH",oklahoma:"OK",oregon:"OR",pennsylvania:"PA","rhode island":"RI",
+  "south carolina":"SC","south dakota":"SD",tennessee:"TN",texas:"TX",utah:"UT",vermont:"VT",
+  virginia:"VA",washington:"WA","west virginia":"WV",wisconsin:"WI",wyoming:"WY",
+  "district of columbia":"DC"
+};
+
+// Normalize a city/location string for grouping: strip zip, abbreviate state, title-case
+function normalizeLocation(text) {
+  if (!text) return "";
+  // Strip trailing zip codes (5 or 5+4 digit)
+  let s = text.trim().replace(/\s+\d{5}(-\d{4})?$/, "").trim();
+  // Replace full state names with abbreviations
+  for (const [name, abbr] of Object.entries(STATE_ABBREVS)) {
+    const re = new RegExp(`(,\\s*)${name}$`, "i");
+    if (re.test(s)) { s = s.replace(re, `$1${abbr}`); break; }
+  }
+  // Normalize case: "new york" → "New York"
+  s = s.replace(/\b\w+/g, w => w.length <= 2 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+  // Fix state abbr casing after comma
+  s = s.replace(/,\s*([a-z]{2})$/i, (_, st) => `, ${st.toUpperCase()}`);
+  return s;
+}
+
 function normalizePort(text) {
   if (!text) return "";
   const lower = text.trim().toLowerCase();
+  // Strip zip for matching: "new york, ny 01887" → "new york, ny"
+  const noZip = lower.replace(/\s+\d{5}(-\d{4})?$/, "").trim();
+  if (PORT_CLUSTERS[noZip]) return PORT_CLUSTERS[noZip];
   if (PORT_CLUSTERS[lower]) return PORT_CLUSTERS[lower];
-  // Substring match
-  const entries = Object.entries(PORT_CLUSTERS).sort((a, b) => b[0].length - a[0].length);
-  for (const [alias, cluster] of entries) {
-    if (lower.includes(alias)) return cluster;
+  // Substring match — but skip if text contains a US state suffix (e.g. "Wilmington, MA" is NOT a port)
+  const hasStateSuffix = /,\s*[A-Za-z]{2,}\s*(\d{5}(-\d{4})?)?$/.test(text.trim()) || Object.keys(STATE_ABBREVS).some(st => noZip.includes(`, ${st}`));
+  if (!hasStateSuffix) {
+    const entries = Object.entries(PORT_CLUSTERS).sort((a, b) => b[0].length - a[0].length);
+    for (const [alias, cluster] of entries) {
+      if (lower.includes(alias)) return cluster;
+    }
   }
-  return text.trim();
+  return normalizeLocation(text);
 }
 
 // ── History Tab Content (rate history by port group) ──
@@ -756,12 +793,14 @@ export default function RateIQView() {
     });
   }, [dirCarriers, dirSearch, dirMarket, dirCaps, dirHideDnu, dirPort, portGroups]);
 
-  // ── Group lane results by origin → destination ──
+  // ── Group lane results by origin → destination (normalized) ──
   const groupedLanes = useMemo(() => {
     const map = {};
     (Array.isArray(laneResults) ? laneResults : []).forEach(r => {
-      const key = `${r.port || ""} → ${r.destination || ""}`;
-      if (!map[key]) map[key] = { port: r.port, destination: r.destination, carriers: [], minRate: Infinity, maxRate: 0, total: 0, count: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
+      const normOrigin = normalizePort(r.port || "");
+      const normDest = normalizePort(r.destination || "");
+      const key = `${normOrigin} → ${normDest}`;
+      if (!map[key]) map[key] = { port: normOrigin, destination: normDest, carriers: [], minRate: Infinity, maxRate: 0, total: 0, count: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
       map[key].carriers.push(r);
       if (!map[key].miles && r.miles) map[key].miles = r.miles;
       if (!map[key].origin_zip && r.origin_zip) map[key].origin_zip = r.origin_zip;
