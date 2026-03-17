@@ -16,7 +16,7 @@ import DocIndicators from "../components/DocIndicators";
 import TrackingBadge from "../components/TrackingBadge";
 import TerminalBadge from "../components/TerminalBadge";
 
-export default function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, repProfiles, onProfileUpdate, trackingSummary, docSummary, inboxThreads, onNavigateInbox, onAddLoad, onRefresh }) {
+export default function RepDashboardView({ repName, shipments, onBack, handleStatusUpdate, handleLoadClick, handleFieldUpdate, handleMetadataUpdate, handleDriverFieldUpdate, handleDeleteLoad, repProfiles, onProfileUpdate, trackingSummary, docSummary, inboxThreads, onNavigateInbox, onAddLoad, onRefresh }) {
   const highlightedEfj = useAppStore(s => s.highlightedEfj);
   const [expandedAccount, setExpandedAccount] = useState(null);
   const [bovietTab, setBovietTab] = useState("All");
@@ -34,6 +34,8 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   const [needsReplyOpen, setNeedsReplyOpen] = useState(false);
   const [puDateFilter, setPuDateFilter] = useState("");
   const [delDateFilter, setDelDateFilter] = useState("");
+  const [deleteConfirmEfj, setDeleteConfirmEfj] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Auto-default to FTL view for Boviet/Tolead
   useEffect(() => {
@@ -327,11 +329,26 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                 return (
                   <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
                     style={{ cursor: "default", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : rowBg }}>
-                    {/* Open slide-over button */}
-                    <td style={{ ...tdBase, padding: "5px 4px", width: 24, textAlign: "center" }}>
-                      <button onClick={() => handleLoadClick(s)} title="Open details"
-                        style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
-                        onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
+                    {/* Open slide-over + delete buttons */}
+                    <td style={{ ...tdBase, padding: "5px 4px", width: 52, textAlign: "center" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}>
+                        <button onClick={() => handleLoadClick(s)} title="Open details"
+                          style={{ background: "rgba(0,184,212,0.06)", border: "1px solid rgba(0,184,212,0.12)", color: "#00b8d4", cursor: "pointer", padding: "3px 5px", borderRadius: 6, lineHeight: 1, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                          onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,184,212,0.18)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.4)"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,184,212,0.06)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.12)"; }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M14 9l3 3-3 3" />
+                          </svg>
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmEfj(s.efj); }} title="Delete load"
+                          style={{ background: "transparent", border: "1px solid transparent", color: "#EF4444", cursor: "pointer", padding: "3px 4px", borderRadius: 6, lineHeight: 1, opacity: 0.35, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                          onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.1)"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.opacity = "1"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.opacity = "0.35"; }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
+                        </button>
+                      </div>
                     </td>
                     {/* EFJ # (inline-editable) */}
                     <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("efj"); setInlineEditValue(s.efj || ""); }}>
@@ -905,11 +922,26 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                   return (
                     <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
                       style={{ cursor: "default", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : (repDrayMarginPct !== null && repDrayMarginPct < 10 ? "rgba(239,68,68,0.10)" : undefined) }}>
-                      {/* Open slide-over button */}
-                      <td style={{ padding: "5px 4px", width: 24, textAlign: "center" }}>
-                        <button onClick={() => handleLoadClick(s)} title="Open details"
-                          style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
-                          onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
+                      {/* Open slide-over + delete buttons */}
+                      <td style={{ padding: "5px 4px", width: 52, textAlign: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}>
+                          <button onClick={() => handleLoadClick(s)} title="Open details"
+                            style={{ background: "rgba(0,184,212,0.06)", border: "1px solid rgba(0,184,212,0.12)", color: "#00b8d4", cursor: "pointer", padding: "3px 5px", borderRadius: 6, lineHeight: 1, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,184,212,0.18)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.4)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,184,212,0.06)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.12)"; }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M14 9l3 3-3 3" />
+                            </svg>
+                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmEfj(s.efj); }} title="Delete load"
+                            style={{ background: "transparent", border: "1px solid transparent", color: "#EF4444", cursor: "pointer", padding: "3px 4px", borderRadius: 6, lineHeight: 1, opacity: 0.35, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.1)"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.opacity = "1"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.opacity = "0.35"; }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            </svg>
+                          </button>
+                        </div>
                       </td>
                       <td style={{ padding: "8px 14px" }} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("efj"); setInlineEditValue(s.efj || ""); }}>
                         {isEditing && inlineEditField === "efj" ? (
@@ -1127,11 +1159,26 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                   return (
                     <tr key={s.id} className={`row-hover${highlightedEfj === s.efj ? " row-highlight-pulse" : ""}`}
                       style={{ cursor: "default", borderBottom: "1px solid rgba(255,255,255,0.02)", background: highlightedEfj === s.efj ? undefined : (repFtlMarginPct !== null && repFtlMarginPct < 10 ? "rgba(239,68,68,0.10)" : undefined) }}>
-                      {/* Open slide-over button */}
-                      <td style={{ padding: "5px 4px", width: 24, textAlign: "center" }}>
-                        <button onClick={() => handleLoadClick(s)} title="Open details"
-                          style={{ background: "none", border: "none", color: "#5A6478", cursor: "pointer", fontSize: 13, padding: "2px 4px", borderRadius: 4, lineHeight: 1, fontFamily: "inherit" }}
-                          onMouseEnter={e => e.currentTarget.style.color = "#00D4AA"} onMouseLeave={e => e.currentTarget.style.color = "#5A6478"}>{"\u203A"}</button>
+                      {/* Open slide-over + delete buttons */}
+                      <td style={{ padding: "5px 4px", width: 52, textAlign: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}>
+                          <button onClick={() => handleLoadClick(s)} title="Open details"
+                            style={{ background: "rgba(0,184,212,0.06)", border: "1px solid rgba(0,184,212,0.12)", color: "#00b8d4", cursor: "pointer", padding: "3px 5px", borderRadius: 6, lineHeight: 1, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,184,212,0.18)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.4)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,184,212,0.06)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.12)"; }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M14 9l3 3-3 3" />
+                            </svg>
+                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmEfj(s.efj); }} title="Delete load"
+                            style={{ background: "transparent", border: "1px solid transparent", color: "#EF4444", cursor: "pointer", padding: "3px 4px", borderRadius: 6, lineHeight: 1, opacity: 0.35, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.1)"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.opacity = "1"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.opacity = "0.35"; }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            </svg>
+                          </button>
+                        </div>
                       </td>
                       {/* EFJ (inline-editable) */}
                       <td style={{ padding: "8px 14px" }}
@@ -1326,6 +1373,29 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
           )}
         </div>
       </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteConfirmEfj && (
+        <div style={{ position: "fixed", inset: 0, zIndex: Z.panel + 20, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div onClick={() => setDeleteConfirmEfj(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)" }} />
+          <div style={{ position: "relative", background: "#1A2236", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 14, padding: "24px 28px", maxWidth: 380, width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#F0F2F5", marginBottom: 8 }}>Delete Load?</div>
+            <div style={{ fontSize: 12, color: "#8B95A8", marginBottom: 18, lineHeight: 1.5 }}>
+              Are you sure you want to delete <span style={{ color: "#F0F2F5", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{deleteConfirmEfj}</span>? This will remove it from the dashboard and Google Sheet.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setDeleteConfirmEfj(null)} disabled={deleteLoading}
+                style={{ flex: 1, padding: "9px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.04)", color: "#8B95A8", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                Cancel
+              </button>
+              <button onClick={async () => { setDeleteLoading(true); try { await handleDeleteLoad(deleteConfirmEfj); setDeleteConfirmEfj(null); } catch (err) { alert(`Delete failed: ${err.message}`); } setDeleteLoading(false); }} disabled={deleteLoading}
+                style={{ flex: 1, padding: "9px", borderRadius: 8, border: "none", background: deleteLoading ? "#7f1d1d" : "#EF4444", color: "#fff", fontSize: 12, fontWeight: 700, cursor: deleteLoading ? "wait" : "pointer", fontFamily: "inherit" }}>
+                {deleteLoading ? "Deleting..." : "Yes, Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

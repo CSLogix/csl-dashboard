@@ -535,6 +535,14 @@ export default function DispatchDashboard() {
     }
   };
 
+  // Delete load — shared by DispatchView and RepDashboardView
+  const handleDeleteLoad = useCallback(async (efj) => {
+    const res = await apiFetch(`${API_BASE}/api/v2/load/${efj}`, { method: "DELETE" });
+    if (!res.ok) { const txt = await res.text(); throw new Error(txt); }
+    addSheetLog(`Deleted load | ${efj}`);
+    setShipments(prev => prev.filter(s => s.efj !== efj));
+  }, [addSheetLog]);
+
   // Inline metadata update — writes to Postgres via POST /api/v2/load/{efj}/update
   const META_TO_PG = { truckType: "equipment_type", customerRate: "customer_rate", carrierPay: "carrier_pay", notes: "notes" };
   const FIELD_LABELS = { customerRate: "Customer Rate", carrierPay: "Carrier Pay", notes: "Notes", truckType: "Equipment" };
@@ -932,7 +940,7 @@ export default function DispatchDashboard() {
             <RepDashboardView repName={selectedRep} shipments={shipments} onBack={goBackFromRep}
               handleStatusUpdate={handleStatusUpdate} handleLoadClick={handleLoadClick}
               handleFieldUpdate={handleFieldUpdate} handleMetadataUpdate={handleMetadataUpdate}
-              handleDriverFieldUpdate={handleDriverFieldUpdate}
+              handleDriverFieldUpdate={handleDriverFieldUpdate} handleDeleteLoad={handleDeleteLoad}
               repProfiles={repProfiles} onProfileUpdate={fetchProfiles}
               trackingSummary={trackingSummary} docSummary={docSummary}
               inboxThreads={inboxThreads}
