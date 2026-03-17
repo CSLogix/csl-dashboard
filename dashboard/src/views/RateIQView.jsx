@@ -801,6 +801,7 @@ export default function RateIQView() {
     const capDef = CAP_OPTIONS.find(c => c.key === field);
     const updates = { [field]: value };
     if (capDef?.sync) updates[capDef.sync] = value;
+    const snapshot = dirCarriers;
     setDirCarriers(prev => prev.map(c => c.id === carrierId ? { ...c, ...updates } : c));
     try {
       const r = await apiFetch(`${API_BASE}/api/carriers/${carrierId}`, {
@@ -808,7 +809,10 @@ export default function RateIQView() {
         body: JSON.stringify(updates),
       });
       if (!r.ok) throw new Error(r.status);
-    } catch (e) { console.error("Carrier update failed:", e); }
+    } catch (e) {
+      console.error("Carrier update failed:", e);
+      setDirCarriers(snapshot);
+    }
   };
 
   // ── API: Add carrier ──
