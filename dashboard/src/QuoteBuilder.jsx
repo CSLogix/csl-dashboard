@@ -51,24 +51,24 @@ const DEFAULT_TERMS = [
 ];
 
 // ════════════════════════════════════════════════════════════
-// ─── Quote Preview Card (customer-facing) ───
+// ─── Quote Preview Card (customer-facing, screenshot-optimized) ───
 // ════════════════════════════════════════════════════════════
 function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, terms, quoteNumber, shipmentType }) {
   const margin = parseNum(marginPct) / 100;
   const flatMarkup = marginType === "flat" ? parseNum(marginPct) : 0;
   const isRoundTrip = shipmentType === "Dray";
 
-  // Build route data for card — format-specific labels (always show rows, "—" if empty)
+  // Route info rows (only show rows that have values — keeps it tight)
   const routeRows = [];
   routeRows.push({ label: isRoundTrip ? "POD" : "Port / Origin", value: route.pod || "—" });
   routeRows.push({ label: "Delivery Destination", value: route.finalDelivery || "—" });
-  routeRows.push({ label: isRoundTrip ? "R/T Mileage" : "One-Way Mileage", value: (isRoundTrip ? route.roundTripMiles : route.oneWayMiles) || "—" });
-  // Dray: show drive hours rounded up to nearest 15 min. FTL/other: show day-range string.
-  let transitDisplay = "—";
+  const mileVal = (isRoundTrip ? route.roundTripMiles : route.oneWayMiles) || "";
+  if (mileVal) routeRows.push({ label: isRoundTrip ? "R/T Mileage" : "One-Way Mileage", value: mileVal });
+  let transitDisplay = "";
   if (isRoundTrip && route.durationHours) {
     const h = parseFloat(route.durationHours);
     if (!isNaN(h)) {
-      const rounded = Math.ceil(h * 4) / 4; // round up to nearest 0.25 hr
+      const rounded = Math.ceil(h * 4) / 4;
       const hrs = Math.floor(rounded);
       const mins = Math.round((rounded - hrs) * 60);
       transitDisplay = mins > 0 ? `${hrs} hr ${mins} min` : `${hrs} hr`;
@@ -76,64 +76,58 @@ function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, te
   } else if (route.transitTime) {
     transitDisplay = route.transitTime;
   }
-  routeRows.push({ label: "Transit Time (One-Way)", value: transitDisplay });
+  if (transitDisplay) routeRows.push({ label: "Transit Time (One-Way)", value: transitDisplay });
 
-  // Group linehaul by section with margin applied
+  // Linehaul charges grouped by section with margin
   const lhBySection = {};
   linehaul.filter(r => r.description && parseNum(r.rate) > 0).forEach(r => {
     const sec = r.section || "Charges";
     if (!lhBySection[sec]) lhBySection[sec] = [];
     const base = parseNum(r.rate);
     const sell = marginType === "flat" ? base + flatMarkup : base * (1 + margin);
-    lhBySection[sec].push({
-      desc: r.description,
-      rate: fmt(sell),
-    });
+    lhBySection[sec].push({ desc: r.description, rate: sell });
   });
   const sellSubtotal = linehaul.reduce((sum, r) => {
     const base = parseNum(r.rate);
     return sum + (marginType === "flat" ? base + flatMarkup : base * (1 + margin));
   }, 0);
 
-  // All accessorials with amounts show on preview; only checked ones count toward total
+  // Accessorials — all with amounts show; only checked count toward total
   const accRows = accessorials.filter(a => parseNum(a.amount) > 0).map(a => ({
     desc: a.charge + (a.frequency && a.frequency !== "flat" ? ` ${a.frequency}` : ""),
-    rate: fmt(parseNum(a.amount)),
+    rate: parseNum(a.amount),
     included: a.checked,
   }));
   const accTotal = accessorials.filter(a => a.checked).reduce((sum, a) => sum + parseNum(a.amount), 0);
   const total = sellSubtotal + accTotal;
 
-  // Build sections — linehaul groups first, then accessorials
-  const sections = [];
-  Object.entries(lhBySection).forEach(([title, rows]) => {
-    sections.push({ title: title.toUpperCase(), rows });
-  });
-  if (accRows.length > 0) sections.push({ title: "ACCESSORIAL CHARGES", rows: accRows });
+  // ── Styles (CSL brand: dark bg, green/teal accents, tight & clean for screenshots) ──
+  const borderColor = "rgba(255,255,255,0.06)";
+  const cellBorder = `1px solid ${borderColor}`;
+  const accentGreen = "#00D4AA";
 
-  const cellLabel = { padding: "8px 20px", fontSize: 13.5, fontWeight: 700, color: "rgba(255,255,255,0.85)", borderBottom: "1px solid rgba(255,255,255,0.04)" };
-  const cellValue = { padding: "8px 20px", fontSize: 13.5, fontWeight: 700, color: "#fff", textAlign: "right", borderBottom: "1px solid rgba(255,255,255,0.04)" };
-  const sectionHead = (left) => ({ padding: "9px 20px", fontSize: 12, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", textAlign: left ? "left" : "right", background: "rgba(0,200,83,0.06)", borderTop: "2px solid", borderImage: grad + " 1", backgroundClip: "text", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundImage: grad });
-  const rowL = { padding: "8px 20px", fontSize: 13.5, fontWeight: 500, color: "rgba(255,255,255,0.7)", borderBottom: "1px solid rgba(255,255,255,0.04)" };
-  const rowR = { padding: "8px 20px", fontSize: 13.5, color: "#fff", fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums", borderBottom: "1px solid rgba(255,255,255,0.04)" };
-  const totalL = { padding: "14px 20px", fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", borderTop: "2px solid", borderImage: grad + " 1", background: "rgba(0,200,83,0.04)", backgroundClip: "text", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundImage: grad, verticalAlign: "middle" };
-  const totalR = { padding: "14px 20px", fontSize: 24, fontWeight: 800, textAlign: "right", borderTop: "2px solid", borderImage: grad + " 1", background: "rgba(0,200,83,0.04)", fontVariantNumeric: "tabular-nums", backgroundClip: "text", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundImage: grad, verticalAlign: "middle" };
+  const routeLabel = { padding: "7px 18px", fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.55)", borderBottom: cellBorder, width: "55%" };
+  const routeValue = { padding: "7px 18px", fontSize: 13, fontWeight: 700, color: "#F0F2F5", textAlign: "right", borderBottom: cellBorder };
+  const sectionHeaderL = { padding: "8px 18px", fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", backgroundClip: "text", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundImage: grad, background: grad, borderBottom: cellBorder, borderTop: `2px solid`, borderImage: grad + " 1" };
+  const sectionHeaderR = { padding: "8px 18px", fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", textAlign: "right", backgroundClip: "text", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundImage: grad, background: grad, borderBottom: cellBorder, borderTop: `2px solid`, borderImage: grad + " 1" };
+  const chargeL = { padding: "6px 18px", fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.7)", borderBottom: cellBorder };
+  const chargeR = { padding: "6px 18px", fontSize: 13, fontWeight: 700, color: "#F0F2F5", textAlign: "right", fontVariantNumeric: "tabular-nums", borderBottom: cellBorder };
 
   return (
     <div id="quote-preview-card" style={{ width: "100%", maxWidth: 520 }}>
       <table cellPadding={0} cellSpacing={0} style={{ fontFamily: "'Segoe UI', -apple-system, sans-serif", width: "100%", background: "#0f1215", borderRadius: 10, overflow: "hidden", borderCollapse: "collapse", color: "#fff" }}>
         <tbody>
-          {/* Header */}
+          {/* ── Header: CSL branding ── */}
           <tr>
-            <td colSpan={2} style={{ padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <td colSpan={2} style={{ padding: "14px 18px", borderBottom: `2px solid`, borderImage: grad + " 1" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <img src="/logo.svg" alt="CSL" style={{ height: 64, width: 64, objectFit: "contain", flexShrink: 0 }} />
+                <img src="/logo.svg" alt="CSL" style={{ height: 52, width: 52, objectFit: "contain", flexShrink: 0 }} />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "0.01em" }}>Common Sense Logistics</div>
-                  <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.35)", fontWeight: 500, marginTop: 1 }}>Evans Delivery Company</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: "#F0F2F5", letterSpacing: "0.01em" }}>Common Sense Logistics</div>
+                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontWeight: 600, marginTop: 1 }}>Evans Delivery Company</div>
                 </div>
                 {quoteNumber && (
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, textAlign: "right" }}>
+                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 600, textAlign: "right", fontFamily: "'JetBrains Mono', monospace" }}>
                     {quoteNumber}
                   </div>
                 )}
@@ -141,33 +135,42 @@ function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, te
             </td>
           </tr>
 
-          {/* Route Info */}
+          {/* ── Route Info ── */}
           {routeRows.map((row, i) => (
-            <tr key={i}><td style={cellLabel}>{row.label}</td><td style={cellValue}>{row.value}</td></tr>
+            <tr key={i}><td style={routeLabel}>{row.label}</td><td style={routeValue}>{row.value}</td></tr>
           ))}
 
-          {routeRows.length > 0 && <tr><td colSpan={2} style={{ height: 10 }} /></tr>}
-
-          {/* Sections */}
-          {sections.map((section, si) => (
-            <Fragment key={si}>
-              <tr><td style={sectionHead(true)}>{section.title}</td><td style={sectionHead(false)}>Rate</td></tr>
-              {section.rows.map((row, ri) => (
-                <tr key={ri}>
-                  <td style={rowL}>{row.desc}</td>
-                  <td style={rowR}>{row.rate}</td>
-                </tr>
+          {/* ── Charges sections ── */}
+          {Object.entries(lhBySection).map(([title, rows]) => (
+            <Fragment key={title}>
+              <tr><td style={sectionHeaderL}>{title}</td><td style={sectionHeaderR}>Rate</td></tr>
+              {rows.map((row, ri) => (
+                <tr key={ri}><td style={chargeL}>{row.desc}</td><td style={chargeR}>{fmt(row.rate)}</td></tr>
               ))}
             </Fragment>
           ))}
 
-          {/* Total */}
+          {/* ── Accessorial Charges ── */}
+          {accRows.length > 0 && (
+            <Fragment>
+              <tr><td style={sectionHeaderL}>Accessorial Charges</td><td style={sectionHeaderR}>Rate</td></tr>
+              {accRows.map((row, ri) => (
+                <tr key={ri}><td style={chargeL}>{row.desc}</td><td style={chargeR}>{fmt(row.rate)}</td></tr>
+              ))}
+            </Fragment>
+          )}
+
+          {/* ── Estimate Invoice Total ── */}
           <tr>
-            <td style={totalL}>Estimated Total Invoice</td>
-            <td style={totalR}>{fmt(total)}</td>
+            <td style={{ padding: "14px 18px", fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", borderTop: "2px solid", borderImage: grad + " 1", backgroundClip: "text", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundImage: grad, verticalAlign: "middle" }}>
+              Estimate Invoice
+            </td>
+            <td style={{ padding: "14px 18px", fontSize: 24, fontWeight: 800, textAlign: "right", borderTop: "2px solid", borderImage: grad + " 1", fontVariantNumeric: "tabular-nums", backgroundClip: "text", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundImage: grad, verticalAlign: "middle" }}>
+              {fmt(total)}
+            </td>
           </tr>
 
-          {/* Footer gradient */}
+          {/* ── Footer gradient bar ── */}
           <tr><td colSpan={2} style={{ height: 3, background: grad }} /></tr>
         </tbody>
       </table>
