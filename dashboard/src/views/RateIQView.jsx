@@ -2627,13 +2627,13 @@ export default function RateIQView() {
                                   {c.trucks && <div style={{ textAlign: "center", minWidth: 28, flexShrink: 0 }}><div style={{ fontSize: 11, fontWeight: 800, color: "#F0F2F5" }}>{c.trucks}</div><div style={{ fontSize: 7, color: "#5A6478" }}>TRUCKS</div></div>}
                                   <span style={{ color: "#5A6478", fontSize: 10, transform: isExp ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.15s", flexShrink: 0 }}>▼</span>
                                 </div>
-                                {/* Expanded detail — reuse flat list expand logic */}
+                                {/* Expanded detail — full edit panel */}
                                 {isExp && (() => {
                                   const isEdit = editingCarrierId === c.id;
+                                  const iStyle = { width: "100%", padding: "3px 6px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 11, fontFamily: "inherit", outline: "none", boxSizing: "border-box" };
                                   const editInput = (label, field, opts = {}) => {
                                     const val = c[field] || "";
                                     if (!isEdit && !val) return null;
-                                    const iStyle = { width: "100%", padding: "3px 6px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 11, fontFamily: "inherit", outline: "none", boxSizing: "border-box" };
                                     return (
                                       <div style={{ fontSize: 11, marginBottom: 4 }}>
                                         <span style={{ color: "#5A6478" }}>{label}: </span>
@@ -2652,22 +2652,90 @@ export default function RateIQView() {
                                     );
                                   };
                                   return (
-                                    <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", padding: "10px 18px 10px 64px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, background: "rgba(0,0,0,0.1)" }}>
-                                      <div>
-                                        {editInput("Email", "contact_email", { color: "#00D4AA", copyable: true })}
-                                        {editInput("Phone", "contact_phone")}
-                                        {editInput("Equipment", "equipment_types")}
+                                    <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", padding: "12px 18px 12px 64px", background: "rgba(0,0,0,0.1)" }}>
+                                      {/* Capability badges (editable in edit mode) */}
+                                      {isEdit && (
+                                        <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
+                                          {CAP_OPTIONS.map(cap => (
+                                            <span key={cap.key} onClick={e => { e.stopPropagation(); handleCarrierUpdate(c.id, cap.key, !c[cap.key]); }}
+                                              style={{ padding: "1px 7px", borderRadius: 4, fontSize: 8, fontWeight: 700, cursor: "pointer", transition: "all 0.15s",
+                                                background: c[cap.key] ? cap.color + "18" : "rgba(255,255,255,0.02)", color: c[cap.key] ? cap.color : "#3D4557",
+                                                border: `1px solid ${c[cap.key] ? cap.color + "30" : "rgba(255,255,255,0.06)"}` }}>{cap.label}</span>
+                                          ))}
+                                        </div>
+                                      )}
+                                      {/* Tier selector + trucks (in edit mode) */}
+                                      {isEdit && (
+                                        <div style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "center" }}>
+                                          <div style={{ fontSize: 11 }}>
+                                            <span style={{ color: "#5A6478" }}>Tier: </span>
+                                            <select value={c.tier_rank ?? ""} onClick={e => e.stopPropagation()}
+                                              onChange={e => { const v = e.target.value === "" ? null : parseInt(e.target.value); handleCarrierUpdate(c.id, "tier_rank", v); if (v === 0) handleCarrierUpdate(c.id, "dnu", true); else if (c.dnu) handleCarrierUpdate(c.id, "dnu", false); }}
+                                              style={{ padding: "2px 6px", borderRadius: 4, fontSize: 11, background: "#151926", color: tier.color, border: `1px solid ${tier.color}30`, cursor: "pointer", fontFamily: "inherit" }}>
+                                              <option value="">Unranked</option>
+                                              <option value="1">Tier 1</option>
+                                              <option value="2">Tier 2</option>
+                                              <option value="3">Tier 3</option>
+                                              <option value="0">DNU</option>
+                                            </select>
+                                          </div>
+                                          <div style={{ fontSize: 11 }}>
+                                            <span style={{ color: "#5A6478" }}>Trucks: </span>
+                                            <input type="number" defaultValue={c.trucks || ""} key={c.trucks} onClick={e => e.stopPropagation()}
+                                              onBlur={e => { const v = e.target.value.trim(); const n = v ? parseInt(v) : null; if (n !== c.trucks) handleCarrierUpdate(c.id, "trucks", n); }}
+                                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                                              placeholder="0" style={{ width: 50, padding: "2px 6px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+                                          </div>
+                                        </div>
+                                      )}
+                                      {/* Market badges */}
+                                      {(c.markets || []).length > 0 && (
+                                        <div style={{ display: "flex", gap: 3, marginBottom: 8, flexWrap: "wrap" }}>
+                                          {c.markets.map(m => (
+                                            <span key={m} style={{ padding: "2px 6px", borderRadius: 4, fontSize: 8, fontWeight: 600, background: "rgba(59,130,246,0.1)", color: "#60a5fa", border: "1px solid rgba(59,130,246,0.2)" }}>{m}</span>
+                                          ))}
+                                        </div>
+                                      )}
+                                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                                        <div>
+                                          {editInput("Email", "contact_email", { color: "#00D4AA", copyable: true, placeholder: "carrier@email.com" })}
+                                          {editInput("Phone", "contact_phone", { placeholder: "555-123-4567" })}
+                                          {editInput("MC#", "mc_number", { placeholder: "MC number" })}
+                                          {editInput("Equipment", "equipment_types", { placeholder: "Dry Van, Flatbed..." })}
+                                          {editInput("Insurance", "insurance_info", { placeholder: "Insurance details" })}
+                                        </div>
+                                        <div>
+                                          {editInput("Feedback", "service_feedback", { placeholder: "Good Rates, Reliable..." })}
+                                          {editInput("Notes", "service_notes", { placeholder: "Operational notes" })}
+                                          {editInput("Record", "service_record", { placeholder: "Worked with Previously" })}
+                                          {editInput("Comments", "comments", { color: c.dnu ? "#f87171" : "#C8D0DC", placeholder: "General comments" })}
+                                        </div>
                                       </div>
-                                      <div>
-                                        {editInput("Feedback", "service_feedback")}
-                                        {editInput("Notes", "service_notes")}
-                                        {editInput("Comments", "comments", { color: c.dnu ? "#f87171" : "#C8D0DC" })}
-                                      </div>
-                                      <div style={{ gridColumn: "1 / -1", display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 8 }}>
                                         <button onClick={e => { e.stopPropagation(); setEditingCarrierId(isEdit ? null : c.id); }}
                                           style={{ padding: "3px 10px", borderRadius: 5, border: isEdit ? "1px solid rgba(0,212,170,0.3)" : "1px solid rgba(255,255,255,0.06)", background: "transparent", color: isEdit ? "#00D4AA" : "#5A6478", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>
                                           {isEdit ? "Done" : "Edit"}
                                         </button>
+                                        {isEdit && (
+                                          deleteConfirm === c.id ? (
+                                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                              <span style={{ fontSize: 10, color: "#f87171" }}>Delete?</span>
+                                              <button onClick={e => { e.stopPropagation(); handleDeleteCarrier(c.id); }}
+                                                style={{ padding: "3px 10px", borderRadius: 5, border: "1px solid rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.15)", color: "#f87171", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                                                Confirm
+                                              </button>
+                                              <button onClick={e => { e.stopPropagation(); setDeleteConfirm(null); }}
+                                                style={{ padding: "3px 10px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>
+                                                Cancel
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <button onClick={e => { e.stopPropagation(); setDeleteConfirm(c.id); }}
+                                              style={{ padding: "3px 10px", borderRadius: 5, border: "1px solid rgba(239,68,68,0.2)", background: "transparent", color: "#f87171", fontSize: 10, cursor: "pointer", fontFamily: "inherit", opacity: 0.7 }}>
+                                              Delete
+                                            </button>
+                                          )
+                                        )}
                                       </div>
                                     </div>
                                   );
