@@ -9,6 +9,7 @@ import { fmt } from './constants';
  *   - rates?: Array<{ date?: string, terminal?: string, base?: number, fsc_pct?: number, total?: number }>
  * @param {number} carrierAvg - Carrier average used to compute the delta against `stats.avg`.
  * @returns {JSX.Element|null} A Market Benchmark card element, or `null` when `benchmark.stats` is not provided.
+ */
 export default function MarketBenchmarkCard({ benchmark, carrierAvg }) {
   if (!benchmark?.stats) return null;
   const { stats, rates } = benchmark;

@@ -503,26 +503,8 @@ async def api_warehouse_extract(request: Request):
 async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Query(default=None),
                               destination: str = Query(default=None),
                               move_type: str = Query(default=None)):
-    """
-                              List lane rates and recent rate quotes filtered by optional criteria.
-                              
-                              Returns a combined list of lane rate records and recent rate quotes matching the provided filters, with normalized fields and source-prefixed IDs.
-                              
-                              Parameters:
-                                  port (str | None): Partial match against lane_rates.port or rate_quotes.origin.
-                                  carrier (str | None): Partial match against carrier_name.
-                                  destination (str | None): Partial match against destination.
-                                  move_type (str | None): Exact match for move_type; pass "all" to disable move_type filtering.
-                              
-                              Returns:
-                                  dict: JSON object with:
-                                      - lane_rates (list): Array of rate objects (both lane_rates and rate_quotes) including derived fields
-                                        `dest_city`, `dest_state`, `origin_city`, and `origin_state`. Each lane_rates record has an `id`
-                                        prefixed with "lr-<id>" and each rate_quote has `id` prefixed with "rq-<id>". Rate quote entries
-                                        include an `_source` field indicating their origin.
-                                      - total (int): Number of returned records.
-                              """
-                              with db.get_cursor() as cur:
+    """List lane rates and recent rate quotes filtered by optional criteria."""
+    with db.get_cursor() as cur:
         # Query lane_rates table
         clauses, params = [], []
         if port:
