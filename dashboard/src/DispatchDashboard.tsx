@@ -9,6 +9,7 @@ import {
   STATUS_COLORS, FTL_STATUS_COLORS, BILLING_STATUS_COLORS,
   ACCOUNT_COLORS, NAV_ITEMS, REP_ACCOUNTS, ALL_REP_NAMES,
   ALERT_TYPES, Z, ALL_STATUSES_COMBINED, isPostDelivery,
+  setRepAccounts,
 } from "./helpers/constants";
 import {
   normalizeStatus, mapShipment, isFTLShipment,
@@ -139,6 +140,19 @@ export default function DispatchDashboard() {
     try {
       const res = await apiFetch(`${API_BASE}/api/team/profiles`);
       if (res.ok) { const data = await res.json(); setRepProfiles(data.profiles || {}); }
+    } catch {}
+  }, []);
+
+  // Fetch rep-account assignments (dynamic)
+  const fetchRepAccounts = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/rep-accounts`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.rep_accounts && Object.keys(data.rep_accounts).length > 0) {
+          setRepAccounts(data.rep_accounts);
+        }
+      }
     } catch {}
   }, []);
 
@@ -300,9 +314,10 @@ export default function DispatchDashboard() {
     fetchScoreboard();
     fetchAccountHealth();
     fetchEmailDrafts();
+    fetchRepAccounts();
     const fallback = setTimeout(() => setLoaded(true), 10000);
     return () => clearTimeout(fallback);
-  }, [fetchData, fetchProfiles, fetchScoreboard, fetchAccountHealth, fetchEmailDrafts]);
+  }, [fetchData, fetchProfiles, fetchScoreboard, fetchAccountHealth, fetchEmailDrafts, fetchRepAccounts]);
   useEffect(() => { const i = setInterval(fetchData, 90000); return () => clearInterval(i); }, [fetchData]);
   // Fast-poll tracking summary (30s) so MP webhook updates appear quickly in dispatch table
   useEffect(() => {

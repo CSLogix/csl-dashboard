@@ -246,16 +246,30 @@ export const NAV_ITEMS = [
 ];
 
 // ─── Rep-to-Account Mapping (from Account Rep lookup table) ───
-export const REP_ACCOUNTS = {
-  Radka: ["Allround", "Cadi", "IWS", "Kripke", "MGF", "Meiko", "Sutton", "Tanera", "TCR", "Texas International", "USHA", "MD Metal", "Prolog", "Talatrans", "LS Cargo"],
+// Default mapping — overridden at runtime by /api/rep-accounts if available
+export let REP_ACCOUNTS: Record<string, string[]> = {
+  Radka: ["Allround", "Cadi", "IWS", "Kripke", "MGF", "Meiko", "Sutton", "Tanera", "TCR", "Texas International", "USHA", "Prolog", "Talatrans", "LS Cargo"],
   "John F": ["DHL", "DSV", "EShipping", "Kishco", "MAO", "Mamata", "Rose", "SEI Acquisition", "GW-World", "Mitchell's Transport"],
   Janice: ["CNL"],
+  Allie: ["Tolead", "MD Metal"],
+  "John N": ["Boviet"],
+  Amanda: ["Boviet"],
   Boviet: ["Boviet"],
   Tolead: ["Tolead"],
 };
-export const REP_COLORS = { Radka: "#ef4444", "John F": "#10b981", Janice: "#ec4899", Boviet: "#8b5cf6", Tolead: "#06b6d4" };
-export const ALL_REP_NAMES = Object.keys(REP_ACCOUNTS);
-export const MASTER_REPS = ["Radka", "John F", "Janice"];
+export const REP_COLORS: Record<string, string> = {
+  Radka: "#ef4444", "John F": "#10b981", Janice: "#ec4899",
+  Allie: "#F59E0B", "John N": "#0891B2", Amanda: "#7C3AED",
+  Boviet: "#8b5cf6", Tolead: "#06b6d4",
+};
+export let ALL_REP_NAMES = Object.keys(REP_ACCOUNTS);
+export const MASTER_REPS = ["Radka", "John F", "Janice", "Allie", "John N", "Amanda"];
+
+/** Update REP_ACCOUNTS at runtime from backend data. */
+export function setRepAccounts(data: Record<string, string[]>) {
+  REP_ACCOUNTS = data;
+  ALL_REP_NAMES = Object.keys(data);
+}
 export const TRUCK_TYPES = ["", "53' Solo", "53' Team", "Flat Bed", "26' Box"];
 
 export const DRAY_EQUIPMENT = ["", "20'", "40' Standard", "40' HC", "40' HC Reefer", "Flatrack", "Flatrack OOG", "LCL"];
