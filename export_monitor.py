@@ -10,7 +10,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from csl_pg_writer import pg_update_shipment, pg_archive_shipment
+from csl_pg_writer import (pg_update_shipment, pg_archive_shipment,
+                          pg_load_all_export_state, pg_set_export_state,
+                          pg_delete_export_state, pg_jc_cache_get,
+                          pg_jc_cache_set, pg_ensure_tracking_tables)
 from csl_sheet_writer import sheet_update_export, sheet_archive_row
 
 SHEET_ID=os.environ["SHEET_ID"]
@@ -33,11 +36,10 @@ GATE_IN_STATUSES=["full load on rail for export","gate in full","full in","recei
 JSONCARGO_API_KEY=os.environ["JSONCARGO_API_KEY"]
 JSONCARGO_BASE="https://api.jsoncargo.com/api/v1"
 
-# -- JsonCargo API response cache (reduces monthly API calls by ~70%%) --
+# -- JsonCargo API response cache (Postgres-backed) --
 import json as _json
 import time as _time_mod
 
-_JSONCARGO_CACHE_FILE = "/root/csl-bot/jsoncargo_cache.json"
 _JSONCARGO_CACHE_TTL = 6 * 3600
 
 # ── Postgres migration: hardcoded lookups ────────────────────────────────
@@ -59,7 +61,8 @@ SSL_LINKS_PG = {
     "maersk":      "MAERSK",
     "hapag":       "HAPAG_LLOYD",
     "hapag-lloyd": "HAPAG_LLOYD",
-    "one":         "ONE",
+    "one line":    "ONE",
+    "ocean network": "ONE",
     "evergreen":   "EVERGREEN",
     "hmm":         "HMM",
     "cma cgm":     "CMA_CGM",
@@ -105,8 +108,56 @@ ACCOUNT_REPS_PG = {
 }
 
 
-def _resolve_ssl_export(vessel, carrier):
-    """Resolve SSL code from vessel/carrier text."""
+# BOL/booking prefix (first 4 chars) -> SSL code
+BOL_PREFIX_TO_SSL = {
+    "MAEU": "MAERSK", "SEAU": "MAERSK", "SGLU": "MAERSK",
+    "SUDU": "MAERSK", "MCPU": "MAERSK", "ALIU": "MAERSK", "CNIU": "MAERSK",
+    "CMDU": "CMA_CGM", "APLU": "CMA_CGM", "ACLU": "CMA_CGM",
+    "ANLC": "CMA_CGM", "CSFU": "CMA_CGM", "MCAW": "CMA_CGM",
+    "HLCU": "HAPAG_LLOYD", "UACU": "HAPAG_LLOYD",
+    "MOLU": "ONE", "KLNE": "ONE",
+    "EVRG": "EVERGREEN",
+    "HDMU": "HMM",
+    "MSCU": "MSC",
+    "COSU": "COSCO", "CHNJ": "COSCO",
+    "ZIMU": "ZIM",
+    "YMLU": "YANG_MING",
+    "SMLM": "SM_LINE",
+    "MATS": "MATSON",
+    "MWHL": "WAN_HAI", "WHLC": "WAN_HAI", "CNCX": "WAN_HAI",
+}
+
+
+def _ssl_from_bol_prefix(bol):
+    """
+    Determine an SSL code from a bill-of-lading or booking identifier by inspecting its first four characters.
+    
+    Parameters:
+        bol (str): Bill-of-lading or booking identifier; may include surrounding whitespace.
+    
+    Returns:
+        str or None: SSL code corresponding to the identifier's 4-character prefix, or None if the identifier is missing, too short, or has no matching SSL.
+    """
+    if not bol or len(bol.strip()) < 5:
+        return None
+    prefix = bol.strip()[:4].upper()
+    return BOL_PREFIX_TO_SSL.get(prefix)
+
+
+def _resolve_ssl_export(vessel, carrier, bol=""):
+    """
+    Determine the shipping line (SSL) code from vessel or carrier text, falling back to a BOL prefix when provided.
+    
+    Checks vessel and carrier strings against the SSL_LINKS_PG mappings (exact match, substring, and word-start heuristics). If no match is found and a BOL/booking string is supplied, attempts to derive the SSL from the BOL prefix.
+    
+    Parameters:
+        vessel (str): Vessel name or description to inspect.
+        carrier (str): Carrier name or description to inspect.
+        bol (str): Bill-of-lading or booking identifier used as a fallback source for SSL detection.
+    
+    Returns:
+        ssl_code (str | None): The detected SSL code from SSL_LINKS_PG, or `None` if no match is found.
+    """
     for text in (vessel or "", carrier or ""):
         val = text.strip().lower()
         if not val:
@@ -119,36 +170,36 @@ def _resolve_ssl_export(vessel, carrier):
         for key, code in SSL_LINKS_PG.items():
             if any(w.startswith(key) for w in val.split()):
                 return code
+    # Fallback: detect from BOL prefix (e.g. MAEU2814354 -> MAERSK)
+    if bol:
+        detected = _ssl_from_bol_prefix(bol)
+        if detected:
+            print(f"    Auto-detected SSL from BOL prefix: {bol[:4]} -> {detected}")
+            return detected
     return None
 
-
-def _load_jc_cache():
-    try:
-        with open(_JSONCARGO_CACHE_FILE, "r") as f:
-            return _json.load(f)
-    except Exception:
-        return {}
-
-def _save_jc_cache(cache):
-    try:
-        with open(_JSONCARGO_CACHE_FILE, "w") as f:
-            _json.dump(cache, f)
-    except Exception as e:
-        print(f"    Cache save error: {e}")
 
 def _jc_cache_get(container_num):
-    cache = _load_jc_cache()
-    entry = cache.get(container_num)
-    if entry and (_time_mod.time() - entry.get("ts", 0)) < _JSONCARGO_CACHE_TTL:
-        return entry.get("data")
-    return None
+    """
+    Get JsonCargo cache entry for a container from the Postgres-backed cache using the module's TTL.
+    
+    Parameters:
+        container_num (str): Container number to look up.
+    
+    Returns:
+        The cached JsonCargo response for `container_num` if present and not expired, otherwise `None`.
+    """
+    return pg_jc_cache_get(container_num, _JSONCARGO_CACHE_TTL)
 
 def _jc_cache_set(container_num, data):
-    cache = _load_jc_cache()
-    cache[container_num] = {"ts": _time_mod.time(), "data": data}
-    cutoff = _time_mod.time() - 48 * 3600
-    cache = {k: v for k, v in cache.items() if v.get("ts", 0) > cutoff}
-    _save_jc_cache(cache)
+    """
+    Store JsonCargo lookup results in the Postgres-backed JsonCargo cache for a container.
+    
+    Parameters:
+        container_num (str): Container number used as the cache key.
+        data (Any): JSON-serializable lookup result or tracking payload to persist.
+    """
+    pg_jc_cache_set(container_num, data)
 
 SSL_LINKS_TAB="SSL Links"
 
@@ -173,29 +224,43 @@ def load_ssl_links(creds):
         return {}
 
 def _load_credentials():
+    """
+    Load Google service account credentials from the configured service account file and ensure the access token is fresh.
+    
+    Returns:
+        creds (google.oauth2.service_account.Credentials): Service account credentials initialized with SCOPES and refreshed for immediate use.
+    """
     creds=Credentials.from_service_account_file(CREDENTIALS_FILE,scopes=SCOPES)
     creds.refresh(GoogleRequest())
     return creds
 
 def load_state():
+    """
+    Load persisted export tracking state, preferring the Postgres-backed store and falling back to a legacy local JSON file if Postgres has no data.
+    
+    Returns:
+        state (dict): Mapping of per-export keys to their persisted state; empty dict if no persisted state is found.
+    """
+    state = pg_load_all_export_state()
+    if state:
+        return state
+    # Fallback: try legacy JSON file if PG returned empty (first run after migration)
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE) as f: return json.load(f)
         except: pass
     return {}
 
-def save_state(data):
-    try:
-        import shutil
-        if os.path.exists(STATE_FILE):
-            shutil.copy2(STATE_FILE, STATE_FILE + '.bak')
-        tmp = STATE_FILE + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, STATE_FILE)
-    except Exception as e: print(f'  WARNING: {e}')
-
 def load_account_lookup(creds):
+    """
+    Load account representative lookup mapping from the Account Rep sheet.
+    
+    Parameters:
+        creds: Google service account credentials used to access the spreadsheet.
+    
+    Returns:
+        dict: Mapping from account identifier (str) to a dict with keys "rep" (representative name) and "email" (representative email). Returns an empty dict if the sheet cannot be read or no valid rows are found.
+    """
     try:
         gc=gspread.authorize(creds)
         ws=gc.open_by_key(SHEET_ID).worksheet(ACCOUNT_LOOKUP_TAB)
@@ -429,8 +494,28 @@ def archive_export_row_pg(job, tab_name):
 
 
 def run_once():
+    """
+    Perform a single poll cycle to process active Dray Export shipments from Postgres.
+    
+    Reads active "Dray Export" shipments, ensures required tracking tables exist, and processes each row:
+    - Detects ERD and cutoff changes and persists per-row state to Postgres.
+    - Generates cutoff alerts and collects per-account alert batches.
+    - Resolves steamship line (SSL) for lookups (including BOL-prefix fallback) and, when needed,
+      looks up container numbers via JsonCargo and writes assignments to Postgres and the Master Sheet.
+    - Tracks container status via JsonCargo; when a gate-in is observed, archives the export row,
+      removes persisted state, and notifies recipients.
+    - Sends email notifications for cutoff/container alerts, container assignments, and archive events.
+    
+    Side effects:
+    - Reads and updates Postgres shipment and tracking state tables.
+    - May update the Master Sheet and send HTML emails.
+    - May call external JsonCargo APIs for lookups and tracking.
+    """
     now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
     print(f"\n[{now_str}] Export poll cycle (Postgres mode)...")
+
+    # Ensure tracking state tables exist
+    pg_ensure_tracking_tables()
 
     # ── Read active dray export loads from Postgres ──────────────────────────
     try:
@@ -468,7 +553,6 @@ def run_once():
         return
 
     state = load_state()
-    new_state = dict(state)
 
     for tab_name in account_tabs:
         loads = by_account[tab_name]
@@ -498,7 +582,7 @@ def run_once():
             changed = [f.upper() for f in ("erd", "cutoff") if current[f] != prev.get(f, "")]
             if "CUTOFF" in changed:
                 current["cutoff_alerted"] = ""
-            new_state[key] = current
+            pg_set_export_state(key, **current)
 
             alert_reason = _cutoff_alert(cutoff) if cutoff else None
             if alert_reason and current["cutoff_alerted"] == cutoff:
@@ -508,7 +592,7 @@ def run_once():
             if changed or alert_reason:
                 if alert_reason:
                     current["cutoff_alerted"] = cutoff
-                    new_state[key] = current
+                    pg_set_export_state(key, **current)
                 tab_alerts.append({
                     "efj": efj, "container": container, "vessel": vessel,
                     "booking": booking, "erd": erd, "cutoff": cutoff,
@@ -520,9 +604,9 @@ def run_once():
                                    account=tab_name, move_type="Dray Export")
 
             # Resolve SSL line
-            ssl_line = _resolve_ssl_export(vessel, carrier)
+            ssl_line = _resolve_ssl_export(vessel, carrier, booking)
             if not ssl_line:
-                print(f"    SSL line not detected for {vessel}/{carrier} - skipping API")
+                print(f"    SSL line not detected for {vessel}/{carrier}/{booking} - skipping API")
                 continue
 
             # Check if container column has booking# instead of container#
@@ -558,7 +642,7 @@ def run_once():
                 }
                 ok = archive_export_row_pg(job, tab_name)
                 if ok:
-                    new_state.pop(key, None)
+                    pg_delete_export_state(key)
             else:
                 print(f"    No gate-in yet for {container}")
 
@@ -568,7 +652,7 @@ def run_once():
         else:
             print(f"  No alerts for {tab_name}")
 
-    save_state(new_state)
+    # State already persisted per-row to Postgres via pg_set_export_state()
     print("Export poll complete.")
 
 
