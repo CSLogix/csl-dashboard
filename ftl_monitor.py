@@ -175,7 +175,7 @@ def send_unresponsive_alert(efj, load_num, account, carrier, driver_phone,
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
 
-    smtp_user = os.getenv("SMTP_USER", "jfeltzjr@gmail.com")
+    smtp_user = os.environ.get("SMTP_USER", "")
     smtp_pass = os.getenv("SMTP_PASSWORD", "")
     cc_addr = os.getenv("EMAIL_CC", "efj-operations@evansdelivery.com")
 

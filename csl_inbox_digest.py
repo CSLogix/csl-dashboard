@@ -31,7 +31,7 @@ if "--once" not in sys.argv:
 load_dotenv("/root/csl-bot/csl-doc-tracker/.env")
 load_dotenv("/root/csl-bot/.env", override=False)
 
-SMTP_USER = os.getenv("SMTP_USER", "jfeltzjr@gmail.com")
+SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587

@@ -219,22 +219,6 @@ def upload():
         results=results,not_found=not_found,total_updates=total_updates)
 
 
-@app.route('/upload-pdf-test', methods=['GET','POST'])
-def upload_pdf_test():
-    if request.method=='POST':
-        f=request.files.get('pdf')
-        if f:
-            f.save('/tmp/test_pod.pdf')
-            import subprocess
-            result=subprocess.run(['python3','/tmp/test_pdf_parse.py'],capture_output=True,text=True)
-            return f'<pre>{result.stdout}\n{result.stderr}</pre>'
-        return 'No file'
-    return '''<form method="POST" enctype="multipart/form-data">
-    <input type="file" name="pdf">
-    <button type="submit">Upload & Parse</button>
-    </form>'''
-
-
 @app.route('/macropoint', methods=['GET','POST'])
 def macropoint_page():
     import pdfplumber, re, json, subprocess
@@ -558,19 +542,3 @@ input[type=text]{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;bor
 
 if __name__=='__main__':
     app.run(host='0.0.0.0',port=5001,debug=False)
-
-
-@app.route('/upload-pdf-test', methods=['GET','POST'])
-def upload_pdf_test():
-    if request.method=='POST':
-        f=request.files.get('pdf')
-        if f:
-            f.save('/tmp/test_pod.pdf')
-            import subprocess
-            result=subprocess.run(['python3','/tmp/test_pdf_parse.py'],capture_output=True,text=True)
-            return f'<pre>{result.stdout}\n{result.stderr}</pre>'
-        return 'No file'
-    return '''<form method="POST" enctype="multipart/form-data">
-    <input type="file" name="pdf" >
-    <button type="submit">Upload & Parse</button>
-    </form>'''

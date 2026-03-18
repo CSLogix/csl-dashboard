@@ -3,7 +3,10 @@ import os
 from decimal import Decimal
 from fastapi import APIRouter, Query, Request, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
+from psycopg2 import sql as psql
 import database as db
+
+_ALLOWED_RATE_TABLES = frozenset({"lane_rates", "rate_quotes"})
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -613,10 +616,14 @@ async def api_update_lane_rate(rate_id: str, request: Request):
         table, real_id = "rate_quotes", int(rate_id[3:])
     else:
         table, real_id = "lane_rates", int(rate_id)
+    if table not in _ALLOWED_RATE_TABLES:
+        raise HTTPException(400, "Invalid table")
     params.append(real_id)
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
-            cur.execute(f"UPDATE {table} SET {', '.join(sets)} WHERE id = %s RETURNING *", params)
+            query = psql.SQL("UPDATE {} SET " + ', '.join(sets) + " WHERE id = %s RETURNING *").format(
+                psql.Identifier(table))
+            cur.execute(query, params)
             row = cur.fetchone()
     if not row:
         raise HTTPException(404, "Lane rate not found")
@@ -633,9 +640,13 @@ async def api_delete_lane_rate(rate_id: str):
     else:
         # Legacy: bare integer ID — assume lane_rates
         table, real_id = "lane_rates", int(rate_id)
+    if table not in _ALLOWED_RATE_TABLES:
+        raise HTTPException(400, "Invalid table")
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
-            cur.execute(f"DELETE FROM {table} WHERE id = %s RETURNING id", (real_id,))
+            query = psql.SQL("DELETE FROM {} WHERE id = %s RETURNING id").format(
+                psql.Identifier(table))
+            cur.execute(query, (real_id,))
             row = cur.fetchone()
     if not row:
         raise HTTPException(404, "Lane rate not found")

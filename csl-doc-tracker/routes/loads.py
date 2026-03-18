@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, 
 from fastapi.responses import JSONResponse, FileResponse
 from google.oauth2.service_account import Credentials
 
+from psycopg2 import sql as psql
 import database as db
 from shared import (
     sheet_cache, log,
@@ -1191,7 +1192,8 @@ async def apply_rate_to_shipment(efj: str, request: Request):
 
             # Write to shipments
             cur.execute(
-                f"UPDATE shipments SET {field} = %s, updated_at = NOW() WHERE efj = %s RETURNING *",
+                psql.SQL("UPDATE shipments SET {} = %s, updated_at = NOW() WHERE efj = %s RETURNING *").format(
+                    psql.Identifier(field)),
                 (quote["rate_amount"], efj),
             )
             row = cur.fetchone()
