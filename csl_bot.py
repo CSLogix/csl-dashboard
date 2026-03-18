@@ -516,6 +516,102 @@ SSL_LINKS = {
     "matson":    {"code": "MATSON",        "url": "https://www.matson.com/tracking"},
 }
 
+# Container prefix (first 4 chars) -> SSL code
+# Used for: (1) auto-detect SSL when vessel/carrier fields are empty,
+#           (2) strip prefix for tracking retry
+CONTAINER_PREFIX_TO_SSL = {
+    # Maersk + subsidiaries
+    "MAEU": "MAERSK",
+    "SEAU": "MAERSK",   # SeaLand
+    "SGLU": "MAERSK",   # Seago Line
+    "SUDU": "MAERSK",   # Hamburg Süd
+    "MCPU": "MAERSK",   # MCC Transport / Sealand
+    "ALIU": "MAERSK",   # Aliança (Hamburg Süd)
+    "CNIU": "MAERSK",   # CCNI (Hamburg Süd)
+    # CMA CGM + subsidiaries
+    "CMDU": "CMA_CGM",
+    "APLU": "CMA_CGM",  # APL
+    "ACLU": "CMA_CGM",  # Atlantic Container Line
+    "ANLC": "CMA_CGM",  # ANL
+    "CSFU": "CMA_CGM",  # Containerships
+    "MCAW": "CMA_CGM",  # MacAndrews
+    # Hapag-Lloyd
+    "HLCU": "HAPAG_LLOYD",
+    "UACU": "HAPAG_LLOYD",  # UASC (merged)
+    # ONE (Ocean Network Express = MOL + K Line + NYK)
+    "MOLU": "ONE",       # MOL
+    "KLNE": "ONE",       # K Line
+    # Evergreen
+    "EVRG": "EVERGREEN",
+    # HMM
+    "HDMU": "HMM",
+    # MSC
+    "MSCU": "MSC",
+    # COSCO
+    "COSU": "COSCO",
+    "CHNJ": "COSCO",    # China Shipping (merged)
+    # ZIM
+    "ZIMU": "ZIM",
+    # Yang Ming
+    "YMLU": "YANG_MING",
+    # SM Line
+    "SMLM": "SM_LINE",
+    # Matson
+    "MATS": "MATSON",
+    # Wan Hai
+    "MWHL": "WAN_HAI",
+    "WHLC": "WAN_HAI",
+    "CNCX": "WAN_HAI",  # Cheng Lie Navigation
+    # Independents (no JsonCargo SSL code, but useful for identification)
+    "ARKU": None,  # Arkas
+    "CMSN": None,  # Crowley
+    "CULX": None,  # China United Lines
+    "DALU": None,  # Deutsche Africa-Linien
+    "ESPU": None,  # Emirates Shipping
+    "FANE": None,  # Far-Eastern Shipping
+    "GRIU": None,  # Grimaldi
+    "GSLU": None,  # Gold Star Line / Sinokor
+    "HALU": None,  # Heung-A Shipping
+    "HJSC": None,  # Hanjin (defunct)
+    "IAAU": None,  # Interasia Lines
+    "JJCS": None,  # Shanghai Jin Jiang
+    "KMTU": None,  # Korea Marine Transport / Sinokor
+    "LMCU": None,  # Ignazio Messina
+    "MACS": None,  # MACS Shipping
+    "MELL": None,  # Mariana Express
+    "MFTU": None,  # Marfret
+    "SEIU": None,  # San-ei Shipping
+    "SIKU": None,  # Samudera Indonesia
+    "SITU": None,  # SITC
+    "SKLU": None,  # Sinokor
+    "SNTU": None,  # Sinotrans
+    "SSPH": None,  # Seth Shipping
+    "TOTE": None,  # TOTE Maritime
+    "TRKU": None,  # Turkon Line
+    "TSGL": None,  # Tropical Shipping
+    "TSQD": None,  # T.S. Lines
+    "USLU": None,  # United States Lines
+    "WECC": None,  # Western European Container Lines
+    "CHVW": None,  # China Navigation
+}
+
+
+def _ssl_from_container_prefix(container):
+    """Auto-detect SSL code from container prefix (first 4 chars).
+    Returns (ssl_code, url) or (None, None)."""
+    if not container or len(container.strip()) < 5:
+        return None, None
+    prefix = container.strip()[:4].upper()
+    ssl_code = CONTAINER_PREFIX_TO_SSL.get(prefix)
+    if not ssl_code:
+        return None, None
+    # Find matching URL from SSL_LINKS
+    for _key, info in SSL_LINKS.items():
+        if info["code"] == ssl_code:
+            return ssl_code, info["url"]
+    return ssl_code, None
+
+
 ACCOUNT_REPS = {
     "Allround": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "Boviet":   {"rep": "",      "email": "Boviet-efj@evansdelivery.com"},
@@ -1585,6 +1681,15 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
     """
     print(f"\n  [Dray Import] row {sheet_row} — Container: {container}  BOL: {bol}")
 
+    # ── Auto-detect SSL from container prefix if not provided ─────────────────
+    if not ssl_code and container:
+        detected_ssl, detected_url = _ssl_from_container_prefix(container)
+        if detected_ssl:
+            ssl_code = detected_ssl
+            if not url:
+                url = detected_url
+            print(f"    Auto-detected SSL from prefix: {container[:4]} -> {ssl_code}")
+
     # ── No SSL code = can't call API ─────────────────────────────────────────
     if not ssl_code:
         if not url or not proxy_ok:
@@ -1622,9 +1727,13 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                         found_container, ssl_code)
 
         # ── Try stripped container (no prefix) if still _fallback ─────────────
-        if status == "_fallback" and container and re.match(r'^[A-Z]{4}\d+$', container.strip()):
-            stripped = container.strip()[4:]  # e.g. MAEU2814354 -> 2814354
-            print(f"    Trying stripped container (no prefix): {stripped}")
+        c_stripped = container.strip() if container else ""
+        prefix = c_stripped[:4].upper() if len(c_stripped) >= 5 else ""
+        if (status == "_fallback" and prefix
+                and prefix in CONTAINER_PREFIX_TO_SSL
+                and re.match(r'^[A-Z]{4}\d+$', c_stripped)):
+            stripped = c_stripped[4:]  # e.g. MAEU2814354 -> 2814354
+            print(f"    Stripping known prefix {prefix} — trying: {stripped}")
             eta, pickup, ret, status = _jsoncargo_container_track(stripped, ssl_code)
 
         # ── Browser fallback if API still returned _fallback ──────────────────
@@ -1652,10 +1761,11 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                             browser, ssl_code, url, container, container)
 
                     # Retry browser with stripped container (digits only)
-                    if (not (eta or pickup or ret or status) and container
-                            and re.match(r'^[A-Z]{4}\d+$', container.strip())):
-                        stripped = container.strip()[4:]
-                        print(f"    Retrying browser with stripped container: {stripped}")
+                    if (not (eta or pickup or ret or status) and prefix
+                            and prefix in CONTAINER_PREFIX_TO_SSL
+                            and re.match(r'^[A-Z]{4}\d+$', c_stripped)):
+                        stripped = c_stripped[4:]
+                        print(f"    Retrying browser with stripped prefix {prefix}: {stripped}")
                         eta, pickup, ret, status = _browser_scrape_by_ssl(
                             browser, ssl_code, url, stripped, container)
                         if eta or pickup or ret or status:
