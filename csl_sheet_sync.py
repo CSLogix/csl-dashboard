@@ -294,6 +294,16 @@ def _write_driver_contact(efj, trailer="", phone=""):
 
 
 def sync_tolead(gc, creds):
+    """
+    Synchronize ToLead hub Google Sheets with the Postgres shipments and driver_contacts tables.
+    
+    Processes each configured hub tab: reads sheet rows, inserts new shipments or merges sheet data into existing shipments, updates driver_contacts and the local tracking cache, and batches any Postgres-driven cell updates back to the sheet.
+    
+    Returns:
+        tuple: (synced_from_sheet, synced_to_sheet)
+            synced_from_sheet: number of rows inserted or merged into Postgres from sheets.
+            synced_to_sheet: number of sheet cells written back from Postgres to sheets.
+    """
     synced_from_sheet = 0
     synced_to_sheet = 0
 
@@ -682,7 +692,12 @@ TERMINAL_STATUSES = {
 
 
 def _get_pg_master_shipments() -> dict:
-    """Get all non-Tolead, non-Boviet PG shipments, keyed by EFJ."""
+    """
+    Retrieve all Postgres shipments not associated with ToLead or Boviet, keyed by EFJ.
+    
+    Returns:
+        shipments_by_efj (dict): A mapping from EFJ (string) to a dict representing the shipment row (database column names as keys).
+    """
     with db.get_cursor() as cur:
         cur.execute(
             "SELECT * FROM shipments WHERE account NOT IN ('Tolead', 'Boviet')"
@@ -734,13 +749,14 @@ def _upsert_master_shipment(data: dict):
 
 def _merge_master_shipment(pg_row: dict, sheet_data: dict, syncable_fields=None):
     """
-    Merge a sheet row with an existing PG row using timestamp-based conflict resolution.
-
-    Rules:
-    1. If PG was updated since last sync (updated_at > sheet_synced_at),
-       PG wins — don't overwrite dashboard edits. But fill empty PG fields from sheet.
-    2. If PG was NOT updated since last sync, sheet wins for non-empty fields.
-    3. sheet_synced_at is always updated to NOW().
+    Merge sheet row data into an existing Postgres shipment row with timestamp-based conflict resolution.
+    
+    If the Postgres row's `updated_at` is later than its `sheet_synced_at`, keep existing Postgres values but populate any empty Postgres fields from the sheet. Otherwise, treat the sheet as authoritative and overwrite Postgres fields with non-empty sheet values. Always update the row's `sheet_synced_at` timestamp to NOW().
+    
+    Parameters:
+        pg_row (dict): Current shipment row from the database (must include `updated_at`, `sheet_synced_at`, and field keys).
+        sheet_data (dict): Data parsed from the sheet row (must include `efj`); date-like fields may be normalized.
+        syncable_fields (iterable[str], optional): Iterable of field names to consider for merging. Defaults to MASTER_SYNCABLE_FIELDS.
     """
     pg_updated = pg_row.get("updated_at")
     pg_synced = pg_row.get("sheet_synced_at")
@@ -798,7 +814,18 @@ def _merge_master_shipment(pg_row: dict, sheet_data: dict, syncable_fields=None)
 
 
 def _format_writeback_value(field, pg_val):
-    """Format a PG value for writing back to the Master Sheet."""
+    """
+    Format a PostgreSQL field value for writing back to the Master Sheet.
+    
+    This applies presentation formatting for specific fields: date-like fields are formatted with `_fmt_eta`, the `status` field is formatted with `_fmt_status`, and all other fields are returned unchanged.
+    
+    Parameters:
+        field (str): The PostgreSQL field name that determines formatting.
+        pg_val: The raw value from PostgreSQL for that field.
+    
+    Returns:
+        The value formatted for the Master Sheet (formatted string for known fields, original value otherwise).
+    """
     if field in ("eta", "lfd", "pickup_date", "delivery_date", "return_date"):
         return _fmt_eta(pg_val)
     elif field == "status":
@@ -807,7 +834,16 @@ def _format_writeback_value(field, pg_val):
 
 
 def sync_master(gc, creds):
-    """Sync Master Track/Trace account tabs into Postgres, with PG → Sheet write-back."""
+    """
+    Synchronize Master Track & Trace account tabs with Postgres and apply Postgres-originated updates back to the Master Sheet.
+    
+    Reads account tabs from the Master Google Sheet, inserts new rows into Postgres, merges sheet edits into existing Postgres rows with timestamp-based conflict resolution, and writes back changed Postgres fields to the sheet. Also appends new Postgres-created rows to appropriate account tabs when applicable.
+    
+    Returns:
+        tuple: (synced_new, synced_to_sheet)
+            synced_new (int): Number of sheet rows inserted into Postgres.
+            synced_to_sheet (int): Number of individual sheet cells updated from Postgres.
+    """
     synced_new = 0
     synced_updated = 0
     synced_to_sheet = 0
@@ -855,6 +891,16 @@ def sync_master(gc, creds):
 
             for ri, row in enumerate(rows[hdr_idx + 1:], start=hdr_idx + 2):
                 def _cell(idx, r=row):
+                    """
+                    Get the trimmed string value of a row cell or an empty string when the cell is absent.
+                    
+                    Parameters:
+                    	idx (int): Zero-based column index to read from the row.
+                    	r (Sequence[str]): The row sequence of cell values; defaults to the surrounding `row` variable.
+                    
+                    Returns:
+                    	str: The cell value with leading and trailing whitespace removed, or an empty string if the index is out of range.
+                    """
                     return r[idx].strip() if len(r) > idx else ""
 
                 efj = _cell(0)
@@ -942,8 +988,21 @@ def sync_master(gc, creds):
 
 def _sync_new_pg_rows_to_sheet(sh, pg_map, sheet_efjs, tabs, rep_map):
     """
-    Append PG-only rows (created via dashboard) to the correct Master Sheet tab.
-    Uses a 2-minute delay to avoid races with sheet_add_row() fire-and-forget.
+    Append Postgres-created shipments that are not yet on the Master Sheet to their account tabs and mark them as synced.
+    
+    Selects shipments not belonging to Tolead/Boviet that are not archived, not created via the sheet, and whose creation time is at least two minutes old; for each such shipment that is not already present on the sheet and whose status is not terminal, append a new A–P row to the matching account tab (if the tab exists) and update that shipment's sheet_synced_at timestamp. Existing EFJs found on the sheet are marked synced without appending. Skips shipments whose account tab is missing or whose status is in TERMINAL_STATUSES.
+    
+    Parameters:
+        sh: gspread.Spreadsheet
+            Open Master Sheet object to append rows into.
+        pg_map: dict
+            Current mapping of efj -> PostgreSQL row data (not required by this function but passed for caller consistency).
+        sheet_efjs: set
+            Set of EFJ identifiers already present on the Master Sheet; used to avoid duplicates.
+        tabs: sequence
+            Collection of valid account tab names present in the Master Sheet.
+        rep_map: dict
+            Account-to-representative mapping (not used by this function but provided for caller consistency).
     """
     try:
         with db.get_cursor() as cur:
@@ -1028,6 +1087,11 @@ def _sync_new_pg_rows_to_sheet(sh, pg_map, sheet_efjs, tabs, rep_map):
 # Main sync loop
 # ---------------------------------------------------------------------------
 def run_sync():
+    """
+    Perform a single full synchronization pass between configured Google Sheets and the Postgres database and log a summary.
+    
+    Initializes Google Sheets credentials, runs the ToLead, Boviet, and Master sync routines, aggregates their results, and logs counts of rows copied from sheets into Postgres and cells written from Postgres back to sheets. This function has side effects (database updates and sheet write-backs) and does not return a value.
+    """
     log.info("Starting sheet sync...")
     creds = Credentials.from_service_account_file(
         CREDS_FILE, scopes=["https://www.googleapis.com/auth/spreadsheets"]
