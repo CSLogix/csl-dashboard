@@ -6,31 +6,35 @@ import { apiFetch } from './api';
 // No external dependencies — wraps apiFetch with caching + dedup
 // ═══════════════════════════════════════════════════════════════
 
-const cache = new Map();     // key → { data, fetchedAt }
-const inflight = new Map();  // key → Promise (dedup concurrent requests)
+interface CacheEntry<T> {
+  data: T;
+  fetchedAt: number;
+}
 
-const defaultFetcher = (url) => apiFetch(url).then(r => {
+interface SWROptions<T> {
+  fetcher?: (key: string) => Promise<T>;
+  staleTime?: number;
+  revalidateInterval?: number;
+  fallbackData?: T | null;
+}
+
+interface SWRResponse<T> {
+  data: T | null;
+  isLoading: boolean;
+  isValidating: boolean;
+  error: Error | null;
+  mutate: (newData?: T | ((current: T | null) => T), shouldRevalidate?: boolean) => void;
+}
+
+const cache = new Map<string, CacheEntry<unknown>>();
+const inflight = new Map<string, Promise<unknown>>();
+
+const defaultFetcher = (url: string) => apiFetch(url).then(r => {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 });
 
-/**
- * Lightweight SWR-style hook that provides cached data fetching with stale-while-revalidate semantics and request deduplication.
- *
- * @param {string|null} key - Resource URL or cache key; pass `null` to disable fetching.
- * @param {object} options - Configuration options.
- * @param {Function} [options.fetcher] - Custom fetch function that accepts the key and resolves to the data (default: JSON fetcher).
- * @param {number} [options.staleTime=60000] - Time in milliseconds before cached data is considered stale.
- * @param {number} [options.revalidateInterval=0] - Polling interval in milliseconds for automatic revalidation (0 disables).
- * @param {*} [options.fallbackData=null] - Initial data to use before the first successful fetch.
- * @returns {{data: *, isLoading: boolean, isValidating: boolean, error: Error|null, mutate: Function}} An object containing:
- *   - data: the current cached or fetched value.
- *   - isLoading: `true` while the initial fetch is in progress and no cached data exists.
- *   - isValidating: `true` while a revalidation request is in progress.
- *   - error: the last fetch error, or `null` when successful or not attempted.
- *   - mutate: function(newData[, shouldRevalidate=true]) — optimistically update cache and local state with `newData` (or updater function) and optionally trigger revalidation.
- */
-export function useSWR(key, options = {}) {
+export function useSWR<T = unknown>(key: string | null, options: SWROptions<T> = {}): SWRResponse<T> {
   const {
     fetcher = defaultFetcher,
     staleTime = 60000,
@@ -38,11 +42,10 @@ export function useSWR(key, options = {}) {
     fallbackData = null,
   } = options;
 
-  const cached = key ? cache.get(key) : null;
-  const hasFreshCache = cached && (Date.now() - cached.fetchedAt < staleTime);
+  const cached = key ? cache.get(key) as CacheEntry<T> | undefined : undefined;
 
-  const [data, setData] = useState(cached?.data ?? fallbackData);
-  const [error, setError] = useState(null);
+  const [data, setData] = useState<T | null>(cached?.data ?? fallbackData);
+  const [error, setError] = useState<Error | null>(null);
   const [isLoading, setIsLoading] = useState(!cached?.data && key !== null);
   const [isValidating, setIsValidating] = useState(false);
   const mountedRef = useRef(true);
@@ -55,13 +58,13 @@ export function useSWR(key, options = {}) {
     // Dedup: reuse in-flight request
     if (inflight.has(currentKey)) {
       try {
-        const result = await inflight.get(currentKey);
+        const result = await inflight.get(currentKey) as T;
         if (mountedRef.current && keyRef.current === currentKey) {
           setData(result);
           setError(null);
         }
       } catch (e) {
-        if (mountedRef.current && keyRef.current === currentKey) setError(e);
+        if (mountedRef.current && keyRef.current === currentKey) setError(e as Error);
       }
       return;
     }
@@ -80,7 +83,7 @@ export function useSWR(key, options = {}) {
       }
     } catch (e) {
       if (mountedRef.current && keyRef.current === currentKey) {
-        setError(e);
+        setError(e as Error);
         setIsLoading(false);
       }
     } finally {
@@ -98,7 +101,7 @@ export function useSWR(key, options = {}) {
       return;
     }
 
-    const entry = cache.get(key);
+    const entry = cache.get(key) as CacheEntry<T> | undefined;
     if (entry) {
       setData(entry.data);
       setIsLoading(false);
@@ -124,15 +127,16 @@ export function useSWR(key, options = {}) {
   }, []);
 
   // Optimistic mutate: update cache + state immediately, optionally revalidate
-  const mutate = useCallback((newData, shouldRevalidate = true) => {
+  const mutate = useCallback((newData?: T | ((current: T | null) => T), shouldRevalidate: boolean = true) => {
     if (!keyRef.current) return;
+    let resolved = newData;
     if (typeof newData === 'function') {
-      const current = cache.get(keyRef.current)?.data;
-      newData = newData(current);
+      const current = (cache.get(keyRef.current) as CacheEntry<T> | undefined)?.data ?? null;
+      resolved = (newData as (current: T | null) => T)(current);
     }
-    if (newData !== undefined) {
-      cache.set(keyRef.current, { data: newData, fetchedAt: Date.now() });
-      setData(newData);
+    if (resolved !== undefined) {
+      cache.set(keyRef.current, { data: resolved, fetchedAt: Date.now() });
+      setData(resolved as T);
     }
     if (shouldRevalidate) revalidate();
   }, [revalidate]);
@@ -140,18 +144,10 @@ export function useSWR(key, options = {}) {
   return { data, isLoading, isValidating, error, mutate };
 }
 
-/**
- * Remove the cached entry for the given cache key.
- *
- * @param {string} key - Cache key (e.g., request URL) to remove from the in-memory cache.
- */
-export function invalidateCache(key) {
+export function invalidateCache(key: string): void {
   cache.delete(key);
 }
 
-/**
- * Remove all entries from the in-memory request cache.
- */
-export function clearCache() {
+export function clearCache(): void {
   cache.clear();
 }

@@ -1,11 +1,12 @@
 import { create } from 'zustand'
+import type { AppState } from './types'
 
 // ─── Core App Store ───
 // Shared state accessible from any component via useAppStore()
 // Existing views still receive these as props from DispatchDashboard (gradual migration)
 // New components (QuoteBuilder, etc.) can import useAppStore() directly
 
-export const useAppStore = create((set) => ({
+export const useAppStore = create<AppState>((set) => ({
   // ── Data ──
   shipments: [],
   accounts: ["All Accounts"],

@@ -4,19 +4,19 @@
 
 export const grad = "linear-gradient(135deg, #00c853 0%, #00b8d4 50%, #2979ff 100%)";
 
-export const fmt = (n) => {
-  const num = parseFloat(n);
+export const fmt = (n: string | number): string => {
+  const num = parseFloat(String(n));
   return isNaN(num) ? "$0" : "$" + num.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 };
 
-export const fmtDec = (n) => {
-  const num = parseFloat(n);
+export const fmtDec = (n: string | number): string => {
+  const num = parseFloat(String(n));
   return isNaN(num) ? "$0.00" : "$" + num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
 // ── Port cluster normalization ──
 // Maps common port name variants to canonical cluster names for grouping + autofill
-export const PORT_CLUSTERS = {
+export const PORT_CLUSTERS: Record<string, string> = {
   "la/lb": "LA/LB", "la/lb ports": "LA/LB", "lalb": "LA/LB", "lax": "LA/LB",
   "los angeles": "LA/LB", "long beach": "LA/LB", "los angeles/long beach": "LA/LB",
   "lbct": "LA/LB", "apm terminals": "LA/LB", "port of los angeles": "LA/LB",
@@ -39,7 +39,7 @@ export const PORT_CLUSTERS = {
 };
 
 // US state name → abbreviation for normalizing "Massachusetts" → "MA" etc.
-export const STATE_ABBREVS = {
+export const STATE_ABBREVS: Record<string, string> = {
   alabama:"AL",alaska:"AK",arizona:"AZ",arkansas:"AR",california:"CA",colorado:"CO",connecticut:"CT",
   delaware:"DE",florida:"FL",georgia:"GA",hawaii:"HI",idaho:"ID",illinois:"IL",indiana:"IN",iowa:"IA",
   kansas:"KS",kentucky:"KY",louisiana:"LA",maine:"ME",maryland:"MD",massachusetts:"MA",michigan:"MI",
@@ -56,7 +56,7 @@ export const STATE_ABBREVS = {
  * @param {string} text - Location input that may include a trailing ZIP code and/or a state name (e.g., "boston massachusetts 02118" or "los angeles, california").
  * @returns {string} The normalized location with ZIP removed, state abbreviated and uppercased when present, and words title-cased (words of length ≤ 2 are fully uppercased).
  */
-export function normalizeLocation(text) {
+export function normalizeLocation(text: string): string {
   if (!text) return "";
   let s = text.trim().replace(/\s+\d{5}(-\d{4})?$/, "").trim();
   for (const [name, abbr] of Object.entries(STATE_ABBREVS)) {
@@ -75,7 +75,7 @@ export function normalizeLocation(text) {
  * @param {string} text - The port/location string to normalize (may include state or ZIP).
  * @returns {string} The canonical port cluster name when a known alias is matched; otherwise a normalized location string; returns an empty string for falsy input.
  */
-export function normalizePort(text) {
+export function normalizePort(text: string): string {
   if (!text) return "";
   const lower = text.trim().toLowerCase();
   const noZip = lower.replace(/\s+\d{5}(-\d{4})?$/, "").trim();
@@ -103,7 +103,7 @@ export function normalizePort(text) {
  * @param {string} text - A port or city string to normalize (e.g., "Baltimore, MD", "Los Angeles CA").
  * @returns {string} The normalized city or canonical port cluster suitable for lane grouping.
  */
-export function normalizeLaneCity(text) {
+export function normalizeLaneCity(text: string): string {
   const port = normalizePort(text);
   const portLower = port.toLowerCase();
   if (Object.values(PORT_CLUSTERS).some(c => c.toLowerCase() === portLower)) return port;
@@ -123,7 +123,7 @@ export const normalizeOrigin = normalizeLaneCity;
  * @param {string} text - Location string (for example, "Boston, MA" or "Los Angeles, MA 02110").
  * @returns {{city: string, state: string}} An object where `city` is the normalized city name (or the normalized input if no state found) and `state` is the uppercase two-letter state abbreviation or an empty string.
  */
-export function splitCityState(text) {
+export function splitCityState(text: string): { city: string; state: string } {
   if (!text) return { city: "", state: "" };
   const normalized = normalizeLocation(text);
   const match = normalized.match(/^(.+?),\s*([A-Z]{2})$/);
