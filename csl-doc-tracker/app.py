@@ -40,6 +40,7 @@ from routes import (
     spa,
     users,
     email_drafts,
+    rep_management,
 )
 
 log = get_logger(__name__)
@@ -149,6 +150,7 @@ app.include_router(v2.router)
 app.include_router(webhooks.router)
 app.include_router(users.router)
 app.include_router(email_drafts.router)
+app.include_router(rep_management.router)
 
 # ---------------------------------------------------------------------------
 # Startup / Shutdown
@@ -365,6 +367,43 @@ def startup():
         log.info("email_drafts table ready")
     except Exception as e:
         log.warning("Could not create email_drafts table: %s", e)
+
+    # Create rep_accounts table (rep -> accounts assignment)
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS rep_accounts (
+                        rep_name VARCHAR(64) PRIMARY KEY,
+                        accounts TEXT[] DEFAULT '{}',
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+        log.info("rep_accounts table ready")
+    except Exception as e:
+        log.warning("Could not create rep_accounts table: %s", e)
+
+    # Create rep_tasks table (manual action items)
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS rep_tasks (
+                        id SERIAL PRIMARY KEY,
+                        rep VARCHAR(64) NOT NULL,
+                        text TEXT NOT NULL,
+                        efj VARCHAR(32),
+                        auto_type VARCHAR(32),
+                        status VARCHAR(20) DEFAULT 'open',
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        completed_at TIMESTAMPTZ
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_rep_tasks_rep ON rep_tasks(rep)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_rep_tasks_status ON rep_tasks(status)")
+        log.info("rep_tasks table ready")
+    except Exception as e:
+        log.warning("Could not create rep_tasks table: %s", e)
 
     # Pre-populate sheet cache in background
     threading.Thread(target=sheet_cache.refresh_if_needed, daemon=True).start()

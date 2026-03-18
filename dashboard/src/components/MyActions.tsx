@@ -1,12 +1,16 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { REP_ACCOUNTS, ALL_REP_NAMES, ALERT_TYPE_CONFIG } from '../helpers/constants';
 import { isDateToday, isDateTomorrow, useIsMobile } from '../helpers/utils';
+import { apiFetch, API_BASE } from '../helpers/api';
 
 // ─── Rep avatar colors (spec: RA=cyan, JF=blue, JA=purple, BO=green, TO=amber) ───
 const MY_ACTIONS_REP_COLORS = {
   Radka: "#06b6d4",
   "John F": "#3B82F6",
   Janice: "#A855F7",
+  Allie: "#F59E0B",
+  "John N": "#0891B2",
+  Amanda: "#7C3AED",
   Boviet: "#22C55E",
   Tolead: "#F59E0B",
 };
@@ -26,6 +30,51 @@ export default function MyActions({
   );
   const [expandedSections, setExpandedSections] = useState(new Set());
   const isMobile = useIsMobile();
+
+  // ── Manual tasks state ──
+  const [manualTasks, setManualTasks] = useState([]);
+  const [showTaskInput, setShowTaskInput] = useState(false);
+  const [taskText, setTaskText] = useState("");
+  const [tasksLoading, setTasksLoading] = useState(false);
+
+  // Fetch tasks for selected rep
+  const fetchTasks = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/rep-tasks?rep=${encodeURIComponent(selectedRep)}`);
+      if (res.ok) { const d = await res.json(); setManualTasks(d.tasks || []); }
+    } catch {}
+  }, [selectedRep]);
+
+  useEffect(() => { fetchTasks(); }, [fetchTasks]);
+
+  const addTask = async () => {
+    const text = taskText.trim();
+    if (!text) return;
+    setTasksLoading(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/rep-tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rep: selectedRep, text }),
+      });
+      if (res.ok) { setTaskText(""); setShowTaskInput(false); await fetchTasks(); }
+    } catch {}
+    setTasksLoading(false);
+  };
+
+  const completeTask = async (taskId) => {
+    try {
+      await apiFetch(`${API_BASE}/api/rep-tasks/${taskId}/complete`, { method: "POST" });
+      setManualTasks(prev => prev.filter(t => t.id !== taskId));
+    } catch {}
+  };
+
+  const deleteTask = async (taskId) => {
+    try {
+      await apiFetch(`${API_BASE}/api/rep-tasks/${taskId}`, { method: "DELETE" });
+      setManualTasks(prev => prev.filter(t => t.id !== taskId));
+    } catch {}
+  };
 
   // Scope shipments to selected rep's accounts
   const repAccounts = REP_ACCOUNTS[selectedRep] || [];
@@ -416,6 +465,65 @@ export default function MyActions({
             </div>
           );
         })}
+      </div>
+
+      {/* ── Manual Tasks Section ── */}
+      <div style={{ marginTop: 14, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#8B95A8" }}>Tasks</span>
+          <button
+            onClick={() => setShowTaskInput(!showTaskInput)}
+            style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", color: "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+          >
+            {showTaskInput ? "Cancel" : "+ Add"}
+          </button>
+        </div>
+
+        {showTaskInput && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <input
+              autoFocus
+              value={taskText}
+              onChange={e => setTaskText(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") addTask(); if (e.key === "Escape") { setShowTaskInput(false); setTaskText(""); } }}
+              placeholder="e.g. Call DHL about invoice..."
+              style={{ flex: 1, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 11, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+            />
+            <button
+              onClick={addTask}
+              disabled={tasksLoading || !taskText.trim()}
+              style={{ padding: "6px 14px", borderRadius: 8, border: "none", background: "rgba(0,212,170,0.15)", color: "#00D4AA", fontSize: 11, fontWeight: 700, cursor: "pointer", opacity: tasksLoading || !taskText.trim() ? 0.5 : 1 }}
+            >
+              Add
+            </button>
+          </div>
+        )}
+
+        {manualTasks.length === 0 && !showTaskInput && (
+          <div style={{ padding: 12, textAlign: "center", color: "#3D4557", fontSize: 11 }}>No tasks</div>
+        )}
+
+        {manualTasks.map(task => (
+          <div key={task.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, transition: "background 0.15s" }}
+            onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+          >
+            <button
+              onClick={() => completeTask(task.id)}
+              title="Mark complete"
+              style={{ width: 16, height: 16, borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#5A6478", fontSize: 10 }}
+            />
+            <span style={{ flex: 1, fontSize: 11, color: "#C8CDD5", fontWeight: 500 }}>{task.text}</span>
+            {task.efj && <span style={{ fontSize: 10, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>{task.efj}</span>}
+            <button
+              onClick={() => deleteTask(task.id)}
+              title="Remove"
+              style={{ background: "none", border: "none", color: "#3D4557", fontSize: 13, cursor: "pointer", padding: 0, lineHeight: 1 }}
+            >
+              x
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );

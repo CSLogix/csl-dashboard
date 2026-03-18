@@ -183,6 +183,41 @@ export function splitDateTime(str: string | null | undefined): { date: string; t
   return { date: s, time: "" };
 }
 
+/**
+ * Normalize time input: accepts "1400", "14:00", "2:30pm", etc.
+ * Returns HH:MM format or empty string if invalid.
+ */
+export function normalizeTimeInput(raw: string): string {
+  const s = raw.trim();
+  if (!s) return "";
+  // Already HH:MM or H:MM
+  const colonMatch = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (colonMatch) {
+    const h = parseInt(colonMatch[1], 10);
+    const m = parseInt(colonMatch[2], 10);
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  }
+  // 3 or 4 digit military: "1400" -> "14:00", "900" -> "09:00"
+  const milMatch = s.match(/^(\d{3,4})$/);
+  if (milMatch) {
+    const num = milMatch[1];
+    const h = parseInt(num.slice(0, -2), 10);
+    const m = parseInt(num.slice(-2), 10);
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  }
+  // am/pm: "2:30pm" or "230pm"
+  const ampmMatch = s.match(/^(\d{1,2}):?(\d{2})\s*(am|pm)$/i);
+  if (ampmMatch) {
+    let h = parseInt(ampmMatch[1], 10);
+    const m = parseInt(ampmMatch[2], 10);
+    const isPm = ampmMatch[3].toLowerCase() === "pm";
+    if (isPm && h < 12) h += 12;
+    if (!isPm && h === 12) h = 0;
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  }
+  return s; // fallback: return as-is
+}
+
 export function calcMarginPct(customerRate: string | number, carrierPay: string | number): number | null {
   const cx = parseFloat(String(customerRate));
   const rc = parseFloat(String(carrierPay));

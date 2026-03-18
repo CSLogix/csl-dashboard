@@ -9,7 +9,7 @@ import {
 } from "../helpers/constants";
 import {
   isDateToday, isDateTomorrow, isDatePast, getRepShipments, splitDateTime, parseDate,
-  calcMarginPct, formatDDMM, parseDDMM, parseTerminalNotes,
+  calcMarginPct, formatDDMM, parseDDMM, normalizeTimeInput, parseTerminalNotes,
   COL_FILTER_KEY_MAP, applyColFilters, buildColFilterOptions,
 } from "../helpers/utils";
 import DocIndicators from "../components/DocIndicators";
@@ -451,7 +451,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                     </td>
                     {/* MP Status */}
                     <td style={tdBase}>
-                      {(s.moveType === "FTL" || s.mpStatus) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} mpLastUpdated={s.mpLastUpdated} /> : <span style={{ color: "#5A6478", fontSize: 11, fontStyle: "italic" }}>No MP</span>}
+                      {(s.moveType === "FTL" || s.mpStatus || s.mpDisplayStatus || tracking?.mpDisplayStatus || tracking?.status) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} mpLastUpdated={s.mpLastUpdated} /> : <span style={{ color: "#5A6478", fontSize: 11, fontStyle: "italic" }}>No MP</span>}
                     </td>
                     {/* Pickup (inline-editable, DD-MM + time) */}
                     <td style={tdBase} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
@@ -465,10 +465,10 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                         </div>
                       ) : isEditing && inlineEditField === "pickupTime" ? (
                         <div onClick={e => e.stopPropagation()}>
-                          <input type="time" autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
-                            onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", pu.date || ""); setInlineEditId(null); return; } const v = (pu.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "pickup", v); setInlineEditId(null); }}
+                          <input type="text" autoFocus placeholder="1400" maxLength={7} value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "pickup", pu.date || ""); setInlineEditId(null); return; } const norm = normalizeTimeInput(inlineEditValue); const v = (pu.date || "") + " " + norm; handleFieldUpdate(s, "pickup", v); setInlineEditId(null); }}
                             onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                            style={{ ...inlineInputStyle, width: 70 }} />
+                            style={{ ...inlineInputStyle, width: 58, textAlign: "center", letterSpacing: 1 }} />
                         </div>
                       ) : (
                         <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>
@@ -513,10 +513,10 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
                         </div>
                       ) : isEditing && inlineEditField === "deliveryTime" ? (
                         <div onClick={e => e.stopPropagation()}>
-                          <input type="time" autoFocus value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
-                            onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", del.date || ""); setInlineEditId(null); return; } const v = (del.date || "") + " " + inlineEditValue; handleFieldUpdate(s, "delivery", v); setInlineEditId(null); }}
+                          <input type="text" autoFocus placeholder="1400" maxLength={7} value={inlineEditValue} onChange={e => setInlineEditValue(e.target.value)}
+                            onBlur={() => { if (!inlineEditValue.trim()) { handleFieldUpdate(s, "delivery", del.date || ""); setInlineEditId(null); return; } const norm = normalizeTimeInput(inlineEditValue); const v = (del.date || "") + " " + norm; handleFieldUpdate(s, "delivery", v); setInlineEditId(null); }}
                             onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setInlineEditId(null); }}
-                            style={{ ...inlineInputStyle, width: 70 }} />
+                            style={{ ...inlineInputStyle, width: 58, textAlign: "center", letterSpacing: 1 }} />
                         </div>
                       ) : (
                         <span style={{ fontSize: 11, color: "#F0F2F5", fontFamily: "'JetBrains Mono', monospace", cursor: "text", whiteSpace: "nowrap" }}>

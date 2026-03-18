@@ -6,14 +6,14 @@ export default function TrackingBadge({ tracking, mpStatus, mpDisplayStatus, mpD
   const detail = (mpDisplayDetail || tracking?.mpDisplayDetail || "").trim();
   const lastUp = mpLastUpdated || tracking?.mpLastUpdated || "";
 
-  const label = display || raw;
+  // Resolve label: prefer display status, then raw mpStatus, then tracking.status
+  const trackingStatus = (tracking?.status || "").trim();
+  const label = display || raw || trackingStatus;
   if (!label) {
-    if (!tracking) return <span style={{ fontSize: 11, color: "#5A6478", fontStyle: "italic" }}>No MP</span>;
-    const st = (tracking.status || "").trim();
-    if (!st) return <span style={{ fontSize: 11, color: "#5A6478", fontStyle: "italic" }}>No MP</span>;
+    return <span style={{ fontSize: 11, color: "#5A6478", fontStyle: "italic" }}>No MP</span>;
   }
 
-  const ll = (label || "").toLowerCase();
+  const ll = label.toLowerCase();
   let color, bg, border;
 
   if (ll === "on time" || ll.includes("tracking active")) {

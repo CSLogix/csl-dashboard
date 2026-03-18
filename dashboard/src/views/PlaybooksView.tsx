@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiFetch, API_BASE } from '../helpers/api';
 import { useAppStore } from '../store';
+import { REP_ACCOUNTS, REP_COLORS, setRepAccounts } from '../helpers/constants';
 
 // ═══════════════════════════════════════════════════════════════
 // PLAYBOOKS VIEW — Lane playbook browser + detail viewer
@@ -356,9 +357,188 @@ function PlaybookDetail({ playbook, onBack }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MAIN EXPORT
+// TEAM & ACCOUNTS MANAGER
+// ═══════════════════════════════════════════════════════════════
+function TeamAccountsManager() {
+  const [repAccounts, setRepAccountsLocal] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [newRepName, setNewRepName] = useState("");
+  const [editingRep, setEditingRep] = useState(null);
+  const [editAccounts, setEditAccounts] = useState("");
+  const [saveMsg, setSaveMsg] = useState(null);
+
+  const fetchAssignments = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/rep-accounts`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.rep_accounts && Object.keys(data.rep_accounts).length > 0) {
+          setRepAccountsLocal(data.rep_accounts);
+        } else {
+          // Seed from hardcoded defaults if no DB entries yet
+          setRepAccountsLocal({ ...REP_ACCOUNTS });
+        }
+      }
+    } catch {
+      setRepAccountsLocal({ ...REP_ACCOUNTS });
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchAssignments(); }, [fetchAssignments]);
+
+  const saveAssignment = async (repName, accounts) => {
+    setSaving(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/rep-accounts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rep_name: repName, accounts }),
+      });
+      if (res.ok) {
+        setRepAccountsLocal(prev => ({ ...prev, [repName]: accounts }));
+        // Update the global constants
+        setRepAccounts({ ...repAccounts, [repName]: accounts });
+        setSaveMsg("Saved");
+        setTimeout(() => setSaveMsg(null), 2000);
+      }
+    } catch {}
+    setSaving(false);
+    setEditingRep(null);
+  };
+
+  const addRep = async () => {
+    const name = newRepName.trim();
+    if (!name || repAccounts[name]) return;
+    await saveAssignment(name, []);
+    setNewRepName("");
+  };
+
+  const removeRep = async (repName) => {
+    try {
+      await apiFetch(`${API_BASE}/api/rep-accounts/${encodeURIComponent(repName)}`, { method: "DELETE" });
+      setRepAccountsLocal(prev => {
+        const next = { ...prev };
+        delete next[repName];
+        return next;
+      });
+    } catch {}
+  };
+
+  const reps = Object.entries(repAccounts).sort(([a], [b]) => a.localeCompare(b));
+
+  // Collect all unique account names across all reps for the suggestion list
+  const allAccounts = [...new Set(reps.flatMap(([, accts]) => accts))].sort();
+
+  if (loading) return <div style={{ padding: 60, textAlign: "center", color: "#5A6478" }}>Loading team data...</div>;
+
+  return (
+    <div style={{ padding: "0 8px", animation: "fade-in 0.2s ease" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+        <div style={{ flex: 1 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: "#F0F2F5", letterSpacing: "-0.5px", margin: 0 }}>Team & Accounts</h1>
+          <div style={{ fontSize: 11, color: "#5A6478", marginTop: 2 }}>{reps.length} rep{reps.length !== 1 ? "s" : ""} configured</div>
+        </div>
+        {saveMsg && <span style={{ fontSize: 11, color: "#00D4AA", fontWeight: 700 }}>{saveMsg}</span>}
+      </div>
+
+      {/* Add new rep */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        <input
+          value={newRepName}
+          onChange={e => setNewRepName(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") addRep(); }}
+          placeholder="New rep name..."
+          style={{ flex: 1, maxWidth: 260, padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "var(--bg-input, rgba(255,255,255,0.04))", color: "#F0F2F5", fontSize: 12, outline: "none" }}
+        />
+        <button onClick={addRep} disabled={!newRepName.trim()}
+          style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "rgba(0,212,170,0.15)", color: "#00D4AA", fontSize: 12, fontWeight: 700, cursor: "pointer", opacity: newRepName.trim() ? 1 : 0.4 }}>
+          + Add Rep
+        </button>
+      </div>
+
+      {/* Rep cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))", gap: 12 }}>
+        {reps.map(([repName, accounts]) => {
+          const isEditing = editingRep === repName;
+          const color = REP_COLORS[repName] || "#8B95A8";
+          const initials = repName.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+
+          return (
+            <div key={repName} className="glass" style={{ padding: 16, borderRadius: 12, borderLeft: `3px solid ${color}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: "50%",
+                  background: `linear-gradient(135deg, ${color}44, ${color}88)`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 12, fontWeight: 800, color: "#fff",
+                  border: `2px solid ${color}66`,
+                }}>{initials}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#F0F2F5" }}>{repName}</div>
+                  <div style={{ fontSize: 11, color: "#5A6478" }}>{accounts.length} account{accounts.length !== 1 ? "s" : ""}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => { setEditingRep(isEditing ? null : repName); setEditAccounts(accounts.join(", ")); }}
+                    style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: isEditing ? "rgba(59,130,246,0.12)" : "transparent", color: isEditing ? "#3B82F6" : "#5A6478", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                    {isEditing ? "Cancel" : "Edit"}
+                  </button>
+                  {!["Radka", "John F", "Janice", "Boviet", "Tolead", "Allie", "John N", "Amanda"].includes(repName) && (
+                    <button onClick={() => { if (confirm(`Remove ${repName}?`)) removeRep(repName); }}
+                      style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.15)", background: "transparent", color: "#EF4444", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {isEditing ? (
+                <div>
+                  <textarea
+                    value={editAccounts}
+                    onChange={e => setEditAccounts(e.target.value)}
+                    placeholder="Comma-separated accounts: DHL, DSV, MAO..."
+                    rows={3}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 11, outline: "none", resize: "vertical", fontFamily: "'Plus Jakarta Sans', sans-serif", boxSizing: "border-box" }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 6 }}>
+                    <button
+                      onClick={() => {
+                        const parsed = editAccounts.split(",").map(s => s.trim()).filter(Boolean);
+                        saveAssignment(repName, parsed);
+                      }}
+                      disabled={saving}
+                      style={{ padding: "6px 16px", borderRadius: 8, border: "none", background: "rgba(0,212,170,0.2)", color: "#00D4AA", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                      {saving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {accounts.length === 0 && <span style={{ fontSize: 11, color: "#3D4557", fontStyle: "italic" }}>No accounts assigned</span>}
+                  {accounts.map(acct => (
+                    <span key={acct} style={{
+                      padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                      background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
+                      color: "#C8CDD5",
+                    }}>{acct}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MAIN EXPORT (Tabbed: Lane Playbooks + Team & Accounts)
 // ═══════════════════════════════════════════════════════════════
 export default function PlaybooksView() {
+  const [activeTab, setActiveTab] = useState("lanes");
   const [playbooks, setPlaybooks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedLane, setSelectedLane] = useState(null); // full playbook row
@@ -398,6 +578,30 @@ export default function PlaybooksView() {
     );
   }, [playbooks, search]);
 
+  const TABS = [
+    { key: "lanes", label: "Lane Playbooks" },
+    { key: "team", label: "Team & Accounts" },
+  ];
+
+  // ── Team tab ──
+  if (activeTab === "team") {
+    return (
+      <div style={{ padding: "0 8px", animation: "fade-in 0.2s ease" }}>
+        {/* Tab bar */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 8 }}>
+          {TABS.map(t => (
+            <button key={t.key} onClick={() => setActiveTab(t.key)}
+              style={{ padding: "6px 16px", borderRadius: 8, border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                background: activeTab === t.key ? "rgba(0,212,170,0.12)" : "transparent",
+                color: activeTab === t.key ? "#00D4AA" : "#5A6478",
+              }}>{t.label}</button>
+          ))}
+        </div>
+        <TeamAccountsManager />
+      </div>
+    );
+  }
+
   // ── Detail view ──
   if (selectedLane && !detailLoading) {
     return (
@@ -410,6 +614,16 @@ export default function PlaybooksView() {
   // ── List view ──
   return (
     <div style={{ padding: "0 8px", animation: "fade-in 0.2s ease" }}>
+      {/* Tab bar */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 8 }}>
+        {TABS.map(t => (
+          <button key={t.key} onClick={() => setActiveTab(t.key)}
+            style={{ padding: "6px 16px", borderRadius: 8, border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer",
+              background: activeTab === t.key ? "rgba(0,212,170,0.12)" : "transparent",
+              color: activeTab === t.key ? "#00D4AA" : "#5A6478",
+            }}>{t.label}</button>
+        ))}
+      </div>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <div style={{ flex: 1 }}>
