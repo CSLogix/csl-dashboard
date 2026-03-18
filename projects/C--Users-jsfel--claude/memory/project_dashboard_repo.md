@@ -28,4 +28,4 @@ scp csl_sheet_sync.py root@187.77.217.61:/root/csl-bot/csl-doc-tracker/csl_sheet
 
 **Sync verification:** Compare local vs server with `md5sum` on all changed `.py` files to confirm deploy.
 
-**Current state (2026-03-17):** All PRs through #15 merged on GitHub and fully deployed to server. CI/CD workflow live and tested green.
+**Current state (2026-03-18):** All PRs through #19 merged and deployed. PR #19 migrated frontend to TypeScript (JSX→TSX renames, type definitions in `src/types/`, typed helpers). CI/CD pipeline green.
