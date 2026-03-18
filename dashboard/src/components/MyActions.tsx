@@ -73,7 +73,13 @@ export default function MyActions({
       const ship = shipments.find(s => s.efj === a.efj);
       if (!ship) return;
       let clearType = null;
-      const coverAssigned = (ship.carrier && ship.carrier.trim()) || (ship.driver && ship.driver.trim()) || (ship.macropointUrl && ship.macropointUrl.trim()) || (ship.driverPhone && ship.driverPhone.trim()) || (ship.carrierEmail && ship.carrierEmail.trim());
+      const isFTL = ship.moveType === "FTL";
+      const acMpStat = (ship.mpStatus || "").toLowerCase().trim();
+      const acMpNotAssigned = !acMpStat || ["scheduled", "assigned", "pending", "booked"].includes(acMpStat) || acMpStat.includes("requesting");
+      const acMpActive = ship.macropointUrl && ship.macropointUrl.trim() && !acMpNotAssigned;
+      const coverAssigned = isFTL
+        ? ((ship.driverPhone && ship.driverPhone.trim()) || (ship.carrierEmail && ship.carrierEmail.trim()) || acMpActive || (ship.driver && ship.driver.trim()))
+        : ((ship.carrier && ship.carrier.trim()) || (ship.driver && ship.driver.trim()) || (ship.driverPhone && ship.driverPhone.trim()) || (ship.carrierEmail && ship.carrierEmail.trim()));
       if (a.auto_type === "cover_load" && coverAssigned) {
         clearType = "driver_assigned";
       } else if (a.auto_type === "close_out" && ["delivered", "billed_closed"].includes(ship.status)) {
@@ -150,12 +156,20 @@ export default function MyActions({
   const needsDriver = useMemo(() =>
     repShipments.filter(s => {
       const hasPickupSoon = isDateToday(s.pickupDate) || isDateTomorrow(s.pickupDate);
-      const hasCarrier = s.carrier && s.carrier.trim() !== "";
-      const hasDriver = s.driver && s.driver.trim() !== "";
-      const hasMacropoint = s.macropointUrl && s.macropointUrl.trim() !== "";
+      const isFTL = s.moveType === "FTL";
       const hasPhone = s.driverPhone && s.driverPhone.trim() !== "";
       const hasEmail = s.carrierEmail && s.carrierEmail.trim() !== "";
-      const isAssigned = hasCarrier || hasDriver || hasMacropoint || hasPhone || hasEmail;
+      const hasDriver = s.driver && s.driver.trim() !== "";
+      const hasCarrier = s.carrier && s.carrier.trim() !== "";
+      // FTL: MP URL is pre-added so ignore it. Only counts as assigned when MP status
+      // shows active tracking (tracking now, assigned, ready to track, in transit, etc.)
+      // NOT assigned: scheduled, pending, booked, requesting app install, or empty
+      const mpStat = (s.mpStatus || "").toLowerCase().trim();
+      const mpNotAssigned = !mpStat || ["scheduled", "assigned", "pending", "booked"].includes(mpStat) || mpStat.includes("requesting");
+      const mpActive = s.macropointUrl && s.macropointUrl.trim() !== "" && !mpNotAssigned;
+      const isAssigned = isFTL
+        ? (hasPhone || hasEmail || mpActive || hasDriver)
+        : (hasCarrier || hasDriver || hasPhone || hasEmail);
       return hasPickupSoon && !isAssigned && !["delivered", "empty_return", "cancelled", "cancelled_tonu", "billed_closed"].includes(s.status);
     }),
     [repShipments]
