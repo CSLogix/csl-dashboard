@@ -248,7 +248,7 @@ def load_state():
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE) as f: return json.load(f)
-        except: pass
+        except (OSError, ValueError): pass
     return {}
 
 def load_account_lookup(creds):
@@ -297,7 +297,7 @@ def _parse_date(s):
             dt=datetime.strptime(s,fmt)
             if dt.year==1900: dt=dt.replace(year=yr)
             return dt
-        except: continue
+        except (ValueError, TypeError): continue
     return None
 
 def _cutoff_alert(s):

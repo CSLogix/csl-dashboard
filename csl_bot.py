@@ -36,7 +36,7 @@ def detect_bot_block(page):
             if t in title:
                 return "akamai"
     except Exception:
-        pass
+        pass  # best-effort; returns None on failure
     return None
 
 def block_resources(page):
