@@ -516,10 +516,11 @@ SSL_LINKS = {
     "matson":    {"code": "MATSON",        "url": "https://www.matson.com/tracking"},
 }
 
-# Container prefix (first 4 chars) -> SSL code
+# BOL/booking prefix (first 4 chars) -> SSL code
+# The BOL number carries the shipping line prefix (e.g. MAEU = Maersk).
 # Used for: (1) auto-detect SSL when vessel/carrier fields are empty,
-#           (2) strip prefix for tracking retry
-CONTAINER_PREFIX_TO_SSL = {
+#           (2) strip prefix from BOL for tracking retry
+BOL_PREFIX_TO_SSL = {
     # Maersk + subsidiaries
     "MAEU": "MAERSK",
     "SEAU": "MAERSK",   # SeaLand
@@ -596,13 +597,13 @@ CONTAINER_PREFIX_TO_SSL = {
 }
 
 
-def _ssl_from_container_prefix(container):
-    """Auto-detect SSL code from container prefix (first 4 chars).
+def _ssl_from_bol_prefix(bol):
+    """Auto-detect SSL code from BOL/booking prefix (first 4 chars).
     Returns (ssl_code, url) or (None, None)."""
-    if not container or len(container.strip()) < 5:
+    if not bol or len(bol.strip()) < 5:
         return None, None
-    prefix = container.strip()[:4].upper()
-    ssl_code = CONTAINER_PREFIX_TO_SSL.get(prefix)
+    prefix = bol.strip()[:4].upper()
+    ssl_code = BOL_PREFIX_TO_SSL.get(prefix)
     if not ssl_code:
         return None, None
     # Find matching URL from SSL_LINKS
@@ -1681,14 +1682,14 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
     """
     print(f"\n  [Dray Import] row {sheet_row} — Container: {container}  BOL: {bol}")
 
-    # ── Auto-detect SSL from container prefix if not provided ─────────────────
-    if not ssl_code and container:
-        detected_ssl, detected_url = _ssl_from_container_prefix(container)
+    # ── Auto-detect SSL from BOL prefix if not provided ─────────────────────
+    if not ssl_code and bol:
+        detected_ssl, detected_url = _ssl_from_bol_prefix(bol)
         if detected_ssl:
             ssl_code = detected_ssl
             if not url:
                 url = detected_url
-            print(f"    Auto-detected SSL from prefix: {container[:4]} -> {ssl_code}")
+            print(f"    Auto-detected SSL from BOL prefix: {bol[:4]} -> {ssl_code}")
 
     # ── No SSL code = can't call API ─────────────────────────────────────────
     if not ssl_code:
@@ -1726,15 +1727,15 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                     eta, pickup, ret, status = _jsoncargo_container_track(
                         found_container, ssl_code)
 
-        # ── Try stripped container (no prefix) if still _fallback ─────────────
-        c_stripped = container.strip() if container else ""
-        prefix = c_stripped[:4].upper() if len(c_stripped) >= 5 else ""
-        if (status == "_fallback" and prefix
-                and prefix in CONTAINER_PREFIX_TO_SSL
-                and re.match(r'^[A-Z]{4}\d+$', c_stripped)):
-            stripped = c_stripped[4:]  # e.g. MAEU2814354 -> 2814354
-            print(f"    Stripping known prefix {prefix} — trying: {stripped}")
-            eta, pickup, ret, status = _jsoncargo_container_track(stripped, ssl_code)
+        # ── Try stripped BOL (remove SSL prefix) if still _fallback ───────────
+        bol_stripped = bol.strip() if bol else ""
+        bol_prefix = bol_stripped[:4].upper() if len(bol_stripped) >= 5 else ""
+        if (status == "_fallback" and bol_prefix
+                and bol_prefix in BOL_PREFIX_TO_SSL
+                and re.match(r'^[A-Z]{4}\d+$', bol_stripped)):
+            bol_digits = bol_stripped[4:]  # e.g. MAEU2814354 -> 2814354
+            print(f"    Stripping BOL prefix {bol_prefix} — trying: {bol_digits}")
+            eta, pickup, ret, status = _jsoncargo_container_track(bol_digits, ssl_code)
 
         # ── Browser fallback if API still returned _fallback ──────────────────
         if status == "_fallback":
@@ -1760,16 +1761,16 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                         eta, pickup, ret, status = _browser_scrape_by_ssl(
                             browser, ssl_code, url, container, container)
 
-                    # Retry browser with stripped container (digits only)
-                    if (not (eta or pickup or ret or status) and prefix
-                            and prefix in CONTAINER_PREFIX_TO_SSL
-                            and re.match(r'^[A-Z]{4}\d+$', c_stripped)):
-                        stripped = c_stripped[4:]
-                        print(f"    Retrying browser with stripped prefix {prefix}: {stripped}")
+                    # Retry browser with stripped BOL (digits only)
+                    if (not (eta or pickup or ret or status) and bol_prefix
+                            and bol_prefix in BOL_PREFIX_TO_SSL
+                            and re.match(r'^[A-Z]{4}\d+$', bol_stripped)):
+                        bol_digits = bol_stripped[4:]
+                        print(f"    Retrying browser with stripped BOL {bol_prefix}: {bol_digits}")
                         eta, pickup, ret, status = _browser_scrape_by_ssl(
-                            browser, ssl_code, url, stripped, container)
+                            browser, ssl_code, url, bol_digits, container)
                         if eta or pickup or ret or status:
-                            print(f"    Stripped container search found results!")
+                            print(f"    Stripped BOL search found results!")
 
     # Don't report pickup/LFD if it's the same as ETA (not a real LFD)
     if pickup and eta and pickup == eta:

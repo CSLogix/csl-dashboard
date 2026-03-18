@@ -108,8 +108,8 @@ ACCOUNT_REPS_PG = {
 }
 
 
-# Container prefix -> SSL code (shared with import bot)
-CONTAINER_PREFIX_TO_SSL = {
+# BOL/booking prefix (first 4 chars) -> SSL code
+BOL_PREFIX_TO_SSL = {
     "MAEU": "MAERSK", "SEAU": "MAERSK", "SGLU": "MAERSK",
     "SUDU": "MAERSK", "MCPU": "MAERSK", "ALIU": "MAERSK", "CNIU": "MAERSK",
     "CMDU": "CMA_CGM", "APLU": "CMA_CGM", "ACLU": "CMA_CGM",
@@ -128,16 +128,16 @@ CONTAINER_PREFIX_TO_SSL = {
 }
 
 
-def _ssl_from_container_prefix(container):
-    """Auto-detect SSL code from container prefix (first 4 chars)."""
-    if not container or len(container.strip()) < 5:
+def _ssl_from_bol_prefix(bol):
+    """Auto-detect SSL code from BOL/booking prefix (first 4 chars)."""
+    if not bol or len(bol.strip()) < 5:
         return None
-    prefix = container.strip()[:4].upper()
-    return CONTAINER_PREFIX_TO_SSL.get(prefix)
+    prefix = bol.strip()[:4].upper()
+    return BOL_PREFIX_TO_SSL.get(prefix)
 
 
-def _resolve_ssl_export(vessel, carrier, container=""):
-    """Resolve SSL code from vessel/carrier text, with container prefix fallback."""
+def _resolve_ssl_export(vessel, carrier, bol=""):
+    """Resolve SSL code from vessel/carrier text, with BOL prefix fallback."""
     for text in (vessel or "", carrier or ""):
         val = text.strip().lower()
         if not val:
@@ -150,11 +150,11 @@ def _resolve_ssl_export(vessel, carrier, container=""):
         for key, code in SSL_LINKS_PG.items():
             if any(w.startswith(key) for w in val.split()):
                 return code
-    # Fallback: detect from container prefix
-    if container:
-        detected = _ssl_from_container_prefix(container)
+    # Fallback: detect from BOL prefix (e.g. MAEU2814354 -> MAERSK)
+    if bol:
+        detected = _ssl_from_bol_prefix(bol)
         if detected:
-            print(f"    Auto-detected SSL from prefix: {container[:4]} -> {detected}")
+            print(f"    Auto-detected SSL from BOL prefix: {bol[:4]} -> {detected}")
             return detected
     return None
 
@@ -531,9 +531,9 @@ def run_once():
                                    account=tab_name, move_type="Dray Export")
 
             # Resolve SSL line
-            ssl_line = _resolve_ssl_export(vessel, carrier, container)
+            ssl_line = _resolve_ssl_export(vessel, carrier, booking)
             if not ssl_line:
-                print(f"    SSL line not detected for {vessel}/{carrier}/{container} - skipping API")
+                print(f"    SSL line not detected for {vessel}/{carrier}/{booking} - skipping API")
                 continue
 
             # Check if container column has booking# instead of container#
