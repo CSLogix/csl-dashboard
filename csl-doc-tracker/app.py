@@ -3,8 +3,8 @@ FastAPI dashboard for CSL AI Dispatch — Operations Dashboard.
 Thin orchestrator: imports routers, adds middleware, handles startup/shutdown.
 """
 
-import logging
 import os
+import sys
 import threading
 from pathlib import Path
 
@@ -13,6 +13,10 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
+
+# Make csl_logging importable from the parent directory
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from csl_logging import get_logger
 
 import auth
 import database as db
@@ -38,8 +42,7 @@ from routes import (
     email_drafts,
 )
 
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 app = FastAPI(title="CSL AI Dispatch")
 

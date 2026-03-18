@@ -12,10 +12,10 @@ Usage:
     from csl_pg_writer import pg_update_shipment, pg_archive_shipment
 """
 import os
-import logging
 from date_normalizer import clean_date
+from csl_logging import get_logger
 
-log = logging.getLogger("pg_writer")
+log = get_logger("pg_writer")
 
 _conn = None
 _env_loaded = False

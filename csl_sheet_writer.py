@@ -11,13 +11,13 @@ Deploy to: /root/csl-bot/csl_sheet_writer.py
 """
 
 import os
-import logging
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from csl_logging import get_logger
 
-log = logging.getLogger("sheet_writer")
+log = get_logger("sheet_writer")
 
 MASTER_SHEET_ID = "19MB5HmmWwsVXY_nADCYYLJL-zWXYt8yWrfeRBSfB2S0"
 CREDS_FILE = os.environ.get("GOOGLE_CREDENTIALS_FILE", "/root/csl-credentials.json")

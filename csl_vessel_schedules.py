@@ -13,7 +13,6 @@ import json
 import os
 import sys
 import time
-import logging
 import requests
 import psycopg2
 import psycopg2.extras
@@ -24,13 +23,10 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, "/root/csl-bot/csl-doc-tracker")
 import config
 
+from csl_logging import get_logger
+
 ET = ZoneInfo("America/New_York")
-log = logging.getLogger("vessel-schedules")
-logging.basicConfig(
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-    level=logging.INFO,
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+log = get_logger("vessel-schedules")
 
 # SeaRates API keys
 SEARATES_API_KEY = os.environ.get("SEARATES_API_KEY", "")

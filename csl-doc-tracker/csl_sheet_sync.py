@@ -14,7 +14,6 @@ Designed to run as cron or systemd service.
 
 import argparse
 import json
-import logging
 
 # ── Status normalizer (sheet title-case → PG snake_case) ──
 _STATUS_NORM = {
@@ -60,11 +59,10 @@ from google.oauth2.service_account import Credentials
 import config
 import database as db
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [sheet_sync] %(message)s",
-)
-log = logging.getLogger("sheet_sync")
+sys.path.insert(0, str(os.path.join(os.path.dirname(__file__), "..")))
+from csl_logging import get_logger
+
+log = get_logger("sheet_sync")
 
 CREDS_FILE = "/root/csl-credentials.json"
 BOVIET_SHEET_ID = "1OP-ZDaMCOsPxcxezHSPfN5ftUXlUcOjFgsfCQgDp3wI"

@@ -14,7 +14,6 @@ import time
 import json
 import uuid
 import base64
-import logging
 from pathlib import Path
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -40,12 +39,9 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 load_dotenv(os.path.join(os.path.dirname(__file__), "csl-doc-tracker", ".env"))
 
 # ── Logging ──
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-log = logging.getLogger("csl_inbox_scanner")
+from csl_logging import get_logger
+
+log = get_logger("csl_inbox_scanner")
 
 # ── Config ──
 TOKEN_PATH = os.path.join(os.path.dirname(__file__), "csl_gmail_token.json")

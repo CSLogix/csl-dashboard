@@ -17,6 +17,9 @@ import time as _time
 import random as _random
 import argparse
 from urllib.parse import urlparse
+from csl_logging import get_logger
+
+log = get_logger("csl_bot")
 
 POLL_INTERVAL = 3 * 60 * 60  # 3 hours in seconds
 
@@ -61,12 +64,12 @@ def check_proxy_health(browser, timeout=15000):
         body = page.inner_text("body")
         page.close()
         if "origin" in body:
-            print(f"  Proxy OK (response: {body.strip()[:60]})")
+            log.info("Proxy health check passed", extra={"response": body.strip()[:60]})
             return True
-        print("  Proxy returned unexpected response")
+        log.warning("Proxy returned unexpected response")
         return False
     except Exception as exc:
-        print(f"  Proxy FAILED: {exc.__class__.__name__}: {str(exc)[:80]}")
+        log.error("Proxy health check failed", extra={"error": f"{exc.__class__.__name__}: {str(exc)[:80]}"})
         try:
             page.close()
         except Exception:
@@ -83,8 +86,7 @@ def sheets_retry(func, *args, max_retries=5, **kwargs):
         except Exception as exc:
             if "429" in str(exc) and attempt < max_retries - 1:
                 wait = min(2 ** attempt + _random.uniform(0, 1), 60)
-                print(f"  QUOTA HIT (429) — waiting {wait:.1f}s "
-                      f"(attempt {attempt+1}/{max_retries})")
+                log.warning("Quota hit (429), retrying", extra={"wait_seconds": round(wait, 1), "attempt": attempt + 1, "max_retries": max_retries})
                 _time.sleep(wait)
             else:
                 raise
@@ -163,7 +165,7 @@ def _jsoncargo_bol_lookup(bol_num, ssl_line):
     cache_key = f"bol:{bol_num}"
     cached = _jc_cache_get(cache_key)
     if cached is not None:
-        print(f"    BOL lookup: cache hit for {bol_num}")
+        log.info("BOL lookup cache hit", extra={"bol": bol_num})
         return cached
     api_key = _get_jsoncargo_key()
     if not api_key:
@@ -176,13 +178,13 @@ def _jsoncargo_bol_lookup(bol_num, ssl_line):
         if "data" in data:
             containers = data["data"].get("associated_container_numbers", [])
             if containers:
-                print(f"    BOL lookup: found container(s) {containers}")
+                log.info("BOL lookup found containers", extra={"bol": bol_num, "containers": containers})
                 _jc_cache_set(cache_key, containers[0])
                 return containers[0]
-        print(f"    BOL lookup: {data.get('error', {}).get('title', 'no result')}")
+        log.info("BOL lookup returned no result", extra={"bol": bol_num, "error": data.get('error', {}).get('title', 'no result')})
         return None
     except Exception as exc:
-        print(f"    BOL lookup error: {exc}")
+        log.error("BOL lookup error", extra={"bol": bol_num, "error": str(exc)})
         return None
 
 
@@ -218,7 +220,7 @@ def _searates_container_track(container_num, ssl_line):
         data = resp.json()
         if data.get("status") != "success":
             msg = data.get("message", "unknown error")
-            print(f"    SeaRates: {msg}")
+            log.info("SeaRates lookup returned error", extra={"container": container_num, "message": msg})
             if any(kw in msg.lower() for kw in ("not found", "invalid", "not recognized")):
                 return None, None, None, "_fallback"
             return None, None, None, None
@@ -244,10 +246,10 @@ def _searates_container_track(container_num, ssl_line):
                 events.append(meta_st)
 
         if not events:
-            print("    SeaRates: response OK but no events")
+            log.info("SeaRates response OK but no events", extra={"container": container_num})
             return None, None, None, None
 
-        print(f"    SeaRates: {len(events)} events found")
+        log.info("SeaRates events found", extra={"container": container_num, "event_count": len(events)})
         all_text = " ".join(events)
 
         # Status extraction — same keyword priority as JSONCargo
@@ -332,7 +334,7 @@ def _searates_container_track(container_num, ssl_line):
         return eta, pickup, ret, status
 
     except Exception as e:
-        print(f"    SeaRates error: {e}")
+        log.error("SeaRates error", extra={"container": container_num, "error": str(e)})
         return None, None, None, None
 
 
@@ -341,7 +343,7 @@ def _jsoncargo_container_track(container_num, ssl_line):
     container_num = container_num.strip()
     cached = _jc_cache_get(container_num)
     if cached is not None:
-        print(f"    Tracking: cache hit for {container_num}")
+        log.info("Tracking cache hit", extra={"container": container_num})
         return tuple(cached)
     # -- Try SeaRates first (if SEARATES_API_KEY is configured) --
     if os.environ.get("SEARATES_API_KEY"):
@@ -349,7 +351,7 @@ def _jsoncargo_container_track(container_num, ssl_line):
         if sr is not None:
             _eta, _pu, _ret, _st = sr
             if _st and _st != "_fallback":
-                print(f"    SeaRates: resolved → {_st}")
+                log.info("SeaRates resolved", extra={"container": container_num, "status": _st})
                 _jc_cache_set(container_num, list(sr))
                 return sr
             # SeaRates returned _fallback or empty — try JSONCargo
@@ -357,7 +359,7 @@ def _jsoncargo_container_track(container_num, ssl_line):
     JSONCARGO_API_KEY = _get_jsoncargo_key()
     if not JSONCARGO_API_KEY:
         # Neither SeaRates nor JSONCargo available
-        print("    No tracking API keys configured")
+        log.warning("No tracking API keys configured")
         return None, None, None, "_fallback"
     try:
         url = f"{JSONCARGO_BASE}/containers/{container_num}/"
@@ -366,7 +368,7 @@ def _jsoncargo_container_track(container_num, ssl_line):
         data = resp.json()
         if "error" in data:
             err_title = data['error'].get('title', 'error')
-            print(f"    JsonCargo: {err_title}")
+            log.info("JsonCargo error response", extra={"container": container_num, "error": err_title})
             # Signal fallback for unrecognized container prefixes
             if any(kw in err_title.lower() for kw in ("prefix not found", "not valid tracking")):
                 return None, None, None, "_fallback"
@@ -387,9 +389,9 @@ def _jsoncargo_container_track(container_num, ssl_line):
         flat_status = (d.get("container_status") or "").lower()
         if not events and flat_status:
             events.append(flat_status)
-            print(f"    JsonCargo: flat response -- container_status=\"{flat_status}\"")
+            log.info("JsonCargo flat response", extra={"container": container_num, "container_status": flat_status})
         else:
-            print(f"    JsonCargo: {len(events)} events found")
+            log.info("JsonCargo events found", extra={"container": container_num, "event_count": len(events)})
 
         all_text = " ".join(events)
         status = None
@@ -466,7 +468,7 @@ def _jsoncargo_container_track(container_num, ssl_line):
             _jc_cache_set(container_num, [eta, pickup, ret, status])
         return eta, pickup, ret, status
     except Exception as e:
-        print(f"    JsonCargo error: {e}")
+        log.error("JsonCargo error", extra={"container": container_num, "error": str(e)})
         return None, None, None, None
 
 from dotenv import load_dotenv
@@ -725,10 +727,10 @@ def _load_account_reps_from_sheet(sh, force=False):
                 }
         _REP_CACHE["data"] = result
         _REP_CACHE["ts"] = now
-        print(f"  [rep_cache] loaded {len(result)} accounts from Account Rep sheet")
+        log.info("Rep cache loaded from Account Rep sheet", extra={"account_count": len(result)})
         return result
     except Exception as e:
-        print(f"  [rep_cache] WARNING: sheet load failed ({e}) — using hardcoded fallback")
+        log.warning("Rep cache sheet load failed, using hardcoded fallback", extra={"error": str(e)})
         return {}
 
 def _get_rep_for_account(sh, account_name):
@@ -868,8 +870,7 @@ def write_tracking_results(ws, sheet_row, eta, pickup, return_date, status=None)
             {"backgroundColor": {"red": 144 / 255, "green": 238 / 255, "blue": 144 / 255}},
         )
 
-    print(f"  Written → ETA={eta!r}  Pickup={pickup!r}  Return={return_date!r}  "
-          f"Status={status!r}  [{timestamp}]")
+    log.info("Written tracking results", extra={"eta": eta, "pickup": pickup, "return_date": return_date, "status": status, "timestamp": timestamp})
 
 
 # ─────────────────────────────────────────────
@@ -1058,17 +1059,17 @@ def run_dray_import(browser, url, bol):
     _stealth.apply_stealth_sync(page)
     block_resources(page)
     try:
-        print(f"    Loading {url}")
+        log.info("Loading page", extra={"url": url})
         page.goto(url, wait_until="domcontentloaded", timeout=30_000)
         blocked = detect_bot_block(page)
         if blocked:
-            print(f"    BLOCKED ({blocked}) — skipping")
+            log.warning("Blocked by bot detection", extra={"blocker": blocked, "url": url})
             return None, None, None, None
         _dismiss_dialogs(page)
 
         input_loc = _find_input(page)
         if input_loc is None:
-            print(f"    WARNING: no search input found on page")
+            log.warning("No search input found on page", extra={"url": url})
             return None, None, None, None
 
         _submit(page, input_loc, bol)
@@ -1088,10 +1089,10 @@ def run_dray_import(browser, url, bol):
         return eta, pickup, ret, status
 
     except PlaywrightTimeout as exc:
-        print(f"    TIMEOUT: {exc}")
+        log.warning("Page load timeout", extra={"url": url, "error": str(exc)})
         return None, None, None, None
     except Exception as exc:
-        print(f"    ERROR: {exc}")
+        log.error("Scraper error", extra={"url": url, "error": str(exc)})
         return None, None, None, None
     finally:
         page.close()
@@ -1141,11 +1142,11 @@ def run_shipmentlink(browser, url, bol, container):
         block_resources(page)
         try:
             label = " (retry)" if attempt == 2 else ""
-            print(f"    Loading {url}{label}")
+            log.info("Loading page", extra={"url": url, "attempt": attempt})
             page.goto(url, wait_until="domcontentloaded", timeout=60_000)
             blocked = detect_bot_block(page)
             if blocked:
-                print(f"    BLOCKED ({blocked}) — skipping")
+                log.warning("Blocked by bot detection", extra={"blocker": blocked, "url": url})
                 return None, None, None, None
             page.wait_for_timeout(3_000)
 
@@ -1167,7 +1168,7 @@ def run_shipmentlink(browser, url, bol, container):
             page.wait_for_timeout(3_000)
 
             if bol not in page.inner_text("body"):
-                print(f"    WARNING: B/L {bol} not found in results page")
+                log.warning("B/L not found in results page", extra={"bol": bol})
                 return None, None, None, None
 
             try:
@@ -1242,7 +1243,7 @@ def run_shipmentlink(browser, url, bol, container):
                                     break
                         if popup_matches:
                             pickup, pickup_status_kw = popup_matches[-1]
-                        print(f"    Popup pickup: {pickup!r}  (kw={pickup_status_kw!r})")
+                        log.info("Popup pickup scraped", extra={"pickup": pickup, "keyword": pickup_status_kw})
 
                         popup_eta_matches = []
                         for line in popup_lines:
@@ -1255,13 +1256,13 @@ def run_shipmentlink(browser, url, bol, container):
                                     break
                         if popup_eta_matches:
                             popup_eta, popup_eta_kw = popup_eta_matches[-1]
-                        print(f"    Popup ETA:    {popup_eta!r}  (kw={popup_eta_kw!r})")
+                        log.info("Popup ETA scraped", extra={"popup_eta": popup_eta, "keyword": popup_eta_kw})
                     finally:
                         popup.close()
                 else:
-                    print(f"    WARNING: container link not visible for {container_upper}")
+                    log.warning("Container link not visible", extra={"container": container_upper})
             except Exception as exc:
-                print(f"    WARNING: pickup popup scrape failed: {exc}")
+                log.warning("Pickup popup scrape failed", extra={"container": container_upper, "error": str(exc)})
 
             if eta is None and popup_eta is not None:
                 eta = popup_eta
@@ -1310,13 +1311,13 @@ def run_shipmentlink(browser, url, bol, container):
             return eta, pickup, return_date, status
 
         except PlaywrightTimeout as exc:
-            print(f"    TIMEOUT: {exc}")
+            log.warning("Shipmentlink timeout", extra={"url": url, "attempt": attempt, "error": str(exc)})
             if attempt < 2:
-                print(f"    Retrying once more...")
+                log.info("Retrying once more...")
             else:
                 return None, None, None, None
         except Exception as exc:
-            print(f"    ERROR: {exc}")
+            log.error("Shipmentlink error", extra={"url": url, "error": str(exc)})
             return None, None, None, None
         finally:
             page.close()
@@ -1336,7 +1337,7 @@ def run_hapag_lloyd(browser, url, bol, container):
     block_resources(page)
     try:
         direct_url = f"https://www.hapag-lloyd.com/en/online-business/track/track-by-booking-solution.html?blno={bol}"
-        print(f"    Loading {direct_url}")
+        log.info("Loading page", extra={"url": direct_url})
         page.goto(direct_url, wait_until="domcontentloaded", timeout=60_000)
         try:
             page.wait_for_load_state("networkidle", timeout=20_000)
@@ -1344,9 +1345,9 @@ def run_hapag_lloyd(browser, url, bol, container):
             pass
         page.wait_for_timeout(4_000)
         title = page.title()
-        print(f"    Page title: {title!r}")
+        log.info("Page loaded", extra={"title": title})
         if "just a moment" in title.lower() or "attention required" in title.lower():
-            print(f"    WARNING: Cloudflare challenge")
+            log.warning("Cloudflare challenge detected", extra={"title": title})
             return None, None, None, None
         _dismiss_dialogs(page)
         try:
@@ -1397,13 +1398,13 @@ def run_hapag_lloyd(browser, url, bol, container):
         elif discharged: status = "Discharged"
         elif final_eta: status = "Vessel"
         else: status = None
-        print(f"    Hapag result: eta={final_eta!r} pickup={pickup!r} ret={ret!r} status={status!r}")
+        log.info("Hapag result", extra={"eta": final_eta, "pickup": pickup, "return_date": ret, "status": status})
         return final_eta, pickup, ret, status
     except PlaywrightTimeout as exc:
-        print(f"    TIMEOUT: {exc}")
+        log.warning("Hapag-Lloyd timeout", extra={"error": str(exc)})
         return None, None, None, None
     except Exception as exc:
-        print(f"    ERROR: {exc}")
+        log.error("Hapag-Lloyd error", extra={"error": str(exc)})
         return None, None, None, None
     finally:
         page.close()
@@ -1415,11 +1416,11 @@ def run_one_line(browser, url, bol, container):
     _stealth.apply_stealth_sync(page)
     block_resources(page)
     try:
-        print(f"    Loading {url}")
+        log.info("Loading page", extra={"url": url})
         page.goto(url, wait_until="domcontentloaded", timeout=60_000)
         blocked = detect_bot_block(page)
         if blocked:
-            print(f"    BLOCKED ({blocked}) — skipping")
+            log.warning("Blocked by bot detection", extra={"blocker": blocked, "url": url})
             return None, None, None, None
         try:
             page.wait_for_load_state("networkidle", timeout=20_000)
@@ -1439,13 +1440,13 @@ def run_one_line(browser, url, bol, container):
         try:
             page.wait_for_selector(_ONE_SEL, timeout=20_000)
         except PlaywrightTimeout:
-            print(f"    WARNING: ONE Line form did not render in time")
+            log.warning("ONE Line form did not render in time", extra={"url": url})
             return None, None, None, None
-        print(f"    Page title: {page.title()!r}")
+        log.info("Page loaded", extra={"title": page.title()})
         input_loc = page.locator(_ONE_SEL).first
         # ONE Line wants the last 12 chars only, no 'ONEY' prefix
         one_bol = bol.upper().replace('ONEY', '').strip()[-12:]
-        print(f"    ONE BOL submitted: {one_bol!r}")
+        log.info("ONE BOL submitted", extra={"bol": one_bol})
         input_loc.fill(one_bol)
         input_loc.press("Enter")
         try:
@@ -1487,13 +1488,13 @@ def run_one_line(browser, url, bol, container):
         elif pickup: status = "Released"
         elif eta: status = "Vessel"
         else: status = None
-        print(f"    ONE result: eta={eta!r} pickup={pickup!r} ret={ret!r} status={status!r}")
+        log.info("ONE result", extra={"eta": eta, "pickup": pickup, "return_date": ret, "status": status})
         return eta, pickup, ret, status
     except PlaywrightTimeout as exc:
-        print(f"    TIMEOUT: {exc}")
+        log.warning("ONE Line timeout", extra={"error": str(exc)})
         return None, None, None, None
     except Exception as exc:
-        print(f"    ERROR: {exc}")
+        log.error("ONE Line error", extra={"error": str(exc)})
         return None, None, None, None
     finally:
         page.close()
@@ -1574,7 +1575,7 @@ def _parse_smline_detail(page):
     try:
         data = page.evaluate(_SMLINE_EXTRACT_JS)
     except Exception as exc:
-        print(f"    SM Line DOM extraction failed: {exc}")
+        log.error("SM Line DOM extraction failed", extra={"error": str(exc)})
         return None, None, None, None
 
     eta = data.get("sailing_eta")
@@ -1642,16 +1643,16 @@ def run_sm_line(browser, url, bol, container):
     page = browser.new_page()
     _stealth.apply_stealth_sync(page)
     try:
-        print(f"    Loading {url}")
+        log.info("Loading page", extra={"url": url})
         page.goto(url, wait_until="domcontentloaded", timeout=30_000)
         blocked = detect_bot_block(page)
         if blocked:
-            print(f"    BLOCKED ({blocked}) — skipping")
+            log.warning("Blocked by bot detection", extra={"blocker": blocked, "url": url})
             return None, None, None, None
         page.wait_for_timeout(2_000)
 
         # ── Search by container number first ────────────────────────
-        print(f"    SM Line: searching by container {container}")
+        log.info("SM Line searching by container", extra={"container": container})
         try:
             page.select_option("#searchType", "C")
             page.wait_for_timeout(300)
@@ -1660,7 +1661,7 @@ def run_sm_line(browser, url, bol, container):
             page.click("#btnSearch")
             page.wait_for_timeout(4_000)
         except Exception as exc:
-            print(f"    SM Line form interaction failed: {exc}")
+            log.error("SM Line form interaction failed", extra={"container": container, "error": str(exc)})
             return None, None, None, None
 
         body = page.inner_text("body")
@@ -1671,7 +1672,7 @@ def run_sm_line(browser, url, bol, container):
 
         # ── Container search returned list or nothing — try BL ──────
         if bol and bol.strip() != container.strip():
-            print(f"    SM Line: container search insufficient, trying BL {bol}")
+            log.info("SM Line container search insufficient, trying BL", extra={"bol": bol})
             page.goto(url, wait_until="domcontentloaded", timeout=30_000)
             page.wait_for_timeout(2_000)
             try:
@@ -1682,7 +1683,7 @@ def run_sm_line(browser, url, bol, container):
                 page.click("#btnSearch")
                 page.wait_for_timeout(4_000)
             except Exception as exc:
-                print(f"    SM Line BL form failed: {exc}")
+                log.error("SM Line BL form failed", extra={"bol": bol, "error": str(exc)})
                 return None, None, None, None
 
             try:
@@ -1696,10 +1697,10 @@ def run_sm_line(browser, url, bol, container):
 
         return None, None, None, None
     except PlaywrightTimeout as exc:
-        print(f"    TIMEOUT: {exc}")
+        log.warning("SM Line timeout", extra={"error": str(exc)})
         return None, None, None, None
     except Exception as exc:
-        print(f"    ERROR: {exc}")
+        log.error("SM Line error", extra={"error": str(exc)})
         return None, None, None, None
     finally:
         page.close()
@@ -1792,7 +1793,7 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                                   - return_date (str|None): Return date string if found, otherwise None.
                                   - status (str|None): Tracking status string if found, otherwise None.
                           """
-    print(f"\n  [Dray Import] row {sheet_row} — Container: {container}  BOL: {bol}")
+    log.info("Processing Dray Import row", extra={"sheet_row": sheet_row, "container": container, "bol": bol})
 
     # ── Auto-detect SSL from BOL prefix if not provided ─────────────────────
     if not ssl_code and bol:
@@ -1801,41 +1802,41 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
             ssl_code = detected_ssl
             if not url:
                 url = detected_url
-            print(f"    Auto-detected SSL from BOL prefix: {bol[:4]} -> {ssl_code}")
+            log.info("Auto-detected SSL from BOL prefix", extra={"bol_prefix": bol[:4], "ssl_code": ssl_code})
 
     # ── No SSL code = can't call API ─────────────────────────────────────────
     if not ssl_code:
         if not url or not proxy_ok:
             reason = "no URL" if not url else "proxy down"
-            print(f"    SKIPPED (no SSL code + {reason})")
+            log.info("Skipped - no SSL code", extra={"reason": reason})
             return None, None, None, None
 
         carrier_domain = _extract_domain(url)
         if circuit_breaker and carrier_domain and circuit_breaker.should_skip(carrier_domain):
-            print(f"    CIRCUIT BREAKER: skipping {carrier_domain}")
+            log.warning("Circuit breaker triggered", extra={"domain": carrier_domain})
             return None, None, None, None
 
-        print(f"    No SSL code — using generic browser scraper")
+        log.info("No SSL code - using generic browser scraper")
         eta, pickup, ret, status = run_dray_import(browser, url, bol)
         _record_cb(circuit_breaker, carrier_domain, eta, pickup, ret, status)
 
         # Retry with container number if BOL search returned nothing
         if not (eta or pickup or ret or status) and container and bol and container.strip() != bol.strip():
-            print(f"    BOL returned nothing — retrying with container: {container}")
+            log.info("BOL returned nothing, retrying with container", extra={"container": container})
             eta, pickup, ret, status = run_dray_import(browser, url, container)
 
     else:
         # ── Primary path: JsonCargo API via SSL code ─────────────────────────
-        print(f"    Using Container API (ssl_line={ssl_code})")
+        log.info("Using Container API", extra={"ssl_code": ssl_code})
         eta, pickup, ret, status = _jsoncargo_container_track(container, ssl_code)
 
         # ── Try BOL lookup if container tracking failed or returned _fallback ─
         if status == "_fallback" or not (eta or pickup or ret or status):
             if bol and bol.strip() != container.strip():
-                print(f"    Container track insufficient — trying BOL lookup: {bol}")
+                log.info("Container track insufficient, trying BOL lookup", extra={"bol": bol})
                 found_container = _jsoncargo_bol_lookup(bol, ssl_code)
                 if found_container and found_container.strip() != container.strip():
-                    print(f"    BOL resolved to container: {found_container} — tracking it")
+                    log.info("BOL resolved to container, tracking it", extra={"found_container": found_container})
                     eta, pickup, ret, status = _jsoncargo_container_track(
                         found_container, ssl_code)
 
@@ -1846,22 +1847,22 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                 and bol_prefix in BOL_PREFIX_TO_SSL
                 and re.match(r'^[A-Z]{4}\d+$', bol_stripped)):
             bol_digits = bol_stripped[4:]  # e.g. MAEU2814354 -> 2814354
-            print(f"    Stripping BOL prefix {bol_prefix} — trying: {bol_digits}")
+            log.info("Stripping BOL prefix, retrying", extra={"bol_prefix": bol_prefix, "bol_digits": bol_digits})
             eta, pickup, ret, status = _jsoncargo_container_track(bol_digits, ssl_code)
 
         # ── Browser fallback if API still returned _fallback ──────────────────
         if status == "_fallback":
             if not proxy_ok or not url:
                 reason = "proxy down" if not proxy_ok else "no URL"
-                print(f"    API exhausted + {reason} — skipping")
+                log.info("API exhausted, skipping browser fallback", extra={"reason": reason})
                 eta, pickup, ret, status = None, None, None, None
             else:
                 carrier_domain = _extract_domain(url)
                 if circuit_breaker and carrier_domain and circuit_breaker.should_skip(carrier_domain):
-                    print(f"    CIRCUIT BREAKER: skipping browser fallback for {ssl_code}")
+                    log.warning("Circuit breaker: skipping browser fallback", extra={"ssl_code": ssl_code})
                     eta, pickup, ret, status = None, None, None, None
                 else:
-                    print(f"    API exhausted — falling back to browser ({ssl_code})")
+                    log.info("API exhausted, falling back to browser", extra={"ssl_code": ssl_code})
                     eta, pickup, ret, status = _browser_scrape_by_ssl(
                         browser, ssl_code, url, bol, container)
                     _record_cb(circuit_breaker, carrier_domain, eta, pickup, ret, status)
@@ -1869,7 +1870,7 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                     # Retry browser with container if BOL search returned nothing
                     if (not (eta or pickup or ret or status) and container and bol
                             and container.strip() != bol.strip()):
-                        print(f"    BOL returned nothing — retrying with container: {container}")
+                        log.info("BOL returned nothing, retrying with container", extra={"container": container})
                         eta, pickup, ret, status = _browser_scrape_by_ssl(
                             browser, ssl_code, url, container, container)
 
@@ -1878,17 +1879,17 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                             and bol_prefix in BOL_PREFIX_TO_SSL
                             and re.match(r'^[A-Z]{4}\d+$', bol_stripped)):
                         bol_digits = bol_stripped[4:]
-                        print(f"    Retrying browser with stripped BOL {bol_prefix}: {bol_digits}")
+                        log.info("Retrying browser with stripped BOL", extra={"bol_prefix": bol_prefix, "bol_digits": bol_digits})
                         eta, pickup, ret, status = _browser_scrape_by_ssl(
                             browser, ssl_code, url, bol_digits, container)
                         if eta or pickup or ret or status:
-                            print(f"    Stripped BOL search found results!")
+                            log.info("Stripped BOL search found results")
 
     # Don't report pickup/LFD if it's the same as ETA (not a real LFD)
     if pickup and eta and pickup == eta:
         pickup = None
 
-    print(f"    ETA={eta!r}  Pickup={pickup!r}  Return={ret!r}  Status={status!r}")
+    log.info("Tracking results", extra={"eta": eta, "pickup": pickup, "return_date": ret, "status": status})
 
     # Collect updates for batching or write immediately
     if pending_updates is not None:
@@ -1900,21 +1901,21 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
         if eta and not ex_eta:
             pending_updates.append({"range": f"{col_letter(COL_ETA)}{sheet_row}", "values": [[eta]]})
         elif eta and ex_eta:
-            print(f"    I{sheet_row} already has {ex_eta!r} — not overwriting with {eta!r}")
+            log.info("ETA cell already populated, not overwriting", extra={"sheet_row": sheet_row, "existing": ex_eta, "new": eta})
         if pickup and not ex_pickup:
             pending_updates.append({"range": f"{col_letter(COL_PICKUP)}{sheet_row}", "values": [[pickup]]})
         elif pickup and ex_pickup:
-            print(f"    K{sheet_row} already has {ex_pickup!r} — not overwriting with {pickup!r}")
+            log.info("Pickup cell already populated, not overwriting", extra={"sheet_row": sheet_row, "existing": ex_pickup, "new": pickup})
         if ret and not ex_return:
             pending_updates.append({"range": f"{col_letter(COL_RETURN)}{sheet_row}", "values": [[ret]]})
         elif ret and ex_return:
-            print(f"    P{sheet_row} already has {ex_return!r} — not overwriting with {ret!r}")
+            log.info("Return cell already populated, not overwriting", extra={"sheet_row": sheet_row, "existing": ex_return, "new": ret})
         if status:
             ex_status = (existing_row[COL_STATUS - 1].strip() if existing_row and len(existing_row) > COL_STATUS - 1 else '')
             if ex_status in BOT_MANAGED_STATUSES:
                 pending_updates.append({"range": f"{col_letter(COL_STATUS)}{sheet_row}", "values": [[status]]})
             else:
-                print(f'    M{sheet_row} has manual status {ex_status!r} -- not overwriting with {status!r}')
+                log.info("Manual status set, not overwriting", extra={"sheet_row": sheet_row, "existing": ex_status, "new": status})
         pending_updates.append({"range": f"{col_letter(COL_TIMESTAMP)}{sheet_row}", "values": [[ts]]})
     else:
         write_tracking_results(ws, sheet_row, eta, pickup, ret, status)
@@ -1944,7 +1945,7 @@ def load_last_check():
             with open(LAST_CHECK_FILE) as f:
                 return json.load(f)
         except Exception as exc:
-            print(f"  WARNING: Could not read {LAST_CHECK_FILE}: {exc}")
+            log.warning("Could not read last check file", extra={"file": LAST_CHECK_FILE, "error": str(exc)})
     return {}
 
 
@@ -1965,10 +1966,10 @@ def load_account_lookup(sheet):
                 email   = row[2].strip()
                 if account and email:
                     lookup[account] = {"rep": rep, "email": email}
-        print(f"  Loaded {len(lookup)} account(s) from '{ACCOUNT_LOOKUP_TAB}'")
+        log.info("Loaded accounts from lookup tab", extra={"account_count": len(lookup), "tab": ACCOUNT_LOOKUP_TAB})
         return lookup
     except Exception as exc:
-        print(f"  WARNING: Could not load '{ACCOUNT_LOOKUP_TAB}' tab: {exc}")
+        log.warning("Could not load account lookup tab", extra={"tab": ACCOUNT_LOOKUP_TAB, "error": str(exc)})
         return {}
 
 
@@ -1987,7 +1988,7 @@ def get_account_tabs(sheet, account_lookup):
     """
     all_tabs = [ws.title for ws in sheet.worksheets()]
     tabs = [t for t in all_tabs if t not in SKIP_TABS and t in account_lookup]
-    print(f"  Account tabs to process: {tabs}")
+    log.info("Account tabs to process", extra={"tabs": tabs})
     return tabs
 
 
@@ -2053,9 +2054,9 @@ def _send_email(to_email, cc_email, subject, body):
             smtp.starttls()
             smtp.login(SMTP_USER, SMTP_PASSWORD)
             smtp.sendmail(SMTP_USER, recipients, msg.as_string())
-        print(f"  Email sent → {to_email}  (cc: {cc_email or 'none'})")
+        log.info("Email sent", extra={"to": to_email, "cc": cc_email or "none"})
     except Exception as exc:
-        print(f"  WARNING: Email failed: {exc}")
+        log.warning("Email failed", extra={"to": to_email, "error": str(exc)})
 
 
 def send_account_notification(account_name, account_lookup, changes):
@@ -2064,7 +2065,7 @@ def send_account_notification(account_name, account_lookup, changes):
     Changes still logged to console but email suppressed."""
     if not changes:
         return
-    print(f"  [SUPPRESSED] Container Update email for {account_name} ({len(changes)} changes) — disabled per team request")
+    log.info("Container Update email suppressed (disabled per team request)", extra={"account": account_name, "change_count": len(changes)})
     return  # Email disabled — changes visible in dashboard + bot logs
 
     info      = account_lookup.get(account_name, {})
@@ -2145,18 +2146,18 @@ def archive_completed_row(sheet, tab_name, sheet_row, row_data, url, eta, pickup
     # ── No completed tab — write note to Col O on source tab, bail ───────────
     if not dest_tab:
         note = f"No completed tab for rep '{rep_name}' — manual archive needed"
-        print(f"  WARNING: {note} (account '{tab_name}', row {sheet_row})")
+        log.warning("No completed tab for rep", extra={"rep": rep_name, "tab": tab_name, "sheet_row": sheet_row})
         try:
             src_ws = sheet.worksheet(tab_name)
             src_ws.update_cell(sheet_row, COL_TIMESTAMP, note)
         except Exception as exc:
-            print(f"  WARNING: Could not write fallback note to Col O: {exc}")
+            log.warning("Could not write fallback note to Col O", extra={"error": str(exc)})
         return False
 
     try:
         dest_ws = sheet.worksheet(dest_tab)
     except Exception as exc:
-        print(f"  WARNING: Could not open '{dest_tab}': {exc}")
+        log.warning("Could not open completed tab", extra={"dest_tab": dest_tab, "error": str(exc)})
         return False
 
     # ── Duplicate check — skip if EFJ# already in completed tab ──────────────
@@ -2166,7 +2167,7 @@ def archive_completed_row(sheet, tab_name, sheet_row, row_data, url, eta, pickup
             if efj_num in existing_efjs:
                 dup_note = (f"WARNING: EFJ# {efj_num} already in '{dest_tab}' "
                             f"— archive skipped")
-                print(f"  {dup_note}")
+                log.warning("Duplicate EFJ in completed tab, archive skipped", extra={"efj": efj_num, "dest_tab": dest_tab})
                 try:
                     src_ws = sheet.worksheet(tab_name)
                     src_ws.update_cell(sheet_row, COL_TIMESTAMP, dup_note)
@@ -2174,7 +2175,7 @@ def archive_completed_row(sheet, tab_name, sheet_row, row_data, url, eta, pickup
                     pass
                 return False
         except Exception as exc:
-            print(f"  WARNING: Duplicate EFJ# check failed: {exc}")
+            log.warning("Duplicate EFJ check failed", extra={"efj": efj_num, "error": str(exc)})
 
     # ── Build archive row — patch tracking columns with current values ────────
     timestamp = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
@@ -2203,9 +2204,9 @@ def archive_completed_row(sheet, tab_name, sheet_row, row_data, url, eta, pickup
     try:
         dest_ws.append_row(row, value_input_option="USER_ENTERED")
         pg_archive_shipment(efj_num)
-        print(f"  Archived row {sheet_row} → '{dest_tab}'")
+        log.info("Archived row", extra={"sheet_row": sheet_row, "dest_tab": dest_tab})
     except Exception as exc:
-        print(f"  WARNING: Archive append failed for row {sheet_row}: {exc}")
+        log.warning("Archive append failed", extra={"sheet_row": sheet_row, "error": str(exc)})
         return False
 
     # ── Send archive email ────────────────────────────────────────────────────
@@ -2236,9 +2237,9 @@ def archive_completed_row(sheet, tab_name, sheet_row, row_data, url, eta, pickup
     try:
         src_ws = sheet.worksheet(tab_name)
         src_ws.delete_rows(sheet_row)
-        print(f"  Deleted row {sheet_row} from '{tab_name}'")
+        log.info("Deleted row from tab", extra={"sheet_row": sheet_row, "tab": tab_name})
     except Exception as exc:
-        print(f"  WARNING: Delete failed for row {sheet_row} in '{tab_name}': {exc}")
+        log.warning("Delete failed for row", extra={"sheet_row": sheet_row, "tab": tab_name, "error": str(exc)})
         return False
 
     return True
@@ -2278,7 +2279,7 @@ def run_once(args):
     from zoneinfo import ZoneInfo as _ZI
     from collections import defaultdict
     now_str = _time.strftime("%Y-%m-%d %H:%M ET", _time.localtime())
-    print(f"\n[{now_str}] Dray Import cycle (Postgres mode)...")
+    log.info("Dray Import cycle started (Postgres mode)", extra={"timestamp": now_str})
 
     # Ensure tracking state tables exist
     pg_ensure_tracking_tables()
@@ -2302,7 +2303,7 @@ def run_once(args):
             """)
             all_loads = cur.fetchall()
     except Exception as exc:
-        print(f"FATAL: Could not read from Postgres: {exc}")
+        log.error("Could not read from Postgres", extra={"error": str(exc)})
         return
     finally:
         if conn is not None:
@@ -2315,18 +2316,18 @@ def run_once(args):
         by_account[acct].append(row)
 
     account_tabs = sorted(by_account.keys())
-    print(f"  Loaded {len(all_loads)} active Dray Import load(s) across {len(account_tabs)} account(s)")
-    print(f"  Accounts: {account_tabs}")
+    log.info("Loaded active Dray Import loads", extra={"load_count": len(all_loads), "account_count": len(account_tabs)})
+    log.info("Accounts to process", extra={"accounts": account_tabs})
 
     if args.tab:
         if args.tab in by_account:
             account_tabs = [args.tab]
         else:
-            print(f"Tab '{args.tab}' not found. Available: {account_tabs}")
+            log.warning("Requested tab not found", extra={"tab": args.tab, "available": account_tabs})
             return
 
     if not account_tabs:
-        print("No active Dray Import loads found.")
+        log.info("No active Dray Import loads found")
         return
 
     last_check = load_last_check()
@@ -2346,16 +2347,12 @@ def run_once(args):
         # Quick proxy health check before scraping
         proxy_ok = check_proxy_health(browser)
         if not proxy_ok:
-            print()
-            print("  WARNING: Proxy is down - browser scrapers will be skipped.")
-            print("  Only API-based routes will run.")
-            print()
+            log.warning("Proxy is down - browser scrapers will be skipped. Only API-based routes will run.")
 
         for tab_name in account_tabs:
             loads = by_account[tab_name]
-            print(f"\n{'='*60}")
-            print(f"Account: {tab_name}")
-            print(f"  Loads: {len(loads)}")
+            log.info("=" * 60)
+            log.info("Processing account", extra={"tab": tab_name, "load_count": len(loads)})
 
             dray_jobs = []
             origin_fixes = []  # (efj, old_origin, new_origin) for write-back
@@ -2404,17 +2401,17 @@ def run_once(args):
                 if norm_origin and norm_origin != raw_origin:
                     origin_fixes.append((efj_val, raw_origin, norm_origin))
 
-            print(f"  Dray Import rows: {len(dray_jobs)}")
+            log.info("Dray Import rows to process", extra={"tab": tab_name, "count": len(dray_jobs)})
 
             # ── Write back normalized origins ─────────────────────────────
             if origin_fixes and not args.dry_run:
-                print(f"  Normalizing {len(origin_fixes)} origin field(s):")
+                log.info("Normalizing origin fields", extra={"count": len(origin_fixes)})
                 for efj_fix, old_orig, new_orig in origin_fixes:
-                    print(f"    {efj_fix}: {old_orig!r} -> {new_orig!r}")
+                    log.info("Origin normalized", extra={"efj": efj_fix, "old": old_orig, "new": new_orig})
                     try:
                         pg_update_shipment(efj_fix, origin=new_orig)
                     except Exception as _oe:
-                        print(f"    WARNING: PG origin update failed for {efj_fix}: {_oe}")
+                        log.warning("PG origin update failed", extra={"efj": efj_fix, "error": str(_oe)})
                     try:
                         from csl_sheet_writer import _get_gc, _find_row_by_efj
                         import gspread
@@ -2432,10 +2429,10 @@ def run_once(args):
             archive_jobs = []
             for job in dray_jobs:
                 if not job["ssl_code"] and not job["url"]:
-                    print(f"  {job['efj']}: no SSL match for vessel={job['vessel']!r} carrier={job['carrier']!r} — skipped.")
+                    log.info("No SSL match, skipped", extra={"efj": job["efj"], "vessel": job["vessel"], "carrier": job["carrier"]})
                     continue
                 if not job["bol"] and not job["container"]:
-                    print(f"  {job['efj']}: no BOL or container — skipped.")
+                    log.info("No BOL or container, skipped", extra={"efj": job["efj"]})
                     continue
 
                 # Use a throwaway list for pending_updates (sheet writes we discard)
@@ -2452,7 +2449,7 @@ def run_once(args):
                         existing_row=job.get("row_data"),
                     )
                 except Exception as _wf_err:
-                    print(f"    ERROR: Workflow crashed for {job['container']}: {_wf_err}")
+                    log.error("Workflow crashed", extra={"container": job["container"], "error": str(_wf_err)})
                     eta, pickup, ret, status = None, None, None, None
 
                 container_id  = job["container"].strip() or job["efj"]
@@ -2463,7 +2460,7 @@ def run_once(args):
                 if eta is None and pickup is None and ret is None and status is None:
                     prev = last_check.get(container_key, {})
                     new_check[container_key] = prev  # keep previous good state
-                    print(f"    ⚠ No data returned for {container_id} — skipping comparison")
+                    log.info("No data returned, skipping comparison", extra={"container": container_id})
                     continue
 
                 current = {
@@ -2530,7 +2527,7 @@ def run_once(args):
                             "changed_fields": changed_fields,
                         })
                     else:
-                        print(f"    ⚠ Suppressed empty-value alert for {container_id}")
+                        log.info("Suppressed empty-value alert", extra={"container": container_id})
 
                 # Queue for archiving if container has been returned to port
                 if status == "Returned to Port":
@@ -2554,13 +2551,13 @@ def run_once(args):
                 if nola_jobs:
                     try:
                         nola_cnums = [j["container"] for j in nola_jobs]
-                        print(f"\n  Terminal check (NOLA): {len(nola_cnums)} container(s)...")
+                        log.info("Terminal check (NOLA)", extra={"container_count": len(nola_cnums)})
                         terminal_results = _check_nola(nola_cnums)
                         for j in nola_jobs:
                             cnum = j["container"]
                             t = terminal_results.get(cnum)
                             if not t:
-                                print(f"    {cnum}: not in terminal API response")
+                                log.info("Container not in terminal API response", extra={"container": cnum})
                                 continue
                             # Update bot_notes with terminal status
                             tn = t["bot_notes"]
@@ -2569,9 +2566,9 @@ def run_once(args):
                             if t["ready"] and t["pickup_date"] and not j["existing_pickup"]:
                                 pg_update_shipment(j["efj"], pickup_date=t["pickup_date"])
                                 sheet_update_import(j["efj"], tab_name, pickup=t["pickup_date"])
-                                print(f"    {cnum}: AVAILABLE — pickup {t['pickup_date']}")
+                                log.info("Container available at terminal", extra={"container": cnum, "pickup_date": t["pickup_date"]})
                             else:
-                                print(f"    {cnum}: {tn[:90]}")
+                                log.info("Terminal status", extra={"container": cnum, "notes": tn[:90]})
                             # Write bot_notes directly to sheet Col N via csl_sheet_writer helper
                             try:
                                 import gspread
@@ -2587,20 +2584,19 @@ def run_once(args):
                             except Exception as _se:
                                 pass  # sheet write is best-effort
                     except Exception as _te:
-                        print(f"  WARNING: Terminal check error: {_te}")
+                        log.warning("Terminal check error", extra={"error": str(_te)})
 
             # ── Archive completed loads (Postgres only) ──────────────────────
             if archive_jobs and not args.dry_run:
-                print(f"\n  Archiving {len(archive_jobs)} completed load(s)...")
+                log.info("Archiving completed loads", extra={"count": len(archive_jobs)})
                 for aj in archive_jobs:
                     rep_info = _get_rep_for_account(sh, tab_name)
                     if not rep_info:
-                        print(f"  WARNING: archive skipped — no rep mapping for '{tab_name}', efj={aj['efj']}. Load remains active.")
-                        print(f"  WARN: Skipping archive {aj['efj']} — no rep mapping for '{tab_name}'")
+                        log.warning("Archive skipped - no rep mapping, load remains active", extra={"tab": tab_name, "efj": aj["efj"]})
                         continue
                     pg_archive_shipment(aj["efj"])
                     sheet_archive_row(aj["efj"], tab_name, rep=rep_info["rep"])
-                    print(f"  Archived {aj['efj']} (Returned to Port)")
+                    log.info("Archived load", extra={"efj": aj["efj"], "status": "Returned to Port"})
 
                     # Remove from new_check
                     archived_key = f"{tab_name}:{aj['container']}"
@@ -2635,15 +2631,15 @@ def run_once(args):
                         _send_email(rep_email, EMAIL_CC, subject, body)
 
             if tab_changes:
-                print(f"\n  {len(tab_changes)} change(s) detected — sending email...")
+                log.info("Changes detected, sending email", extra={"tab": tab_name, "change_count": len(tab_changes)})
                 send_account_notification(tab_name, ACCOUNT_REPS, tab_changes)
             else:
-                print(f"\n  No changes in '{tab_name}'.")
+                log.info("No changes detected", extra={"tab": tab_name})
 
         browser.close()
 
     # State already persisted per-row to Postgres via pg_set_import_state()
-    print("\nRun complete.")
+    log.info("Run complete")
 
 
 def main():
@@ -2659,13 +2655,13 @@ def main():
         run_once(args)
         return
 
-    print(f"Dray Import Monitor started — polling every {POLL_INTERVAL // 3600} hours.")
+    log.info("Dray Import Monitor started", extra={"poll_interval_hours": POLL_INTERVAL // 3600})
     while True:
         try:
             run_once(args)
         except Exception as exc:
-            print(f"ERROR in run_once: {exc.__class__.__name__}: {exc}")
-        print(f"\n  Sleeping {POLL_INTERVAL // 3600} hours...")
+            log.error("Error in run_once", extra={"error_type": exc.__class__.__name__, "error": str(exc)})
+        log.info("Sleeping before next cycle", extra={"hours": POLL_INTERVAL // 3600})
         _time.sleep(POLL_INTERVAL)
 
 
