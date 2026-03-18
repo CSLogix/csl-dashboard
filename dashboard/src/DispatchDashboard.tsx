@@ -319,14 +319,47 @@ export default function DispatchDashboard() {
     return () => clearTimeout(fallback);
   }, [fetchData, fetchProfiles, fetchScoreboard, fetchAccountHealth, fetchEmailDrafts, fetchRepAccounts]);
   useEffect(() => { const i = setInterval(fetchData, 90000); return () => clearInterval(i); }, [fetchData]);
-  // Fast-poll tracking summary (30s) so MP webhook updates appear quickly in dispatch table
+  // SSE: real-time tracking updates from webhook (< 1s latency)
+  useEffect(() => {
+    let es: EventSource | null = null;
+    let retryDelay = 1000;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function connect() {
+      es = new EventSource(`${API_BASE}/api/shipments/tracking-stream`);
+      es.onopen = () => { retryDelay = 1000; };
+      es.onmessage = (event) => {
+        try {
+          const update = JSON.parse(event.data);
+          const efj = update.efj;
+          if (!efj) return;
+          setTrackingSummary((prev: Record<string, any>) => ({
+            ...prev,
+            [efj]: { ...prev[efj], ...update },
+          }));
+        } catch {}
+      };
+      es.onerror = () => {
+        es?.close();
+        // Reconnect with exponential backoff (max 30s)
+        retryTimer = setTimeout(connect, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 30000);
+      };
+    }
+    connect();
+    return () => {
+      es?.close();
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [setTrackingSummary]);
+  // Fallback poll tracking summary (60s) in case SSE drops
   useEffect(() => {
     const i = setInterval(async () => {
       try {
         const r = await apiFetch(`${API_BASE}/api/shipments/tracking-summary`);
         if (r.ok) { const d = await r.json(); setTrackingSummary(d.tracking || {}); }
       } catch {}
-    }, 30000);
+    }, 60000);
     return () => clearInterval(i);
   }, [setTrackingSummary]);
   useEffect(() => { const i = setInterval(fetchScoreboard, 120000); return () => clearInterval(i); }, [fetchScoreboard]);

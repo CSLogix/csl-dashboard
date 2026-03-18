@@ -17,7 +17,7 @@ import database as db
 from shared import (
     _read_tracking_cache, _ai_quick_parse,
     TRACKING_CACHE_FILE, _find_tracking_entry, _classify_mp_display_status,
-    templates,
+    templates, tracking_cache, broadcast_tracking_update,
 )
 import ai_assistant
 
@@ -29,6 +29,10 @@ router = APIRouter()
 if "/root/csl-bot" not in sys.path:
     sys.path.insert(0, "/root/csl-bot")
 from csl_ftl_alerts import send_webhook_alert, STATUS_TO_DROPDOWN as _ALERT_STATUS_MAP
+try:
+    from csl_sheet_writer import sheet_update_ftl as _sheet_update_ftl
+except ImportError:
+    _sheet_update_ftl = None
 
 # ── Status hierarchy: higher number = further along in lifecycle ──
 _STATUS_RANK = {
@@ -73,6 +77,8 @@ _WEBHOOK_STATUS_MAP = {
     "TRACKING_COMPLETED_SUCCESSFULLY": "Delivered",
     "TRACKING_COMPLETED": "Delivered",
     "COMPLETED": "Delivered",
+    "READY_TO_TRACK": "Tracking Started",
+    "TRACKING_NOW": "Tracking Started",
 }
 
 _WEBHOOK_LOG = "/root/csl-bot/webhook_payloads.log"
@@ -97,38 +103,18 @@ def _webhook_basic_auth(request: Request) -> bool:
 
 
 def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload: dict):
-    """Update ftl_tracking_cache.json when a webhook event arrives."""
-    try:
-        with open(TRACKING_CACHE_FILE, "r") as f:
-            cache = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return False, None
-    efj_clean = load_ref.replace("EFJ", "").strip()
-    matched_key = None
-    for key, entry in cache.items():
-        efj = entry.get("efj", "")
-        load_num = entry.get("load_num", "")
-        mp_load_id = entry.get("mp_load_id", "")
-        if (efj == load_ref or efj == efj_clean or
-                load_num == load_ref or mp_load_id == load_ref or
-                key == efj_clean):
-            matched_key = key
-            break
+    """Update in-memory tracking cache when a webhook event arrives.
+
+    Uses the TrackingCache singleton (in-memory with debounced disk flush)
+    instead of direct file I/O for much lower latency.
+    """
+    # Find entry in in-memory cache
+    matched_key, entry = tracking_cache.find_entry(load_ref)
 
     # Fallback: look up by container field in Postgres
-    # Gap C: suffix-stripped fallback for _update_tracking_cache_webhook
-    if not matched_key and "-" in load_ref:
-        _base_ref = load_ref.rsplit("-", 1)[0]
-        for key, entry in cache.items():
-            if _base_ref in (entry.get("efj", ""), entry.get("load_num", "") or "",
-                             entry.get("mp_load_id", "") or "", key):
-                matched_key = key
-                break
-
     if not matched_key:
         try:
             with db.get_cursor() as cur:
-                # Try exact match, then LIKE for partial (PO # 336840 vs PO336840)
                 cur.execute(
                     "SELECT efj FROM shipments WHERE container = %s OR container LIKE %s LIMIT 1",
                     (load_ref, f"%{load_ref}%"),
@@ -138,10 +124,10 @@ def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload
                     pg_efj = row["efj"]
                     efj_num = pg_efj.replace("EFJ", "").strip()
                     # Check if this EFJ is in cache
-                    if efj_num in cache:
-                        matched_key = efj_num
-                    elif pg_efj in cache:
-                        matched_key = pg_efj
+                    existing = tracking_cache.get(efj_num) or tracking_cache.get(pg_efj)
+                    if existing:
+                        matched_key = efj_num if tracking_cache.get(efj_num) else pg_efj
+                        entry = existing
                     else:
                         # Pull driver_phone from driver_contacts if available
                         _init_phone = ""
@@ -158,7 +144,7 @@ def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload
                         except Exception as e:
                             log.debug("driver_contacts lookup for %s failed: %s", pg_efj, e)
                         # Create a new cache entry for this load
-                        cache[efj_num] = {
+                        entry = {
                             "efj": pg_efj,
                             "load_num": load_ref,
                             "status": "",
@@ -170,19 +156,18 @@ def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload
                             "driver_phone": _init_phone,
                             "trailer": _init_trailer,
                         }
+                        tracking_cache.set(efj_num, entry)
                         matched_key = efj_num
                         log.info(f"Webhook: created cache entry {efj_num} for container {load_ref}")
         except Exception as exc:
             log.debug(f"Webhook PG container lookup failed: {exc}")
 
-    if not matched_key:
+    if not matched_key or not entry:
         return False, None
-    entry = cache[matched_key]
     old_status = entry.get("status", "")
     # ── Status hierarchy guard: block regressions ──
     if _status_is_regression(old_status, status):
-        import logging
-        logging.getLogger("uvicorn.error").info(
+        log.info(
             f"Webhook: BLOCKED status regression {matched_key} [{old_status}] -> [{status}]"
         )
         return False, None
@@ -229,12 +214,28 @@ def _update_tracking_cache_webhook(load_ref: str, status: str, now: str, payload
 
     entry["stop_times"] = stop_times
 
-    tmp_path = TRACKING_CACHE_FILE + ".tmp"
-    with open(tmp_path, "w") as f:
-        json.dump(cache, f, indent=2)
-    os.replace(tmp_path, TRACKING_CACHE_FILE)
+    # Write to in-memory cache (disk flush happens in background every 2s)
+    tracking_cache.set(matched_key, entry)
 
     log.info(f"Webhook cache updated: {matched_key} [{old_status}] -> [{status}]")
+
+    # ── SSE broadcast: push update to all connected dashboard clients ──
+    _ts_disp, _ts_detail = _classify_mp_display_status(entry)
+    broadcast_tracking_update(matched_key, {
+        "status": status,
+        "behindSchedule": "BEHIND" in (entry.get("schedule_alert") or "").upper(),
+        "cantMakeIt": bool(entry.get("cant_make_it")),
+        "lastScraped": now,
+        "stop1Arrived": stop_times.get("stop1_arrived"),
+        "stop1Departed": stop_times.get("stop1_departed"),
+        "stop2Arrived": stop_times.get("stop2_arrived"),
+        "stop2Departed": stop_times.get("stop2_departed"),
+        "mpDisplayStatus": _ts_disp,
+        "mpDisplayDetail": _ts_detail,
+        "driverPhone": entry.get("driver_phone", ""),
+        "trailer": entry.get("trailer", ""),
+    })
+
     _match_info = {
         "efj": entry.get("efj", ""),
         "load_num": entry.get("load_num", ""),
@@ -330,6 +331,9 @@ def _webhook_send_alert_background(efj: str, load_num: str, status: str,
 
         # Map webhook status to dropdown value for PG write
         dropdown = _ALERT_STATUS_MAP.get(status)
+        # ── "Assigned" auto-status: when MP shows Tracking Started/Ready to Track ──
+        if status == "Tracking Started" and (not dropdown or dropdown == "Tracking Waiting for Update"):
+            dropdown = "Assigned"
 
         # Write PG status update
         # ── Block status regression (skip PG write AND email) ──
@@ -368,9 +372,7 @@ def _webhook_send_alert_background(efj: str, load_num: str, status: str,
 
         # Write container_url and driver_phone to PG if available from cache
         try:
-            with open(TRACKING_CACHE_FILE, "r") as _cf:
-                _cache_tmp = json.load(_cf)
-            _entry_tmp = _cache_tmp.get(matched_key, {})
+            _entry_tmp = tracking_cache.get(matched_key) or {}
             _mp_url = _entry_tmp.get("macropoint_url", "")
             if _mp_url:
                 with db.get_cursor() as cur:
@@ -408,6 +410,19 @@ def _webhook_send_alert_background(efj: str, load_num: str, status: str,
             mp_load_id=mp_load_id,
         )
         log.info(f"Webhook bg: alert {'sent' if sent else 'skipped (dedup)'} for {efj} [{status}]")
+
+        # ── Sheet dual-write (fire-and-forget) ──
+        if _sheet_update_ftl and dropdown:
+            try:
+                _sheet_update_ftl(
+                    efj, account,
+                    pickup=stop_times.get("stop1_arrived"),
+                    delivery=stop_times.get("stop2_departed") or stop_times.get("stop2_arrived"),
+                    status=dropdown,
+                )
+                log.info(f"Webhook bg: sheet dual-write for {efj} -> {dropdown}")
+            except Exception as _sh_exc:
+                log.debug(f"Webhook bg: sheet dual-write failed for {efj}: {_sh_exc}")
 
     except Exception as exc:
         log.error(f"Webhook bg: unhandled error for {efj}: {exc}")
@@ -454,34 +469,10 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
 
     # ── Location Pings ────────────────────────────────────────────────
     if data_source == "Ping" and lat and lon:
-        # Update tracking cache with latest location
-        try:
-            with open(TRACKING_CACHE_FILE, "r") as f:
-                cache = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            cache = {}
+        # Find matching cache entry using in-memory cache
+        matched_key, entry = tracking_cache.find_entry(load_ref)
 
-        # Find matching cache entry by load_ref (could be ORD1260305010 format)
-        matched_key = None
-        for key, entry in cache.items():
-            efj = entry.get("efj", "")
-            load_num = entry.get("load_num", "")
-            mp_load_id = entry.get("mp_load_id", "")
-            if (load_ref == efj or load_ref == load_num or
-                    load_ref == mp_load_id or load_ref == key):
-                matched_key = key
-                break
-        # Gap C: suffix-stripped fallback (LAX1260308015-1 -> LAX1260308015)
-        if not matched_key and "-" in load_ref:
-            _base_ref = load_ref.rsplit("-", 1)[0]
-            for key, entry in cache.items():
-                if _base_ref in (entry.get("efj", ""), entry.get("load_num", ""),
-                                 entry.get("mp_load_id", ""), key):
-                    matched_key = key
-                    break
-
-        if matched_key:
-            entry = cache[matched_key]
+        if matched_key and entry:
             entry["last_location"] = {
                 "lat": lat, "lon": lon,
                 "city": city, "state": state, "street": street,
@@ -495,10 +486,7 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
             if not (entry.get("status") or "").strip():
                 entry["status"] = "Tracking Started"
                 log.info(f"Webhook: auto-set Tracking Started for {matched_key} (ping received)")
-            tmp_path = TRACKING_CACHE_FILE + ".tmp"
-            with open(tmp_path, "w") as f:
-                json.dump(cache, f, indent=2)
-            os.replace(tmp_path, TRACKING_CACHE_FILE)
+            tracking_cache.set(matched_key, entry)
 
         log.debug(f"Webhook ping: {load_ref} @ {city}, {state}")
         return {"status": "ok", "type": "location_ping", "load": load_ref}
@@ -611,32 +599,10 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
             arrived_key = f"{stop_key}_arrived"
             departed_key = f"{stop_key}_departed"
 
-            # Read current cache to check existing stop_times
-            try:
-                with open(TRACKING_CACHE_FILE, "r") as f:
-                    _sc_cache = json.load(f)
-            except (FileNotFoundError, json.JSONDecodeError):
-                _sc_cache = {}
+            # Use in-memory cache
+            _sc_matched, _sc_entry = tracking_cache.find_entry(load_ref)
 
-            _sc_matched = None
-            for _sk, _sv in _sc_cache.items():
-                _efj = _sv.get("efj", "")
-                _ln = _sv.get("load_num", "")
-                _ml = _sv.get("mp_load_id", "")
-                if load_ref in (_efj, _ln, _ml, _sk):
-                    _sc_matched = _sk
-                    break
-            # Gap C: suffix-stripped fallback
-            if not _sc_matched and "-" in load_ref:
-                _base_ref = load_ref.rsplit("-", 1)[0]
-                for _sk, _sv in _sc_cache.items():
-                    if _base_ref in (_sv.get("efj", ""), _sv.get("load_num", ""),
-                                     _sv.get("mp_load_id", ""), _sk):
-                        _sc_matched = _sk
-                        break
-
-            if _sc_matched:
-                _sc_entry = _sc_cache[_sc_matched]
+            if _sc_matched and _sc_entry:
                 _sc_stops = _sc_entry.get("stop_times", {})
                 _changed = False
 
@@ -650,7 +616,6 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
                     _sc_stops[arrived_key] = event_local_time
                     _changed = True
                     _inferred_event = "Arrived at Pickup" if stop_key == "stop1" else "Arrived at Delivery"
-                    _inferred_code = "X1"
                     log.info(f"Webhook INFERRED {_inferred_event}: {load_ref} dist={distance_mi:.2f}mi at {stop_type}")
 
                     # Persist to PG tracking_events
@@ -702,32 +667,13 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
 
                 if _changed:
                     _sc_entry["stop_times"] = _sc_stops
-                    tmp_path = TRACKING_CACHE_FILE + ".tmp"
-                    with open(tmp_path, "w") as f:
-                        json.dump(_sc_cache, f, indent=2)
-                    os.replace(tmp_path, TRACKING_CACHE_FILE)
+                    tracking_cache.set(_sc_matched, _sc_entry)
 
         # ── Store schedule alert intelligence in tracking cache ──
         if schedule_alert:
             try:
-                with open(TRACKING_CACHE_FILE, "r") as f:
-                    _sa_cache = json.load(f)
-                _sa_key = None
-                for _sak, _sav in _sa_cache.items():
-                    if load_ref in (_sav.get("efj", ""), _sav.get("load_num", ""),
-                                    _sav.get("mp_load_id", ""), _sak):
-                        _sa_key = _sak
-                        break
-                # Gap C: suffix-stripped fallback
-                if not _sa_key and "-" in load_ref:
-                    _base_ref = load_ref.rsplit("-", 1)[0]
-                    for _sak, _sav in _sa_cache.items():
-                        if _base_ref in (_sav.get("efj", ""), _sav.get("load_num", ""),
-                                         _sav.get("mp_load_id", ""), _sak):
-                            _sa_key = _sak
-                            break
-                if _sa_key:
-                    _sa_entry = _sa_cache[_sa_key]
+                _sa_key, _sa_entry = tracking_cache.find_entry(load_ref)
+                if _sa_key and _sa_entry:
                     _old_alert = _sa_entry.get("schedule_alert", "")
                     if schedule_alert != _old_alert:
                         _sa_entry["schedule_alert"] = schedule_alert
@@ -741,13 +687,9 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
                             _sa_entry["cant_make_it"] = True
                             log.info(f"Webhook: cant_make_it=True for {_sa_key} (code=3)")
                         elif _alert_code in ("1", "2") and _sa_entry.get("cant_make_it"):
-                            # Clear cant_make_it if driver recovered (now ahead/on-time)
                             _sa_entry["cant_make_it"] = None
                             log.info(f"Webhook: cant_make_it cleared for {_sa_key} (code={_alert_code})")
-                        tmp_path = TRACKING_CACHE_FILE + ".tmp"
-                        with open(tmp_path, "w") as f:
-                            json.dump(_sa_cache, f, indent=2)
-                        os.replace(tmp_path, TRACKING_CACHE_FILE)
+                        tracking_cache.set(_sa_key, _sa_entry)
                         log.debug(f"Webhook: stored schedule alert for {_sa_key}: {schedule_alert}")
             except Exception as _sa_exc:
                 log.debug(f"Webhook: schedule alert storage failed: {_sa_exc}")

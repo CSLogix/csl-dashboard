@@ -673,10 +673,10 @@ async def api_macropoint(efj: str):
             pass
     if not shipment:
         raise HTTPException(404, f"Load {efj} not found")
-    # Also check tracking cache
+    # Read tracking cache once (in-memory, no file I/O)
     _tracking_cache = _read_tracking_cache()
-    _cached_entry = _find_tracking_entry(_tracking_cache, efj)
-    _cached_url = _cached_entry.get("macropoint_url", "")
+    cached = _find_tracking_entry(_tracking_cache, efj)
+    _cached_url = cached.get("macropoint_url", "")
 
     status = shipment.get("status", "")
     progress = _build_macropoint_progress(status)
@@ -687,10 +687,6 @@ async def api_macropoint(efj: str):
         phone_fmt = f"({phone_raw[:3]}) {phone_raw[3:6]}-{phone_raw[6:]}"
     else:
         phone_fmt = phone_raw
-
-    # ── Tracking cache (stop timeline from ftl_monitor) ──
-    tracking_cache = _read_tracking_cache()
-    cached = _find_tracking_entry(tracking_cache, efj)
 
     # ── Driver contact info (from DB, with cache fallback) ──
     contact = _get_driver_contact(efj)

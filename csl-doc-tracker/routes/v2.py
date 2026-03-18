@@ -146,7 +146,7 @@ async def api_v2_shipments(request: Request, account: str = None, status: str = 
             s["email_count"] = 0
             s["email_max_priority"] = 0
 
-    # Enrich with mp_status + mp_display_status from tracking cache
+    # Enrich with mp_status + mp_display_status + full tracking fields from cache
     try:
         _tc = _read_tracking_cache()
         for s in shipments:
@@ -159,6 +159,16 @@ async def api_v2_shipments(request: Request, account: str = None, status: str = 
                 s["mp_last_updated"] = _ce.get("last_event_at") or _ce.get("last_ping_at") or _ce.get("last_scraped") or ""
                 if not s.get("container_url") and _ce.get("macropoint_url"):
                     s["container_url"] = _ce["macropoint_url"]
+                # Full tracking fields — pre-populate so dispatch table has data on initial load
+                _st = _ce.get("stop_times") or {}
+                s["stop1_arrived"] = _st.get("stop1_arrived")
+                s["stop1_departed"] = _st.get("stop1_departed")
+                s["stop2_arrived"] = _st.get("stop2_arrived")
+                s["stop2_departed"] = _st.get("stop2_departed")
+                s["behind_schedule"] = "BEHIND" in (_ce.get("schedule_alert") or "").upper()
+                s["cant_make_it"] = bool(_ce.get("cant_make_it"))
+                s["driver_phone_cached"] = _ce.get("driver_phone", "")
+                s["trailer_cached"] = _ce.get("trailer", "")
             else:
                 s["mp_display_status"] = ""
                 s["mp_display_detail"] = ""

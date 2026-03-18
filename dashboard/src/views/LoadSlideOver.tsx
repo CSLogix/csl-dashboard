@@ -190,8 +190,25 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
       .then(r => r.ok ? r.json() : { quotes: [] })
       .then(data => { setLoadRateQuotes(data.quotes || []); setRateApplied(false); setRateDismissed(false); })
       .catch(() => setLoadRateQuotes([]));
-    // Fetch tracking for FTL loads — sync back to global trackingSummary
+    // Fetch tracking for FTL loads — use trackingSummary as instant preview,
+    // then fetch full details in background for timeline/progress bar
     if (selectedShipment.moveType === "FTL" || selectedShipment.macropointUrl) {
+      // Instant: use SSE-updated trackingSummary as initial state (no loading spinner)
+      const efjBare = (selectedShipment.efj || "").replace(/^EFJ\s*/i, "");
+      const { trackingSummary } = useAppStore.getState();
+      const cached = trackingSummary[efjBare];
+      if (cached && cached.status) {
+        setTrackingData({
+          trackingStatus: cached.status,
+          mpDisplayStatus: cached.mpDisplayStatus,
+          mpDisplayDetail: cached.mpDisplayDetail,
+          mpLastUpdated: cached.lastScraped,
+          driverPhone: cached.driverPhone,
+          trailer: cached.trailer,
+          _fromCache: true,
+        });
+      }
+      // Fetch full tracking details (timeline, progress bar, etc.)
       setTrackingLoading(true);
       apiFetch(`${API_BASE}/api/macropoint/${selectedShipment.efj}`)
         .then(r => r.ok ? r.json() : null)
@@ -199,7 +216,6 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
           if (data) {
             setTrackingData(data);
             // Push fresh MP data into global store so dispatch table updates immediately
-            const efjBare = (selectedShipment.efj || "").replace(/^EFJ\s*/i, "");
             const { setTrackingSummary } = useAppStore.getState();
             setTrackingSummary(prev => ({ ...prev, [efjBare]: { ...prev[efjBare], mpStatus: data.mpStatus || data.status, mpDisplayStatus: data.mpDisplayStatus || data.display_status, mpDisplayDetail: data.mpDisplayDetail || data.display_detail, mpLastUpdated: data.mpLastUpdated || data.last_updated } }));
           }
