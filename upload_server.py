@@ -220,7 +220,7 @@ def upload():
     for ws_tab in sheet.worksheets():
         if ws_tab.title in SKIP_TABS: continue
         try: rows=ws_tab.get_all_values()
-        except: continue
+        except Exception as e: print(f"Warning: could not read tab {ws_tab.title}: {e}"); continue
         batch=[]
         for i,row in enumerate(rows):
             if not row: continue
@@ -336,7 +336,7 @@ def macropoint_page():
         print("MP stderr:", result.stderr[-200:])
         try:
             out = json.loads(result.stdout.strip().split("\n")[-1])
-        except:
+        except (json.JSONDecodeError, ValueError, IndexError):
             out = {"status": "error", "error": result.stdout[-300:] + result.stderr[-200:]}
 
         if out.get("status") == "success":

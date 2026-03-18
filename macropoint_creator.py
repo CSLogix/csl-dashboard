@@ -76,7 +76,7 @@ def set_state(state):
 def get_state():
     try:
         with open(STATE_FILE) as f: return json.load(f)
-    except: return {}
+    except (OSError, json.JSONDecodeError): return {}
 def create_macropoint(data):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -110,7 +110,8 @@ def create_macropoint(data):
         try:
             page.click('a:has-text("New Shipment"), button:has-text("New Shipment")', timeout=10000)
             page.wait_for_load_state("networkidle", timeout=15000)
-        except:
+        except Exception as e:
+            print(f"New Shipment button not found, navigating directly: {e}")
             page.goto(MACROPOINT_URL + "shipments/new", timeout=20000)
             page.wait_for_load_state("networkidle", timeout=15000)
         page.wait_for_timeout(2000)
@@ -151,7 +152,7 @@ def create_macropoint(data):
         try:
             page.screenshot(path="/tmp/mp_form.png")
             print("Screenshot saved to /tmp/mp_form.png")
-        except: pass
+        except Exception: pass  # best-effort screenshot
 
         # ── Pickup Stop ──────────────────────────────────────────────────────
         print("Filling Pickup stop...")
