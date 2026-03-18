@@ -430,7 +430,7 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
           <button disabled={submitting} onClick={() => {
             setError("");
             if (!form.efj.trim()) { setError("EFJ Pro # is required"); return; }
-            if (!form.carrier || !form.origin || !form.destination) { setError("Carrier, Origin, and Destination are required"); return; }
+            if (!form.origin || !form.destination) { setError("Origin and Destination are required"); return; }
             setSubmitting(true);
             onSubmit({
               efj: form.efj.trim(),

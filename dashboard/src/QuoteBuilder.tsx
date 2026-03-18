@@ -612,7 +612,7 @@ export default function QuoteBuilder({ prefill } = {}) {
             durationHours: data.duration_hours || null,
           }));
         }
-      } catch { /* distance API not available yet */ }
+      } catch (e) { console.warn("Distance API error:", e); }
       finally { setFetchingMiles(false); }
     }, 1200);
     return () => clearTimeout(mileageTimer.current);

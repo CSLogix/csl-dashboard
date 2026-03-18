@@ -1225,6 +1225,8 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                                 <option value="carrier_rate">Carrier Rate</option>
                                 <option value="pod">POD</option>
                                 <option value="bol">BOL</option>
+                                <option value="booking">Booking</option>
+                                <option value="delivery_order">D/O</option>
                                 <option value="carrier_invoice">Carrier Invoice</option>
                                 <option value="packing_list">Packing List</option>
                                 <option value="msds">MSDS</option>
@@ -1264,6 +1266,8 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 <option value="carrier_rate" style={{ background: "#0D1119" }}>Carrier Rate</option>
                 <option value="pod" style={{ background: "#0D1119" }}>POD</option>
                 <option value="bol" style={{ background: "#0D1119" }}>BOL</option>
+                <option value="booking" style={{ background: "#0D1119" }}>Booking</option>
+                <option value="delivery_order" style={{ background: "#0D1119" }}>D/O</option>
                 <option value="carrier_invoice" style={{ background: "#0D1119" }}>Carrier Invoice</option>
                 <option value="packing_list" style={{ background: "#0D1119" }}>Packing List</option>
                 <option value="msds" style={{ background: "#0D1119" }}>MSDS</option>

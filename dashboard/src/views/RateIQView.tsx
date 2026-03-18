@@ -483,6 +483,7 @@ export default function RateIQView() {
     } catch (e) {
       console.error("Carrier update failed:", e);
       setDirCarriers(snapshot);
+      alert(`Failed to update carrier: ${e.message || "server error"}`);
     }
   };
 
@@ -506,8 +507,12 @@ export default function RateIQView() {
         setDirPort("all");
         setDirCaps([]);
         setDirSearch(addedName);
+      } else {
+        const txt = await r.text().catch(() => "");
+        const msg = txt.includes("unique") || txt.includes("duplicate") ? "MC# already exists in directory" : `Save failed (${r.status})`;
+        alert(msg);
       }
-    } catch (e) { console.error("Add carrier failed:", e); }
+    } catch (e) { console.error("Add carrier failed:", e); alert(`Failed to add carrier: ${e.message || "server error"}`); }
     setAddCarrierSaving(false);
   };
 
@@ -1027,20 +1032,25 @@ export default function RateIQView() {
               SEARCH RESULTS — {filtered.length} lane{filtered.length !== 1 ? "s" : ""}{moveTypeFilter !== "all" ? ` (${moveTypeFilter.toUpperCase()})` : ""}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
-              {filtered.map((group, gi) => (
-                <LaneCard key={gi} lane={{
+              {filtered.map((group, gi) => {
+                const mKey = `${group.port}|${group.destination}`;
+                const resolvedMiles = group.miles || laneMiles[mKey]?.miles || null;
+                if (!resolvedMiles && !laneMiles[mKey] && group.port && group.destination) {
+                  fetchLaneMiles(group.port, group.destination, group.rawPort || group.port, group.rawDest || group.destination);
+                }
+                return <LaneCard key={gi} lane={{
                   origin_city: group.port, dest_city: group.destination, port: group.rawPort || group.port, destination: group.rawDest || group.destination,
                   origin_state: group.origin_state, dest_state: group.dest_state,
                   load_count: group.count, avg_rate: group.count > 0 ? Math.round(group.total / group.count) : 0,
                   carrier_count: group.carriers.length,
-                  miles: group.miles, origin_zip: group.origin_zip, dest_zip: group.dest_zip,
+                  miles: resolvedMiles, origin_zip: group.origin_zip, dest_zip: group.dest_zip,
                   move_type: group.move_type,
                   bidirectional: group.bidirectional,
                 }} onClick={() => openLaneDetail(group.port, group.destination, gi, group.carriers)}
                   rateIds={(group.carriers || []).map(c => c.id).filter(Boolean)}
                   onReclassify={mt => handleReclassifyLane(group.port, group.destination, (group.carriers || []).map(c => c.id).filter(Boolean), mt)}
-                  onQuickQuote={() => { setSelectedLane({ origin: group.port, destination: group.destination }); setView("build-quote"); }} />
-              ))}
+                  onQuickQuote={() => { setSelectedLane({ origin: group.port, destination: group.destination }); setView("build-quote"); }} />;
+              })}
             </div>
             </>; })()}
           </div>

@@ -659,20 +659,22 @@ export default function DispatchDashboard() {
         throw new Error(txt);
       }
       const result = await res.json();
-      addSheetLog(`New row → Sheet | ${result.efj} (${result.tab})`);
+      const newEfj = result.shipment?.efj || result.efj || data.efj;
+      const newTab = result.shipment?.account || result.tab || data.account;
+      addSheetLog(`New row → Sheet | ${newEfj} (${newTab})`);
       if (result.playbook_match) {
-        addSheetLog(`Playbook matched | ${result.playbook_match.lane_code} → ${result.efj} (carrier: ${result.playbook_match.carrier || "—"})`);
+        addSheetLog(`Playbook matched | ${result.playbook_match.lane_code} → ${newEfj} (carrier: ${result.playbook_match.carrier || "—"})`);
       }
 
       // Upload pending documents after load creation
-      if (pendingDocs && pendingDocs.length > 0) {
+      if (pendingDocs && pendingDocs.length > 0 && newEfj) {
         for (const doc of pendingDocs) {
           try {
             const fd = new FormData();
             fd.append("file", doc.file);
             fd.append("doc_type", doc.docType);
-            await apiFetch(`${API_BASE}/api/load/${result.efj}/documents`, { method: "POST", body: fd });
-            addSheetLog(`Doc uploaded | ${doc.file.name} → ${result.efj}`);
+            await apiFetch(`${API_BASE}/api/load/${newEfj}/documents`, { method: "POST", body: fd });
+            addSheetLog(`Doc uploaded | ${doc.file.name} → ${newEfj}`);
           } catch (docErr) {
             addSheetLog(`Doc upload failed | ${doc.file.name}: ${docErr.message}`);
           }
