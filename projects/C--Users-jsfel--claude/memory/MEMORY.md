@@ -6,3 +6,5 @@
 - [project_no_sheet_sync_service.md](project_no_sheet_sync_service.md) — csl_sheet_sync.py runs inside csl-dashboard, no separate service
 - [feedback_classifier_model.md](feedback_classifier_model.md) — Email classifier must use Claude Haiku, not Gemini Flash (45% failure rate)
 - [project_port_groupings_datadriven.md](project_port_groupings_datadriven.md) — User wants port/rail groupings to be data-driven (DB + admin UI), awaiting port/rail list
+- [project_jsoncargo_quota.md](project_jsoncargo_quota.md) — JsonCargo API quota optimization: cache TTL, BOL caching, business hours gate (2026-03-18)
+- [feedback_coderabbit_docstrings.md](feedback_coderabbit_docstrings.md) — CodeRabbit auto-docstrings break builds: missing comment closers + indentation errors
