@@ -123,6 +123,37 @@ def _jc_cache_set(container_num, data):
     pg_jc_cache_set(container_num, data)
 
 
+def _jsoncargo_bol_lookup(bol_num, ssl_line):
+    """Look up container number from BOL/booking via JsonCargo API.
+    Returns the first associated container number, or None."""
+    if not bol_num or not ssl_line:
+        return None
+    cache_key = f"bol:{bol_num}"
+    cached = _jc_cache_get(cache_key)
+    if cached is not None:
+        print(f"    BOL lookup: cache hit for {bol_num}")
+        return cached
+    api_key = _get_jsoncargo_key()
+    if not api_key:
+        return None
+    try:
+        url = f"{JSONCARGO_BASE}/containers/bol/{bol_num}/"
+        resp = requests.get(url, headers={"x-api-key": api_key},
+                            params={"shipping_line": ssl_line}, timeout=20)
+        data = resp.json()
+        if "data" in data:
+            containers = data["data"].get("associated_container_numbers", [])
+            if containers:
+                print(f"    BOL lookup: found container(s) {containers}")
+                _jc_cache_set(cache_key, containers[0])
+                return containers[0]
+        print(f"    BOL lookup: {data.get('error', {}).get('title', 'no result')}")
+        return None
+    except Exception as exc:
+        print(f"    BOL lookup error: {exc}")
+        return None
+
+
 
 # -- SeaRates Container Tracking API ─────────────────────────────────────
 def _searates_container_track(container_num, ssl_line):
@@ -1580,11 +1611,27 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
         print(f"    Using Container API (ssl_line={ssl_code})")
         eta, pickup, ret, status = _jsoncargo_container_track(container, ssl_code)
 
+        # ── Try BOL lookup if container tracking failed or returned _fallback ─
+        if status == "_fallback" or not (eta or pickup or ret or status):
+            if bol and bol.strip() != container.strip():
+                print(f"    Container track insufficient — trying BOL lookup: {bol}")
+                found_container = _jsoncargo_bol_lookup(bol, ssl_code)
+                if found_container and found_container.strip() != container.strip():
+                    print(f"    BOL resolved to container: {found_container} — tracking it")
+                    eta, pickup, ret, status = _jsoncargo_container_track(
+                        found_container, ssl_code)
+
+        # ── Try stripped container (no prefix) if still _fallback ─────────────
+        if status == "_fallback" and container and re.match(r'^[A-Z]{4}\d+$', container.strip()):
+            stripped = container.strip()[4:]  # e.g. MAEU2814354 -> 2814354
+            print(f"    Trying stripped container (no prefix): {stripped}")
+            eta, pickup, ret, status = _jsoncargo_container_track(stripped, ssl_code)
+
+        # ── Browser fallback if API still returned _fallback ──────────────────
         if status == "_fallback":
-            # API didn't recognize container prefix — try browser scraper
             if not proxy_ok or not url:
                 reason = "proxy down" if not proxy_ok else "no URL"
-                print(f"    API prefix not found + {reason} — skipping")
+                print(f"    API exhausted + {reason} — skipping")
                 eta, pickup, ret, status = None, None, None, None
             else:
                 carrier_domain = _extract_domain(url)
@@ -1592,19 +1639,27 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                     print(f"    CIRCUIT BREAKER: skipping browser fallback for {ssl_code}")
                     eta, pickup, ret, status = None, None, None, None
                 else:
-                    print(f"    API prefix not found — falling back to browser ({ssl_code})")
+                    print(f"    API exhausted — falling back to browser ({ssl_code})")
                     eta, pickup, ret, status = _browser_scrape_by_ssl(
                         browser, ssl_code, url, bol, container)
                     _record_cb(circuit_breaker, carrier_domain, eta, pickup, ret, status)
 
-                    # Retry with container number if BOL search returned nothing
+                    # Retry browser with container if BOL search returned nothing
                     if (not (eta or pickup or ret or status) and container and bol
                             and container.strip() != bol.strip()):
                         print(f"    BOL returned nothing — retrying with container: {container}")
                         eta, pickup, ret, status = _browser_scrape_by_ssl(
                             browser, ssl_code, url, container, container)
+
+                    # Retry browser with stripped container (digits only)
+                    if (not (eta or pickup or ret or status) and container
+                            and re.match(r'^[A-Z]{4}\d+$', container.strip())):
+                        stripped = container.strip()[4:]
+                        print(f"    Retrying browser with stripped container: {stripped}")
+                        eta, pickup, ret, status = _browser_scrape_by_ssl(
+                            browser, ssl_code, url, stripped, container)
                         if eta or pickup or ret or status:
-                            print(f"    Container search found results!")
+                            print(f"    Stripped container search found results!")
 
     # Don't report pickup/LFD if it's the same as ETA (not a real LFD)
     if pickup and eta and pickup == eta:
