@@ -96,7 +96,11 @@ def seed_users():
         if cur.fetchone()["cnt"] > 1:
             return  # already seeded
 
-    temp_hash = bcrypt.hashpw(b"evans2026", bcrypt.gensalt()).decode()
+    default_pw = os.environ.get("DEFAULT_USER_PASSWORD", "")
+    if not default_pw:
+        log.warning("DEFAULT_USER_PASSWORD not set — skipping user seed")
+        return
+    temp_hash = bcrypt.hashpw(default_pw.encode(), bcrypt.gensalt()).decode()
     users = [
         ("jsfel", "John.Feltz@evansdelivery.com", "admin", "John F"),
         ("radka", "Radka.White@evansdelivery.com", "rep", "Radka"),

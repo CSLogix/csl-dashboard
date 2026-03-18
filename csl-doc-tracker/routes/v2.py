@@ -8,8 +8,14 @@ from fastapi import APIRouter, Query, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from google.oauth2.service_account import Credentials
 
+from psycopg2 import sql as psql
 import database as db
 from routes.email_drafts import generate_milestone_draft, MILESTONES
+
+_ALLOWED_RELATED_TABLES = frozenset({
+    "load_documents", "load_notes", "tracking_events",
+    "driver_contacts", "rate_quotes",
+})
 from shared import (
     sheet_cache,
     SHEET_ID, CREDS_FILE, COL,
@@ -532,8 +538,10 @@ async def api_v2_delete_load(efj: str, background_tasks: BackgroundTasks):
             # Delete related records first (ignore if table doesn't exist)
             for table in ("load_documents", "load_notes", "tracking_events",
                           "driver_contacts", "rate_quotes"):
+                assert table in _ALLOWED_RELATED_TABLES
                 try:
-                    cur.execute(f"DELETE FROM {table} WHERE efj = %s", (efj,))
+                    cur.execute(psql.SQL("DELETE FROM {} WHERE efj = %s").format(
+                        psql.Identifier(table)), (efj,))
                 except Exception:
                     pass  # Table may not exist in all environments
             cur.execute("DELETE FROM shipments WHERE efj = %s", (efj,))

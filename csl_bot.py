@@ -2284,6 +2284,7 @@ def run_once(args):
     pg_ensure_tracking_tables()
 
     # ── Read active dray import loads from Postgres ──────────────────────────
+    conn = None
     try:
         conn = _pg_connect()
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -2300,10 +2301,12 @@ def run_once(args):
                 ORDER BY account, efj
             """)
             all_loads = cur.fetchall()
-        conn.close()
     except Exception as exc:
         print(f"FATAL: Could not read from Postgres: {exc}")
         return
+    finally:
+        if conn is not None:
+            conn.close()
 
     # Group by account
     by_account = defaultdict(list)

@@ -6,6 +6,7 @@ from datetime import datetime
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
 from dotenv import load_dotenv
+from markupsafe import escape
 
 import bcrypt
 from functools import wraps
@@ -27,21 +28,50 @@ def _check_auth(username, password):
             and bcrypt.checkpw(password.encode(), _UPLOAD_HASH))
 
 def _get_remote_ip():
-    return request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+    # Only trust X-Forwarded-For if request comes from loopback (reverse proxy)
+    if request.remote_addr in ("127.0.0.1", "::1"):
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return request.remote_addr or ""
 
 SHEET_ID=os.environ["SHEET_ID"]
 CREDENTIALS_FILE=os.environ.get("GOOGLE_CREDENTIALS_FILE","/root/csl-credentials.json")
 SCOPES=["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
 SKIP_TABS={"Sheet 4","Account Rep","Completed Eli","Completed Radka"}
 app=Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB upload limit
+
+# ── Rate limiting ───────────────────────────────────────────────────────────
+_auth_attempts = {}  # ip -> (count, first_attempt_time)
+_RATE_LIMIT_WINDOW = 300  # 5 minutes
+_RATE_LIMIT_MAX = 10  # max attempts per window
+
+@app.after_request
+def _security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 @app.before_request
 def _require_auth():
+    import time as _time
     remote_ip = _get_remote_ip()
     if _ALLOWED_IPS and remote_ip not in _ALLOWED_IPS:
         return "Forbidden", 403
+    # Rate limit auth attempts
+    now = _time.time()
+    if remote_ip in _auth_attempts:
+        count, first_time = _auth_attempts[remote_ip]
+        if now - first_time > _RATE_LIMIT_WINDOW:
+            _auth_attempts[remote_ip] = (0, now)
+        elif count >= _RATE_LIMIT_MAX:
+            return "Too Many Requests", 429
     auth = request.authorization
     if not auth or not _check_auth(auth.username, auth.password):
+        count, first_time = _auth_attempts.get(remote_ip, (0, now))
+        _auth_attempts[remote_ip] = (count + 1, first_time)
         return ("Unauthorized", 401,
                 {"WWW-Authenticate": "Basic realm=\"CSL Upload Server\""})
 
@@ -177,7 +207,7 @@ def upload():
         file_bytes=f.read()
         report=parse_report(file_bytes,filename)
     except Exception as e:
-        return render_template_string(HTML,message=f"Parse error: {e}",msg_class="error")
+        return render_template_string(HTML,message=f"Parse error: {escape(str(e))}",msg_class="error")
     if not report:
         return render_template_string(HTML,message="No EFJ# rows found.",msg_class="error")
     try:
@@ -185,7 +215,7 @@ def upload():
         gc=gspread.authorize(creds)
         sheet=gc.open_by_key(SHEET_ID)
     except Exception as e:
-        return render_template_string(HTML,message=f"Sheets error: {e}",msg_class="error")
+        return render_template_string(HTML,message=f"Sheets error: {escape(str(e))}",msg_class="error")
     results=[];found_efjs=set();total_updates=0
     for ws_tab in sheet.worksheets():
         if ws_tab.title in SKIP_TABS: continue
@@ -211,28 +241,12 @@ def upload():
         if batch:
             try: ws_tab.batch_update(batch,value_input_option='RAW')
             except Exception as e:
-                return render_template_string(HTML,message=f"Write error: {e}",msg_class="error")
+                return render_template_string(HTML,message=f"Write error: {escape(str(e))}",msg_class="error")
     not_found=[e for e in report if e not in found_efjs]
     now=datetime.now().strftime("%Y-%m-%d %H:%M")
     msg=f"Done {now} - matched {len(found_efjs)} EFJ rows, updated {total_updates} cells."
     return render_template_string(HTML,message=msg,msg_class="success",
         results=results,not_found=not_found,total_updates=total_updates)
-
-
-@app.route('/upload-pdf-test', methods=['GET','POST'])
-def upload_pdf_test():
-    if request.method=='POST':
-        f=request.files.get('pdf')
-        if f:
-            f.save('/tmp/test_pod.pdf')
-            import subprocess
-            result=subprocess.run(['python3','/tmp/test_pdf_parse.py'],capture_output=True,text=True)
-            return f'<pre>{result.stdout}\n{result.stderr}</pre>'
-        return 'No file'
-    return '''<form method="POST" enctype="multipart/form-data">
-    <input type="file" name="pdf">
-    <button type="submit">Upload & Parse</button>
-    </form>'''
 
 
 @app.route('/macropoint', methods=['GET','POST'])
@@ -290,7 +304,7 @@ def macropoint_page():
                 "delivery_appt": d_appt,
             }
         except Exception as e:
-            error = str(e)
+            error = str(escape(str(e)))
 
     if request.method == 'POST' and 'create' in request.form:
         import json, subprocess, gspread
@@ -494,7 +508,7 @@ def mp_login():
             if 'Saved' in result.stdout:
                 message = '✅ Session saved successfully! You can now create Macropoint shipments.'
             else:
-                error = result.stdout + result.stderr
+                error = str(escape(result.stdout + result.stderr))
         else:
             # Step 1: trigger login to get OTP sent
             result = subprocess.run(
@@ -521,7 +535,7 @@ with sync_playwright() as p:
             if 'OTP_SENT' in result.stdout:
                 message = 'otp_sent'
             else:
-                error = 'Login failed: ' + result.stdout + result.stderr
+                error = 'Login failed: ' + str(escape(result.stdout + result.stderr))
 
     return render_template_string("""<!DOCTYPE html>
 <html><head><title>MP Login</title>
@@ -558,19 +572,3 @@ input[type=text]{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;bor
 
 if __name__=='__main__':
     app.run(host='0.0.0.0',port=5001,debug=False)
-
-
-@app.route('/upload-pdf-test', methods=['GET','POST'])
-def upload_pdf_test():
-    if request.method=='POST':
-        f=request.files.get('pdf')
-        if f:
-            f.save('/tmp/test_pod.pdf')
-            import subprocess
-            result=subprocess.run(['python3','/tmp/test_pdf_parse.py'],capture_output=True,text=True)
-            return f'<pre>{result.stdout}\n{result.stderr}</pre>'
-        return 'No file'
-    return '''<form method="POST" enctype="multipart/form-data">
-    <input type="file" name="pdf" >
-    <button type="submit">Upload & Parse</button>
-    </form>'''
