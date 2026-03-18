@@ -34,6 +34,8 @@ from google.oauth2.service_account import Credentials
 import config
 import database as db
 
+from csl_sheet_writer import _fmt_status, _fmt_eta, _tab_cols, TAB_COL_OVERRIDES
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [sheet_sync] %(message)s",
@@ -438,6 +440,17 @@ def sync_tolead(gc, creds):
                         _sh_del = delivery
                         if _pg_del and _pg_del != _sh_del:
                             hub_writebacks.append((ri, cols["delivery"], _pg_del))
+                        # Origin and destination write-back
+                        if cols.get("origin") is not None:
+                            _pg_origin = (pg_row.get("origin") or "").strip()
+                            _sh_origin = _shorten_address(_cell(cols["origin"]) or hub_cfg["default_origin"])
+                            if _pg_origin and _pg_origin != _sh_origin:
+                                hub_writebacks.append((ri, cols["origin"], _pg_origin))
+                        if cols.get("destination") is not None:
+                            _pg_dest = (pg_row.get("destination") or "").strip()
+                            _sh_dest = _shorten_address(_cell(cols["destination"]))
+                            if _pg_dest and _pg_dest != _sh_dest:
+                                hub_writebacks.append((ri, cols["destination"], _pg_dest))
 
                     # Write phone/trailer from PG (driver_contacts) back to sheet
                     # when PG has a value that differs from the sheet
@@ -641,6 +654,32 @@ TOLEAD_BOVIET_SYNCABLE_FIELDS = [
     "pickup_date", "delivery_date", "status", "driver_phone", "container_url",
 ]
 
+# PG field → 0-based column index for Master Sheet write-back
+# Excludes Col C (container/index 2) — hyperlinks would be destroyed by plain text writes
+MASTER_WRITEBACK_COL_MAP = {
+    "move_type":     1,
+    # "container":   2,  # SKIPPED — preserves hyperlinks (Step 6)
+    "bol":           3,
+    "vessel":        4,
+    "carrier":       5,
+    "origin":        6,
+    "destination":   7,
+    "eta":           8,
+    "lfd":           9,
+    "pickup_date":   10,
+    "delivery_date": 11,
+    "status":        12,
+    "driver":        13,
+    "bot_notes":     14,
+    "return_date":   15,
+}
+
+# Terminal statuses that should not be synced as new rows to sheets
+TERMINAL_STATUSES = {
+    "delivered", "billed_closed", "cancelled", "cancelled_tonu",
+    "Delivered", "Billed & Closed", "Cancelled", "Cancelled TONU",
+}
+
 
 def _get_pg_master_shipments() -> dict:
     """Get all non-Tolead, non-Boviet PG shipments, keyed by EFJ."""
@@ -758,10 +797,20 @@ def _merge_master_shipment(pg_row: dict, sheet_data: dict, syncable_fields=None)
                 )
 
 
+def _format_writeback_value(field, pg_val):
+    """Format a PG value for writing back to the Master Sheet."""
+    if field in ("eta", "lfd", "pickup_date", "delivery_date", "return_date"):
+        return _fmt_eta(pg_val)
+    elif field == "status":
+        return _fmt_status(pg_val)
+    return pg_val
+
+
 def sync_master(gc, creds):
-    """Sync Master Track/Trace account tabs into Postgres."""
+    """Sync Master Track/Trace account tabs into Postgres, with PG → Sheet write-back."""
     synced_new = 0
     synced_updated = 0
+    synced_to_sheet = 0
 
     try:
         sh = gc.open_by_key(MASTER_SHEET_ID)
@@ -780,6 +829,9 @@ def sync_master(gc, creds):
         # Get current PG state
         pg_map = _get_pg_master_shipments()
 
+        # Track which EFJs we saw in the sheet (for new-row detection)
+        sheet_efjs = set()
+
         for vr, tab_name in zip(value_ranges, tabs):
             rows = vr.get("values", [])
             if len(rows) < 2:
@@ -793,6 +845,14 @@ def sync_master(gc, creds):
                 if r1_filled > r0_filled:
                     hdr_idx = 1
 
+            # Resolve tab-specific column overrides for bot_notes and return_date
+            botnotes_col_letter, return_col_letter = _tab_cols(tab_name)
+            # Convert column letters to 0-based index for write-back
+            botnotes_col_idx = ord(botnotes_col_letter) - ord("A")
+            return_col_idx = ord(return_col_letter) - ord("A")
+
+            master_writebacks = []  # (row_1based, col_0based, value)
+
             for ri, row in enumerate(rows[hdr_idx + 1:], start=hdr_idx + 2):
                 def _cell(idx, r=row):
                     return r[idx].strip() if len(r) > idx else ""
@@ -803,6 +863,8 @@ def sync_master(gc, creds):
                 # Skip rows that don't look like EFJ numbers
                 if not efj.startswith("EFJ") and not efj.replace("-", "").isdigit():
                     continue
+
+                sheet_efjs.add(efj)
 
                 sheet_data = {
                     "efj": efj,
@@ -837,12 +899,130 @@ def sync_master(gc, creds):
                     _merge_master_shipment(pg_row, sheet_data)
                     synced_updated += 1
 
-        log.info("Master sync: %d new, %d checked/merged", synced_new, synced_updated)
+                    # ── PG → Sheet write-back (dashboard/bot edits) ──
+                    _pg_updated = pg_row.get("updated_at")
+                    _pg_synced = pg_row.get("sheet_synced_at")
+                    if _pg_updated and _pg_synced and _pg_updated > _pg_synced:
+                        for field, col_idx in MASTER_WRITEBACK_COL_MAP.items():
+                            # Use tab-specific columns for bot_notes and return_date
+                            if field == "bot_notes":
+                                col_idx = botnotes_col_idx
+                            elif field == "return_date":
+                                col_idx = return_col_idx
+
+                            pg_val = (pg_row.get(field) or "").strip()
+                            sheet_val = _cell(col_idx)
+
+                            if pg_val and pg_val != sheet_val:
+                                display_val = _format_writeback_value(field, pg_val)
+                                master_writebacks.append((ri, col_idx, display_val))
+
+            # Flush write-backs for this tab
+            if master_writebacks:
+                try:
+                    _batch_writeback(sh.worksheet(tab_name), master_writebacks)
+                    synced_to_sheet += len(master_writebacks)
+                    log.info("Master %s: wrote back %d cell(s) to sheet",
+                             tab_name, len(master_writebacks))
+                    time.sleep(0.5)
+                except Exception as _wb_err:
+                    log.warning("Master %s write-back failed: %s", tab_name, _wb_err)
+
+        # ── New PG rows → Sheet (dashboard-created loads) ──
+        _sync_new_pg_rows_to_sheet(sh, pg_map, sheet_efjs, tabs, rep_map)
+
+        log.info("Master sync: %d new, %d checked/merged, %d cells written back",
+                 synced_new, synced_updated, synced_to_sheet)
 
     except Exception as e:
         log.error("Master Sheet sync failed: %s", e)
 
-    return synced_new, 0
+    return synced_new, synced_to_sheet
+
+
+def _sync_new_pg_rows_to_sheet(sh, pg_map, sheet_efjs, tabs, rep_map):
+    """
+    Append PG-only rows (created via dashboard) to the correct Master Sheet tab.
+    Uses a 2-minute delay to avoid races with sheet_add_row() fire-and-forget.
+    """
+    try:
+        with db.get_cursor() as cur:
+            cur.execute("""
+                SELECT * FROM shipments
+                WHERE account NOT IN ('Tolead', 'Boviet')
+                  AND archived = FALSE
+                  AND sheet_synced_at IS NULL
+                  AND created_at < NOW() - interval '2 minutes'
+                  AND source != 'sheet'
+            """)
+            new_rows = cur.fetchall()
+    except Exception as e:
+        log.warning("Could not query new PG rows: %s", e)
+        return
+
+    appended = 0
+    for pg_row in new_rows:
+        efj = pg_row["efj"]
+        account = pg_row.get("account", "")
+        status = (pg_row.get("status") or "").strip()
+
+        # Skip if already in sheet, archived, or terminal
+        if efj in sheet_efjs:
+            # Just mark as synced — it exists in the sheet already
+            try:
+                with db.get_conn() as conn:
+                    with db.get_cursor(conn) as cur:
+                        cur.execute("UPDATE shipments SET sheet_synced_at = NOW() WHERE efj = %s", (efj,))
+            except Exception:
+                pass
+            continue
+
+        if status in TERMINAL_STATUSES:
+            continue
+
+        # Verify the account tab exists in the sheet
+        if account not in tabs:
+            log.debug("New PG row %s: account '%s' not a valid tab, skipping", efj, account)
+            continue
+
+        try:
+            ws = sh.worksheet(account)
+
+            # Build row A-P (16 columns)
+            row_data = [""] * 16
+            col_map = {
+                0: "efj", 1: "move_type", 2: "container", 3: "bol",
+                4: "vessel", 5: "carrier", 6: "origin", 7: "destination",
+                8: "eta", 9: "lfd", 10: "pickup_date", 11: "delivery_date",
+                12: "status", 13: "driver", 14: "bot_notes", 15: "return_date",
+            }
+            for idx, field in col_map.items():
+                val = pg_row.get(field, "") or ""
+                if field == "efj":
+                    row_data[idx] = efj
+                elif field == "status":
+                    row_data[idx] = _fmt_status(val)
+                elif field in ("eta", "lfd", "pickup_date", "delivery_date", "return_date"):
+                    row_data[idx] = _fmt_eta(str(val)) if val else ""
+                else:
+                    row_data[idx] = str(val)
+
+            ws.append_row(row_data, value_input_option="USER_ENTERED")
+
+            # Mark as synced
+            with db.get_conn() as conn:
+                with db.get_cursor(conn) as cur:
+                    cur.execute("UPDATE shipments SET sheet_synced_at = NOW() WHERE efj = %s", (efj,))
+
+            appended += 1
+            log.info("Master: appended new PG row %s → '%s'", efj, account)
+            time.sleep(0.5)
+
+        except Exception as e:
+            log.warning("Failed to append PG row %s to '%s': %s", efj, account, e)
+
+    if appended:
+        log.info("Master: appended %d new PG row(s) to sheet", appended)
 
 # ---------------------------------------------------------------------------
 # Main sync loop
@@ -863,7 +1043,7 @@ def run_sync():
     total_from = t_from + b_from + m_from
     total_to = t_to + b_to + m_to
     log.info(
-        "Sync complete: %d from sheet → PG, %d from PG → sheet "
+        "Sync complete: %d from sheet → PG, %d cells PG → sheet "
         "(Tolead: %d/%d, Boviet: %d/%d, Master: %d/%d)",
         total_from, total_to, t_from, t_to, b_from, b_to, m_from, m_to,
     )
