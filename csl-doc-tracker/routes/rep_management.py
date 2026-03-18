@@ -97,14 +97,14 @@ async def get_rep_tasks(rep: str = None):
     with db.get_cursor() as cur:
         if rep:
             cur.execute("""
-                SELECT id, rep, text, efj, auto_type, status, created_at
+                SELECT id, rep, text, efj, auto_type, assigned_by, status, created_at
                 FROM rep_tasks
                 WHERE rep = %s AND status = 'open'
                 ORDER BY created_at DESC
             """, (rep,))
         else:
             cur.execute("""
-                SELECT id, rep, text, efj, auto_type, status, created_at
+                SELECT id, rep, text, efj, auto_type, assigned_by, status, created_at
                 FROM rep_tasks
                 WHERE status = 'open'
                 ORDER BY created_at DESC
@@ -119,6 +119,7 @@ async def get_rep_tasks(rep: str = None):
             "text": r["text"],
             "efj": r["efj"],
             "auto_type": r["auto_type"],
+            "assigned_by": r["assigned_by"],
             "status": r["status"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
         })
@@ -133,6 +134,7 @@ async def create_task(request: Request):
     text = body.get("text", "").strip()
     efj = body.get("efj", "").strip() or None
     auto_type = body.get("auto_type") or None
+    assigned_by = body.get("assigned_by", "").strip() or None
 
     if not rep or not text:
         raise HTTPException(400, "Missing rep or text")
@@ -140,10 +142,10 @@ async def create_task(request: Request):
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
             cur.execute("""
-                INSERT INTO rep_tasks (rep, text, efj, auto_type, status)
-                VALUES (%s, %s, %s, %s, 'open')
+                INSERT INTO rep_tasks (rep, text, efj, auto_type, assigned_by, status)
+                VALUES (%s, %s, %s, %s, %s, 'open')
                 RETURNING id
-            """, (rep, text, efj, auto_type))
+            """, (rep, text, efj, auto_type, assigned_by))
             task_id = cur.fetchone()["id"]
 
     return {"ok": True, "id": task_id}
@@ -186,12 +188,18 @@ async def auto_clear_tasks(request: Request):
                 cur.execute("""
                     UPDATE rep_tasks SET status = 'auto_cleared', completed_at = NOW()
                     WHERE efj = %s AND status = 'open'
-                    AND (auto_type = 'needs_driver' OR text ILIKE '%%driver%%' OR text ILIKE '%%carrier%%')
+                    AND (auto_type IN ('needs_driver', 'cover_load') OR text ILIKE '%%driver%%' OR text ILIKE '%%carrier%%')
                 """, (efj,))
             elif clear_type == "delivered":
                 cur.execute("""
                     UPDATE rep_tasks SET status = 'auto_cleared', completed_at = NOW()
                     WHERE efj = %s AND status = 'open'
+                    AND auto_type IN ('close_out', 'cover_load', 'pro_load', 'needs_driver')
+                """, (efj,))
+            elif clear_type == "pro_assigned":
+                cur.execute("""
+                    UPDATE rep_tasks SET status = 'auto_cleared', completed_at = NOW()
+                    WHERE efj = %s AND status = 'open' AND auto_type = 'pro_load'
                 """, (efj,))
             else:
                 cur.execute("""

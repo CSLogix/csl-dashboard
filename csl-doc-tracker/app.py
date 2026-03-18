@@ -394,6 +394,7 @@ def startup():
                         text TEXT NOT NULL,
                         efj VARCHAR(32),
                         auto_type VARCHAR(32),
+                        assigned_by VARCHAR(64),
                         status VARCHAR(20) DEFAULT 'open',
                         created_at TIMESTAMPTZ DEFAULT NOW(),
                         completed_at TIMESTAMPTZ
@@ -401,6 +402,13 @@ def startup():
                 """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_rep_tasks_rep ON rep_tasks(rep)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_rep_tasks_status ON rep_tasks(status)")
+                # Add assigned_by column if missing (existing tables)
+                cur.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE rep_tasks ADD COLUMN assigned_by VARCHAR(64);
+                    EXCEPTION WHEN duplicate_column THEN NULL;
+                    END $$;
+                """)
         log.info("rep_tasks table ready")
     except Exception as e:
         log.warning("Could not create rep_tasks table: %s", e)

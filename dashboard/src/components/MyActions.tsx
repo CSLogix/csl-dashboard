@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { REP_ACCOUNTS, ALL_REP_NAMES, ALERT_TYPE_CONFIG } from '../helpers/constants';
 import { isDateToday, isDateTomorrow, useIsMobile } from '../helpers/utils';
 import { apiFetch, API_BASE } from '../helpers/api';
@@ -16,7 +16,15 @@ const MY_ACTIONS_REP_COLORS = {
 };
 
 // Severity tiers
-const SEVERITY = { red: 0, amber: 1, gray: 2 };
+const SEVERITY = { red: 0, amber: 1, blue: 2, gray: 3 };
+
+// Assignment action types
+const ACTION_TYPES = [
+  { key: "cover_load", label: "Cover", short: "Cover" },
+  { key: "pro_load", label: "PRO", short: "PRO" },
+  { key: "close_out", label: "Close", short: "Close" },
+  { key: "quote", label: "Quote", short: "Quote" },
+];
 
 export default function MyActions({
   shipments, trackingSummary, alerts,
@@ -31,50 +39,104 @@ export default function MyActions({
   const [expandedSections, setExpandedSections] = useState(new Set());
   const isMobile = useIsMobile();
 
-  // ── Manual tasks state ──
-  const [manualTasks, setManualTasks] = useState([]);
-  const [showTaskInput, setShowTaskInput] = useState(false);
-  const [taskText, setTaskText] = useState("");
-  const [tasksLoading, setTasksLoading] = useState(false);
+  // ── Assignment state ──
+  const [assignments, setAssignments] = useState([]);
+  const [showAssignForm, setShowAssignForm] = useState(false);
+  const [assignEfjSearch, setAssignEfjSearch] = useState("");
+  const [assignSelectedShipment, setAssignSelectedShipment] = useState(null);
+  const [assignActionType, setAssignActionType] = useState("cover_load");
+  const [assignToRep, setAssignToRep] = useState("");
+  const [assignNote, setAssignNote] = useState("");
+  const [assignLoading, setAssignLoading] = useState(false);
+  const [showEfjDropdown, setShowEfjDropdown] = useState(false);
+  const efjInputRef = useRef(null);
 
-  // Fetch tasks for selected rep
-  const fetchTasks = useCallback(async () => {
+  // Fetch assignments for selected rep
+  const fetchAssignments = useCallback(async () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/rep-tasks?rep=${encodeURIComponent(selectedRep)}`);
-      if (res.ok) { const d = await res.json(); setManualTasks(d.tasks || []); }
+      if (res.ok) { const d = await res.json(); setAssignments(d.tasks || []); }
     } catch {}
   }, [selectedRep]);
 
-  useEffect(() => { fetchTasks(); }, [fetchTasks]);
+  useEffect(() => { fetchAssignments(); }, [fetchAssignments]);
 
-  const addTask = async () => {
-    const text = taskText.trim();
-    if (!text) return;
-    setTasksLoading(true);
+  // Auto-clear assignments when shipment data refreshes (not on assignment creation)
+  const prevShipmentsRef = useRef(shipments);
+  useEffect(() => {
+    // Only run auto-clear when shipments data actually changes (API refresh), not on first mount with assignments
+    if (prevShipmentsRef.current === shipments) return;
+    prevShipmentsRef.current = shipments;
+    if (!assignments.length || !shipments.length) return;
+    assignments.forEach(async (a) => {
+      if (!a.efj) return;
+      const ship = shipments.find(s => s.efj === a.efj);
+      if (!ship) return;
+      let clearType = null;
+      if (a.auto_type === "cover_load" && ship.carrier && ship.carrier.trim()) {
+        clearType = "driver_assigned";
+      } else if (a.auto_type === "close_out" && ["delivered", "billed_closed"].includes(ship.status)) {
+        clearType = "delivered";
+      }
+      if (clearType) {
+        try {
+          await apiFetch(`${API_BASE}/api/rep-tasks/auto-clear`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ efj: a.efj, clear_type: clearType }),
+          });
+          setAssignments(prev => prev.filter(t => t.id !== a.id));
+        } catch {}
+      }
+    });
+  }, [shipments]);
+
+  const submitAssignment = async () => {
+    if (!assignSelectedShipment || !assignToRep) return;
+    setAssignLoading(true);
+    const actionLabel = ACTION_TYPES.find(t => t.key === assignActionType)?.label || assignActionType;
+    const text = assignNote.trim() || `${actionLabel}: ${assignSelectedShipment.efj}`;
     try {
       const res = await apiFetch(`${API_BASE}/api/rep-tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rep: selectedRep, text }),
+        body: JSON.stringify({
+          rep: assignToRep,
+          text,
+          efj: assignSelectedShipment.efj,
+          auto_type: assignActionType,
+          assigned_by: currentUser?.rep_name || selectedRep,
+        }),
       });
-      if (res.ok) { setTaskText(""); setShowTaskInput(false); await fetchTasks(); }
+      if (res.ok) {
+        setShowAssignForm(false);
+        setAssignEfjSearch("");
+        setAssignSelectedShipment(null);
+        setAssignActionType("cover_load");
+        setAssignToRep("");
+        setAssignNote("");
+        await fetchAssignments();
+      }
     } catch {}
-    setTasksLoading(false);
+    setAssignLoading(false);
   };
 
-  const completeTask = async (taskId) => {
+  const dismissAssignment = async (taskId, e) => {
+    e?.stopPropagation();
     try {
       await apiFetch(`${API_BASE}/api/rep-tasks/${taskId}/complete`, { method: "POST" });
-      setManualTasks(prev => prev.filter(t => t.id !== taskId));
+      setAssignments(prev => prev.filter(t => t.id !== taskId));
     } catch {}
   };
 
-  const deleteTask = async (taskId) => {
-    try {
-      await apiFetch(`${API_BASE}/api/rep-tasks/${taskId}`, { method: "DELETE" });
-      setManualTasks(prev => prev.filter(t => t.id !== taskId));
-    } catch {}
-  };
+  // EFJ search results
+  const efjMatches = useMemo(() => {
+    if (!assignEfjSearch.trim()) return [];
+    const q = assignEfjSearch.toLowerCase();
+    return shipments
+      .filter(s => s.efj?.toLowerCase().includes(q) || s.container?.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [assignEfjSearch, shipments]);
 
   // Scope shipments to selected rep's accounts
   const repAccounts = REP_ACCOUNTS[selectedRep] || [];
@@ -122,6 +184,17 @@ export default function MyActions({
     [repShipments]
   );
 
+  // ── Build "Assigned to you" items by enriching with shipment data ──
+  const assignedItems = useMemo(() =>
+    assignments
+      .filter(a => a.auto_type && ["cover_load", "pro_load", "close_out", "quote"].includes(a.auto_type))
+      .map(a => {
+        const ship = shipments.find(s => s.efj === a.efj);
+        return { ...a, shipment: ship || null };
+      }),
+    [assignments, shipments]
+  );
+
   // ── Build unified action list ──
   const actionGroups = useMemo(() => {
     const groups = [];
@@ -148,6 +221,19 @@ export default function MyActions({
         items: behindSchedule,
         filterAction: () => onFilterStatus("issue"),
         showCheckCall: true,
+      });
+    }
+
+    // Assigned to you — blue severity, after urgent groups
+    if (assignedItems.length > 0) {
+      groups.push({
+        id: "assigned_to_you",
+        label: "Assigned to you",
+        severity: "blue",
+        color: "#2979ff",
+        dotColor: "#2979ff",
+        items: assignedItems,
+        isAssignment: true,
       });
     }
 
@@ -200,16 +286,16 @@ export default function MyActions({
     }
 
     return groups;
-  }, [needsDriver, behindSchedule, pickupsToday, deliveriesToday, pickupsTomorrow, deliveriesTomorrow, onFilterDate, onFilterStatus]);
+  }, [needsDriver, behindSchedule, assignedItems, pickupsToday, deliveriesToday, pickupsTomorrow, deliveriesTomorrow, onFilterDate, onFilterStatus]);
 
   // ── Filter by active pill ──
   const filteredGroups = useMemo(() => {
     switch (activeFilter) {
       case "urgent":
-        return actionGroups.filter(g => g.severity === "red" || g.severity === "amber");
+        return actionGroups.filter(g => g.severity === "red" || g.severity === "amber" || g.severity === "blue");
       case "today":
         return actionGroups.filter(g =>
-          ["needs_driver", "behind_schedule", "pickups_today", "deliveries_today"].includes(g.id)
+          ["needs_driver", "behind_schedule", "assigned_to_you", "pickups_today", "deliveries_today"].includes(g.id)
         );
       case "tomorrow":
         return actionGroups.filter(g =>
@@ -220,7 +306,7 @@ export default function MyActions({
     }
   }, [actionGroups, activeFilter]);
 
-  const urgentCount = actionGroups.filter(g => g.severity === "red" || g.severity === "amber")
+  const urgentCount = actionGroups.filter(g => g.severity === "red" || g.severity === "amber" || g.severity === "blue")
     .reduce((sum, g) => sum + g.items.length, 0);
 
   const toggleSection = (id) => setExpandedSections(prev => {
@@ -232,7 +318,10 @@ export default function MyActions({
   // ── Account breakdown for a group ──
   const getAccountBreakdown = (items) => {
     const counts = {};
-    items.forEach(s => { counts[s.account] = (counts[s.account] || 0) + 1; });
+    items.forEach(s => {
+      const acct = s.account || s.shipment?.account;
+      if (acct) counts[acct] = (counts[acct] || 0) + 1;
+    });
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   };
 
@@ -300,8 +389,8 @@ export default function MyActions({
         </div>
       </div>
 
-      {/* Filter pills */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+      {/* Filter pills + Assign button */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
         {filters.map(f => {
           const isActive = activeFilter === f.key;
           return (
@@ -326,7 +415,160 @@ export default function MyActions({
             </button>
           );
         })}
+
+        {/* Assign button */}
+        <button
+          onClick={() => {
+            setShowAssignForm(!showAssignForm);
+            if (!showAssignForm) setAssignToRep(selectedRep);
+          }}
+          style={{
+            padding: "5px 14px", borderRadius: 20, border: "none",
+            fontSize: 11, fontWeight: 600, cursor: "pointer",
+            fontFamily: "'Plus Jakarta Sans', sans-serif",
+            transition: "all 0.2s ease",
+            background: showAssignForm ? "rgba(41,121,255,0.15)" : "rgba(255,255,255,0.04)",
+            color: showAssignForm ? "#2979ff" : "#5A6478",
+            marginLeft: 2,
+          }}
+          onMouseEnter={e => { if (!showAssignForm) e.currentTarget.style.background = "rgba(255,255,255,0.07)"; }}
+          onMouseLeave={e => { if (!showAssignForm) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+        >
+          + Assign
+        </button>
       </div>
+
+      {/* ── Inline Assign Form ── */}
+      {showAssignForm && (
+        <div style={{
+          marginBottom: 14, padding: 12, borderRadius: 10,
+          background: "rgba(41,121,255,0.04)",
+          border: "1px solid rgba(41,121,255,0.12)",
+        }}>
+          {/* Row 1: EFJ search + Rep selector */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <input
+                ref={efjInputRef}
+                value={assignSelectedShipment ? `${assignSelectedShipment.efj} — ${assignSelectedShipment.account}` : assignEfjSearch}
+                onChange={e => {
+                  setAssignEfjSearch(e.target.value);
+                  setAssignSelectedShipment(null);
+                  setShowEfjDropdown(true);
+                }}
+                onFocus={() => { if (assignEfjSearch && !assignSelectedShipment) setShowEfjDropdown(true); }}
+                onClick={() => { if (assignSelectedShipment) { setAssignSelectedShipment(null); setAssignEfjSearch(""); } }}
+                placeholder="Search EFJ# or container..."
+                style={{
+                  width: "100%", padding: "7px 10px", borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)",
+                  color: "#F0F2F5", fontSize: 11, outline: "none",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  boxSizing: "border-box",
+                }}
+              />
+              {showEfjDropdown && efjMatches.length > 0 && !assignSelectedShipment && (
+                <div style={{
+                  position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
+                  background: "#1A1F2E", border: "1px solid rgba(255,255,255,0.10)",
+                  borderRadius: 8, marginTop: 2, maxHeight: 180, overflowY: "auto",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                }}>
+                  {efjMatches.map(s => (
+                    <div
+                      key={s.efj}
+                      onClick={() => {
+                        setAssignSelectedShipment(s);
+                        setAssignEfjSearch("");
+                        setShowEfjDropdown(false);
+                      }}
+                      style={{
+                        padding: "7px 10px", cursor: "pointer", fontSize: 11,
+                        color: "#C8CDD5", transition: "background 0.1s",
+                        display: "flex", gap: 8, alignItems: "center",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.05)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                    >
+                      <span style={{ color: "#F0F2F5", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>{s.efj}</span>
+                      <span style={{ color: "#5A6478" }}>{s.account}</span>
+                      {s.container && <span style={{ color: "#3D4557", fontSize: 10 }}>{s.container}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <select
+              value={assignToRep}
+              onChange={e => setAssignToRep(e.target.value)}
+              style={{
+                padding: "6px 8px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.10)", borderRadius: 8,
+                color: "#F0F2F5", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none",
+                minWidth: 90,
+              }}
+            >
+              <option value="" disabled style={{ background: "#0D1119" }}>Rep...</option>
+              {ALL_REP_NAMES.map(r => (
+                <option key={r} value={r} style={{ background: "#0D1119" }}>{r}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Row 2: Action type quick-assign buttons — tap to assign immediately */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {ACTION_TYPES.map(t => (
+              <button
+                key={t.key}
+                onClick={() => { setAssignActionType(t.key); setTimeout(() => { /* submit with this type */ }, 0); }}
+                onClickCapture={() => setAssignActionType(t.key)}
+                onDoubleClick={() => {}}
+                style={{
+                  padding: "5px 14px", borderRadius: 16, border: "none",
+                  fontSize: 10, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  transition: "all 0.15s",
+                  background: assignActionType === t.key ? "rgba(41,121,255,0.18)" : "rgba(255,255,255,0.04)",
+                  color: assignActionType === t.key ? "#2979ff" : "#5A6478",
+                  textTransform: "uppercase", letterSpacing: "0.3px",
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={submitAssignment}
+              disabled={assignLoading || !assignSelectedShipment || !assignToRep}
+              style={{
+                padding: "5px 16px", borderRadius: 16, border: "none",
+                background: (!assignSelectedShipment || !assignToRep) ? "rgba(255,255,255,0.04)" : "rgba(0,212,170,0.15)",
+                color: (!assignSelectedShipment || !assignToRep) ? "#3D4557" : "#00D4AA",
+                fontSize: 10, fontWeight: 700, cursor: "pointer",
+                textTransform: "uppercase", letterSpacing: "0.3px",
+                transition: "all 0.15s",
+              }}
+            >
+              Assign
+            </button>
+            <button
+              onClick={() => {
+                setShowAssignForm(false);
+                setAssignEfjSearch("");
+                setAssignSelectedShipment(null);
+                setAssignNote("");
+              }}
+              style={{
+                background: "none", border: "none", color: "#3D4557",
+                fontSize: 11, cursor: "pointer", padding: "4px",
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Action rows */}
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -358,13 +600,13 @@ export default function MyActions({
                 <span style={{
                   width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
                   background: group.dotColor,
-                  boxShadow: group.severity === "red" ? `0 0 8px ${group.dotColor}88` : "none",
+                  boxShadow: group.severity === "red" ? `0 0 8px ${group.dotColor}88` : group.severity === "blue" ? `0 0 6px ${group.dotColor}55` : "none",
                 }} />
 
                 {/* Label */}
                 <span style={{
                   fontSize: 13, fontWeight: 600,
-                  color: group.severity === "red" ? "#F0F2F5" : group.severity === "amber" ? "#F0F2F5" : "#8B95A8",
+                  color: group.severity === "gray" ? "#8B95A8" : "#F0F2F5",
                 }}>
                   {group.label}
                 </span>
@@ -404,55 +646,115 @@ export default function MyActions({
                   marginLeft: 18, borderLeft: `2px solid ${group.color}33`,
                   paddingLeft: 12, marginBottom: 4, marginTop: 2,
                 }}>
-                  {group.items.slice(0, 20).map((s, i) => {
-                    const overdue = group.showCheckCall ? getOverdue(s) : null;
-                    const origin = s.origin || s.pickupCity || "";
-                    const dest = s.destination || s.deliveryCity || "";
-                    const lane = origin && dest ? `${origin} \u2192 ${dest}` : "";
+                  {/* Assignment rows */}
+                  {group.isAssignment ? (
+                    group.items.slice(0, 20).map((a, i) => {
+                      const s = a.shipment;
+                      const origin = s?.origin || s?.pickupCity || "";
+                      const dest = s?.destination || s?.deliveryCity || "";
+                      const lane = origin && dest ? `${origin} \u2192 ${dest}` : "";
+                      const typeLabel = ACTION_TYPES.find(t => t.key === a.auto_type)?.short || a.auto_type;
 
-                    return (
-                      <div
-                        key={s.id || i}
-                        onClick={() => handleLoadClick(s)}
-                        style={{
-                          display: "flex", alignItems: "center", gap: 8,
-                          padding: "6px 10px", borderRadius: 8, cursor: "pointer",
-                          transition: "background 0.15s ease",
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
-                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                      >
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 11, color: "#C8CDD5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            <span style={{ color: "#F0F2F5", fontWeight: 600 }}>{s.account}</span>
-                            {isDateToday(s.pickupDate) && <span style={{ color: "#5A6478" }}> · PU today</span>}
-                            {isDateToday(s.deliveryDate) && <span style={{ color: "#5A6478" }}> · DEL today</span>}
-                            {isDateTomorrow(s.pickupDate) && <span style={{ color: "#5A6478" }}> · PU tomorrow</span>}
-                            {lane && <span style={{ color: "#5A6478" }}> · {lane}</span>}
+                      return (
+                        <div
+                          key={a.id || i}
+                          onClick={() => s && handleLoadClick(s)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8,
+                            padding: "6px 10px", borderRadius: 8, cursor: s ? "pointer" : "default",
+                            transition: "background 0.15s ease",
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
+                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 11, color: "#C8CDD5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ color: "#F0F2F5", fontWeight: 600 }}>{s?.account || "—"}</span>
+                              <span style={{
+                                fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
+                                background: "rgba(41,121,255,0.12)", color: "#2979ff",
+                                textTransform: "uppercase", letterSpacing: "0.3px",
+                              }}>
+                                {typeLabel}
+                              </span>
+                              {a.efj && <span style={{ color: "#5A6478", fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{a.efj}</span>}
+                              {lane && <span style={{ color: "#3D4557" }}> · {lane}</span>}
+                            </div>
+                            {a.text && a.text !== `${ACTION_TYPES.find(t => t.key === a.auto_type)?.label}: ${a.efj}` && (
+                              <div style={{ fontSize: 10, color: "#5A6478", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.text}</div>
+                            )}
+                            {a.assigned_by && (
+                              <div style={{ fontSize: 10, color: "#3D4557", marginTop: 1 }}>from {a.assigned_by}</div>
+                            )}
                           </div>
-                          {overdue && (
-                            <div style={{ fontSize: 11, color: "#ffab00", fontWeight: 600, marginTop: 1 }}>{overdue}</div>
+                          <button
+                            onClick={(e) => dismissAssignment(a.id, e)}
+                            title="Dismiss"
+                            style={{
+                              background: "none", border: "none", color: "#3D4557",
+                              fontSize: 13, cursor: "pointer", padding: "2px 4px",
+                              lineHeight: 1, flexShrink: 0, transition: "color 0.15s",
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.color = "#8B95A8"}
+                            onMouseLeave={e => e.currentTarget.style.color = "#3D4557"}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    /* Standard shipment rows */
+                    group.items.slice(0, 20).map((s, i) => {
+                      const overdue = group.showCheckCall ? getOverdue(s) : null;
+                      const origin = s.origin || s.pickupCity || "";
+                      const dest = s.destination || s.deliveryCity || "";
+                      const lane = origin && dest ? `${origin} \u2192 ${dest}` : "";
+
+                      return (
+                        <div
+                          key={s.id || i}
+                          onClick={() => handleLoadClick(s)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8,
+                            padding: "6px 10px", borderRadius: 8, cursor: "pointer",
+                            transition: "background 0.15s ease",
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
+                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 11, color: "#C8CDD5", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              <span style={{ color: "#F0F2F5", fontWeight: 600 }}>{s.account}</span>
+                              {isDateToday(s.pickupDate) && <span style={{ color: "#5A6478" }}> · PU today</span>}
+                              {isDateToday(s.deliveryDate) && <span style={{ color: "#5A6478" }}> · DEL today</span>}
+                              {isDateTomorrow(s.pickupDate) && <span style={{ color: "#5A6478" }}> · PU tomorrow</span>}
+                              {lane && <span style={{ color: "#5A6478" }}> · {lane}</span>}
+                            </div>
+                            {overdue && (
+                              <div style={{ fontSize: 11, color: "#ffab00", fontWeight: 600, marginTop: 1 }}>{overdue}</div>
+                            )}
+                          </div>
+                          {group.showCheckCall && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleLoadClick(s); }}
+                              style={{
+                                padding: "4px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700,
+                                border: `1px solid ${group.color}44`, background: `${group.color}12`,
+                                color: group.color, cursor: "pointer", fontFamily: "inherit",
+                                transition: "all 0.15s", whiteSpace: "nowrap",
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.background = `${group.color}25`; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = `${group.color}12`; }}
+                            >
+                              Check call
+                            </button>
                           )}
                         </div>
-                        {group.showCheckCall && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleLoadClick(s); }}
-                            style={{
-                              padding: "4px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700,
-                              border: `1px solid ${group.color}44`, background: `${group.color}12`,
-                              color: group.color, cursor: "pointer", fontFamily: "inherit",
-                              transition: "all 0.15s", whiteSpace: "nowrap",
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.background = `${group.color}25`; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = `${group.color}12`; }}
-                          >
-                            Check call
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {group.items.length > 20 && (
+                      );
+                    })
+                  )}
+                  {group.items.length > 20 && group.filterAction && (
                     <div
                       onClick={group.filterAction}
                       style={{ fontSize: 11, color: group.color, padding: "4px 10px", cursor: "pointer", fontWeight: 600 }}
@@ -465,65 +767,6 @@ export default function MyActions({
             </div>
           );
         })}
-      </div>
-
-      {/* ── Manual Tasks Section ── */}
-      <div style={{ marginTop: 14, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#8B95A8" }}>Tasks</span>
-          <button
-            onClick={() => setShowTaskInput(!showTaskInput)}
-            style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", color: "#8B95A8", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
-          >
-            {showTaskInput ? "Cancel" : "+ Add"}
-          </button>
-        </div>
-
-        {showTaskInput && (
-          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-            <input
-              autoFocus
-              value={taskText}
-              onChange={e => setTaskText(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") addTask(); if (e.key === "Escape") { setShowTaskInput(false); setTaskText(""); } }}
-              placeholder="e.g. Call DHL about invoice..."
-              style={{ flex: 1, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 11, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif" }}
-            />
-            <button
-              onClick={addTask}
-              disabled={tasksLoading || !taskText.trim()}
-              style={{ padding: "6px 14px", borderRadius: 8, border: "none", background: "rgba(0,212,170,0.15)", color: "#00D4AA", fontSize: 11, fontWeight: 700, cursor: "pointer", opacity: tasksLoading || !taskText.trim() ? 0.5 : 1 }}
-            >
-              Add
-            </button>
-          </div>
-        )}
-
-        {manualTasks.length === 0 && !showTaskInput && (
-          <div style={{ padding: 12, textAlign: "center", color: "#3D4557", fontSize: 11 }}>No tasks</div>
-        )}
-
-        {manualTasks.map(task => (
-          <div key={task.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, transition: "background 0.15s" }}
-            onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
-            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-          >
-            <button
-              onClick={() => completeTask(task.id)}
-              title="Mark complete"
-              style={{ width: 16, height: 16, borderRadius: 4, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#5A6478", fontSize: 10 }}
-            />
-            <span style={{ flex: 1, fontSize: 11, color: "#C8CDD5", fontWeight: 500 }}>{task.text}</span>
-            {task.efj && <span style={{ fontSize: 10, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>{task.efj}</span>}
-            <button
-              onClick={() => deleteTask(task.id)}
-              title="Remove"
-              style={{ background: "none", border: "none", color: "#3D4557", fontSize: 13, cursor: "pointer", padding: 0, lineHeight: 1 }}
-            >
-              x
-            </button>
-          </div>
-        ))}
       </div>
     </div>
   );
