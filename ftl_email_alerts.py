@@ -28,7 +28,7 @@ def load_sent_email_alerts():
         try:
             with open(EMAIL_ALERTS_FILE, 'r') as f:
                 return json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
+        except (OSError, ValueError) as e:
             print(f"Warning: Could not load {EMAIL_ALERTS_FILE}: {e}")
             return {}
     return {}
@@ -47,7 +47,7 @@ def save_sent_email_alert(load_id, pro_number, status):
         with open(tmp, 'w') as f:
             json.dump(alerts, f, indent=2)
         os.replace(tmp, EMAIL_ALERTS_FILE)
-    except OSError as e:
+    except Exception as e:
         print(f"Warning: Could not save: {e}")
 
 def should_send_email_alert(load_id, status):

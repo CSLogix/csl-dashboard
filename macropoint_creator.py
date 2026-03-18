@@ -76,7 +76,7 @@ def set_state(state):
 def get_state():
     try:
         with open(STATE_FILE) as f: return json.load(f)
-    except (OSError, json.JSONDecodeError): return {}
+    except (OSError, ValueError): return {}
 def create_macropoint(data):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)

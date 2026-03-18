@@ -248,7 +248,7 @@ def load_state():
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE) as f: return json.load(f)
-        except (OSError, json.JSONDecodeError): pass
+        except (OSError, ValueError): pass
     return {}
 
 def load_account_lookup(creds):
