@@ -73,7 +73,8 @@ export default function MyActions({
       const ship = shipments.find(s => s.efj === a.efj);
       if (!ship) return;
       let clearType = null;
-      if (a.auto_type === "cover_load" && ship.carrier && ship.carrier.trim()) {
+      const coverAssigned = (ship.carrier && ship.carrier.trim()) || (ship.driver && ship.driver.trim()) || (ship.macropointUrl && ship.macropointUrl.trim()) || (ship.driverPhone && ship.driverPhone.trim()) || (ship.carrierEmail && ship.carrierEmail.trim());
+      if (a.auto_type === "cover_load" && coverAssigned) {
         clearType = "driver_assigned";
       } else if (a.auto_type === "close_out" && ["delivered", "billed_closed"].includes(ship.status)) {
         clearType = "delivered";
@@ -149,8 +150,13 @@ export default function MyActions({
   const needsDriver = useMemo(() =>
     repShipments.filter(s => {
       const hasPickupSoon = isDateToday(s.pickupDate) || isDateTomorrow(s.pickupDate);
-      const noCarrier = !s.carrier || s.carrier.trim() === "";
-      return hasPickupSoon && noCarrier && !["delivered", "empty_return", "cancelled", "cancelled_tonu", "billed_closed"].includes(s.status);
+      const hasCarrier = s.carrier && s.carrier.trim() !== "";
+      const hasDriver = s.driver && s.driver.trim() !== "";
+      const hasMacropoint = s.macropointUrl && s.macropointUrl.trim() !== "";
+      const hasPhone = s.driverPhone && s.driverPhone.trim() !== "";
+      const hasEmail = s.carrierEmail && s.carrierEmail.trim() !== "";
+      const isAssigned = hasCarrier || hasDriver || hasMacropoint || hasPhone || hasEmail;
+      return hasPickupSoon && !isAssigned && !["delivered", "empty_return", "cancelled", "cancelled_tonu", "billed_closed"].includes(s.status);
     }),
     [repShipments]
   );
