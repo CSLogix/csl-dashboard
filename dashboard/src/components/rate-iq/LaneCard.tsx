@@ -56,6 +56,9 @@ export default function LaneCard({ lane, onClick, onQuickQuote, onReclassify, ra
               )}
             </div>
             <div style={{ fontSize: 11, color: "#5A6478", fontWeight: 600 }}>avg rate</div>
+            {miles && miles > 0 && avgRate > 0 && (
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace", marginTop: 2 }}>${(avgRate / miles).toFixed(2)}/mi</div>
+            )}
           </div>
         )}
       </div>
