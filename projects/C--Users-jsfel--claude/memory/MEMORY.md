@@ -1,0 +1,8 @@
+# Memory Index
+
+- [project_dashboard_repo.md](project_dashboard_repo.md) — Dashboard source at Downloads/csl-dashboard-preview (active) + deploy workflow
+- [project_driver_contact_sync.md](project_driver_contact_sync.md) — PR #11: bidirectional driver phone/trailer sync (webhook ↔ cache ↔ PG ↔ sheets ↔ API)
+- [project_rateiq_bidirectional.md](project_rateiq_bidirectional.md) — PR #13: bidirectional lane grouping + quote preview styling
+- [project_no_sheet_sync_service.md](project_no_sheet_sync_service.md) — csl_sheet_sync.py runs inside csl-dashboard, no separate service
+- [feedback_classifier_model.md](feedback_classifier_model.md) — Email classifier must use Claude Haiku, not Gemini Flash (45% failure rate)
+- [project_port_groupings_datadriven.md](project_port_groupings_datadriven.md) — User wants port/rail groupings to be data-driven (DB + admin UI), awaiting port/rail list
