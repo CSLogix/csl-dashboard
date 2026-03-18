@@ -1,3 +1,5 @@
+import type { Shipment, StatusDef, StatusColor } from '../types';
+
 // ─── Z-Index Scale ───
 export const Z = {
   base: 0,           // ambient BG decorations
@@ -186,26 +188,26 @@ export const POST_DELIVERY_STATUSES = new Set([
   "ready_to_close", "missing_invoice", "billed_closed", "ppwk_needed",
   "waiting_confirmation", "waiting_cx_approval", "cx_approved", "driver_paid",
 ]);
-export function isPostDelivery(status) {
+export function isPostDelivery(status: string): boolean {
   return POST_DELIVERY_STATUSES.has(status);
 }
 
 // ─── Move-type helpers ───
-export function isFTLShipment(s) {
+export function isFTLShipment(s: Pick<Shipment, 'moveType' | 'account'>): boolean {
   return s.moveType === "FTL" || s.account === "Boviet" || s.account === "Tolead";
 }
-export function getStatusesForShipment(s) {
+export function getStatusesForShipment(s: Pick<Shipment, 'moveType' | 'account'>) {
   return isFTLShipment(s) ? FTL_STATUSES : STATUSES;
 }
-export function getStatusColors(s) {
+export function getStatusColors(s: Pick<Shipment, 'moveType' | 'account'>) {
   return isFTLShipment(s) ? FTL_STATUS_COLORS : STATUS_COLORS;
 }
-export function resolveStatusLabel(s) {
+export function resolveStatusLabel(s: Pick<Shipment, 'moveType' | 'account' | 'status' | 'rawStatus'>): string {
   const list = isFTLShipment(s) ? FTL_STATUSES : STATUSES;
   return list.find(st => st.key === s.status)?.label || BILLING_STATUSES.find(st => st.key === s.status)?.label || s.rawStatus || s.status;
 }
-export function resolveStatusColor(s) {
-  const colors = isFTLShipment(s) ? FTL_STATUS_COLORS : STATUS_COLORS;
+export function resolveStatusColor(s: Pick<Shipment, 'moveType' | 'account' | 'status'>): StatusColor {
+  const colors: Record<string, StatusColor> = isFTLShipment(s) ? FTL_STATUS_COLORS : STATUS_COLORS;
   return colors[s.status] || { main: "#94a3b8", glow: "#94a3b833" };
 }
 
