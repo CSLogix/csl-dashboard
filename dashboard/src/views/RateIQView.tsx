@@ -381,11 +381,15 @@ export default function RateIQView() {
       // Bidirectional key: sort endpoints alphabetically so A→B and B→A share a key
       const endpoints = [normOrigin, normDest].sort();
       const biKey = `${endpoints[0]} ↔ ${endpoints[1]}`;
-      if (!map[biKey]) map[biKey] = { port: normOrigin, destination: normDest, carriers: [], minRate: Infinity, maxRate: 0, total: 0, count: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {}, directions: {} };
+      if (!map[biKey]) map[biKey] = { port: normOrigin, destination: normDest, rawPort: null, rawDest: null, carriers: [], minRate: Infinity, maxRate: 0, total: 0, count: 0, miles: null, origin_zip: null, dest_zip: null, origin_state: null, dest_state: null, moveTypes: {}, directions: {} };
+      if (!map[biKey].rawPort && r.port) map[biKey].rawPort = r.port;
+      if (!map[biKey].rawDest && r.destination) map[biKey].rawDest = r.destination;
       map[biKey].carriers.push(r);
       if (!map[biKey].miles && r.miles) map[biKey].miles = r.miles;
       if (!map[biKey].origin_zip && r.origin_zip) map[biKey].origin_zip = r.origin_zip;
       if (!map[biKey].dest_zip && r.dest_zip) map[biKey].dest_zip = r.dest_zip;
+      if (!map[biKey].origin_state && r.origin_state) map[biKey].origin_state = r.origin_state;
+      if (!map[biKey].dest_state && r.dest_state) map[biKey].dest_state = r.dest_state;
       const rate = parseFloat(r.total || r.dray_rate || 0);
       if (rate > 0) { map[biKey].minRate = Math.min(map[biKey].minRate, rate); map[biKey].maxRate = Math.max(map[biKey].maxRate, rate); map[biKey].total += rate; map[biKey].count++; }
       const mt = (r.move_type || "dray").toLowerCase();
@@ -620,11 +624,13 @@ export default function RateIQView() {
         const normPort = normalizeLaneCity(r.port || "");
         const normDest = normalizeLaneCity(r.destination || "");
         const key = `${normPort}|${normDest}`;
-        if (!laneMap[key]) laneMap[key] = { port: normPort, destination: normDest, rawPort: r.port || "", rawDest: r.destination || "", count: 0, totalRate: 0, carriers: new Set(), rawRates: [], recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null, moveTypes: {} };
+        if (!laneMap[key]) laneMap[key] = { port: normPort, destination: normDest, rawPort: r.port || "", rawDest: r.destination || "", count: 0, totalRate: 0, carriers: new Set(), rawRates: [], recentTotal: 0, recentCount: 0, olderTotal: 0, olderCount: 0, miles: null, origin_zip: null, dest_zip: null, origin_state: null, dest_state: null, moveTypes: {} };
         laneMap[key].rawRates.push(r);
         if (!laneMap[key].miles && r.miles) laneMap[key].miles = r.miles;
         if (!laneMap[key].origin_zip && r.origin_zip) laneMap[key].origin_zip = r.origin_zip;
         if (!laneMap[key].dest_zip && r.dest_zip) laneMap[key].dest_zip = r.dest_zip;
+        if (!laneMap[key].origin_state && r.origin_state) laneMap[key].origin_state = r.origin_state;
+        if (!laneMap[key].dest_state && r.dest_state) laneMap[key].dest_state = r.dest_state;
         laneMap[key].count++;
         const rate = parseFloat(r.total || r.dray_rate || 0);
         if (rate > 0) {
@@ -647,7 +653,7 @@ export default function RateIQView() {
           // Determine primary move type (most common across rates for this lane)
           const mtEntries = Object.entries(l.moveTypes);
           const primary_move_type = mtEntries.length > 0 ? mtEntries.sort((a, b) => b[1] - a[1])[0][0] : "dray";
-          return { port: l.port, destination: l.destination, rawPort: l.rawPort, rawDest: l.rawDest, load_count: l.count, avg_rate, carrier_count: l.carriers.size, trend_pct, miles: l.miles, origin_zip: l.origin_zip, dest_zip: l.dest_zip, move_type: primary_move_type, rawRates: l.rawRates };
+          return { port: l.port, destination: l.destination, rawPort: l.rawPort, rawDest: l.rawDest, load_count: l.count, avg_rate, carrier_count: l.carriers.size, trend_pct, miles: l.miles, origin_zip: l.origin_zip, dest_zip: l.dest_zip, origin_state: l.origin_state, dest_state: l.dest_state, move_type: primary_move_type, rawRates: l.rawRates };
         })
         .sort((a, b) => b.load_count - a.load_count);
       setRateLaneSummaries(summaries);
@@ -1023,7 +1029,8 @@ export default function RateIQView() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
               {filtered.map((group, gi) => (
                 <LaneCard key={gi} lane={{
-                  origin_city: group.port, dest_city: group.destination, port: group.port, destination: group.destination,
+                  origin_city: group.port, dest_city: group.destination, port: group.rawPort || group.port, destination: group.rawDest || group.destination,
+                  origin_state: group.origin_state, dest_state: group.dest_state,
                   load_count: group.count, avg_rate: group.count > 0 ? Math.round(group.total / group.count) : 0,
                   carrier_count: group.carriers.length,
                   miles: group.miles, origin_zip: group.origin_zip, dest_zip: group.dest_zip,
@@ -1108,7 +1115,7 @@ export default function RateIQView() {
                                 onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
                                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                                  <span style={{ fontSize: 13, color: "#C8D0DC", fontWeight: 600 }}>→ {ls.destination || ls.dest_city || "—"}</span>
+                                  <span style={{ fontSize: 13, color: "#C8D0DC", fontWeight: 600 }}>→ {ls.destination || ls.dest_city || "—"}{ls.dest_state ? <span style={{ color: "#5A6478", fontSize: 11, fontWeight: 500, marginLeft: 3 }}>{ls.dest_state}</span> : null}</span>
                                   <span style={{ padding: "1px 8px", borderRadius: 10, fontSize: 10, fontWeight: 700, background: mtStyle.bg, color: mtStyle.color, border: `1px solid ${mtStyle.border}` }}>{mtStyle.label}</span>
                                   <span style={{ fontSize: 11, color: "#5A6478" }}>{ls.load_count || 0} rate{(ls.load_count || 0) !== 1 ? "s" : ""}</span>
                                   {ls.carrier_count > 0 && <span style={{ fontSize: 11, color: "#5A6478" }}>{ls.carrier_count} carrier{ls.carrier_count !== 1 ? "s" : ""}</span>}
