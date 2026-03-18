@@ -75,10 +75,11 @@ export default function MyActions({
       let clearType = null;
       const isFTL = ship.moveType === "FTL";
       const acMpStat = (ship.mpStatus || "").toLowerCase().trim();
-      const acMpNotAssigned = !acMpStat || ["scheduled", "assigned", "pending", "booked"].includes(acMpStat) || acMpStat.includes("requesting");
-      const acMpActive = ship.macropointUrl && ship.macropointUrl.trim() && !acMpNotAssigned;
+      const acMpCovered = acMpStat.includes("tracking now") || acMpStat.includes("waiting for update")
+        || acMpStat.includes("transit") || acMpStat.includes("at pickup") || acMpStat.includes("at delivery")
+        || acMpStat.includes("departed") || acMpStat.includes("arrived") || acMpStat.includes("completed");
       const coverAssigned = isFTL
-        ? ((ship.driverPhone && ship.driverPhone.trim()) || (ship.carrierEmail && ship.carrierEmail.trim()) || acMpActive || (ship.driver && ship.driver.trim()))
+        ? ((ship.driverPhone && ship.driverPhone.trim()) || (ship.carrierEmail && ship.carrierEmail.trim()) || acMpCovered || (ship.driver && ship.driver.trim()))
         : ((ship.carrier && ship.carrier.trim()) || (ship.driver && ship.driver.trim()) || (ship.driverPhone && ship.driverPhone.trim()) || (ship.carrierEmail && ship.carrierEmail.trim()));
       if (a.auto_type === "cover_load" && coverAssigned) {
         clearType = "driver_assigned";
@@ -161,14 +162,17 @@ export default function MyActions({
       const hasEmail = s.carrierEmail && s.carrierEmail.trim() !== "";
       const hasDriver = s.driver && s.driver.trim() !== "";
       const hasCarrier = s.carrier && s.carrier.trim() !== "";
-      // FTL: MP URL is pre-added so ignore it. Only counts as assigned when MP status
-      // shows active tracking (tracking now, assigned, ready to track, in transit, etc.)
-      // NOT assigned: scheduled, pending, booked, requesting app install, or empty
+      // FTL: MP URL is pre-added. Covered only when MP shows active tracking
+      // or waiting for update (driver connected at some point).
+      // Covered MP statuses: "Tracking Now", "Tracking - Waiting for Update",
+      // plus any in-progress statuses from webhook (in transit, at pickup, etc.)
+      // NOT covered: "Ready to Track", "Requesting App Install", "scheduled", empty
       const mpStat = (s.mpStatus || "").toLowerCase().trim();
-      const mpNotAssigned = !mpStat || ["scheduled", "assigned", "pending", "booked"].includes(mpStat) || mpStat.includes("requesting");
-      const mpActive = s.macropointUrl && s.macropointUrl.trim() !== "" && !mpNotAssigned;
+      const mpCovered = mpStat.includes("tracking now") || mpStat.includes("waiting for update")
+        || mpStat.includes("transit") || mpStat.includes("at pickup") || mpStat.includes("at delivery")
+        || mpStat.includes("departed") || mpStat.includes("arrived") || mpStat.includes("completed");
       const isAssigned = isFTL
-        ? (hasPhone || hasEmail || mpActive || hasDriver)
+        ? (hasPhone || hasEmail || mpCovered || hasDriver)
         : (hasCarrier || hasDriver || hasPhone || hasEmail);
       return hasPickupSoon && !isAssigned && !["delivered", "empty_return", "cancelled", "cancelled_tonu", "billed_closed"].includes(s.status);
     }),
