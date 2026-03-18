@@ -110,6 +110,12 @@ class CircuitBreaker:
 
 # ── JsonCargo API helpers (for Maersk + HMM) ───────────────────────────────
 def _get_jsoncargo_key():
+    """
+    Retrieve the JsonCargo API key from the environment.
+    
+    Returns:
+        str: The value of the `JSONCARGO_API_KEY` environment variable, or an empty string if it is not set.
+    """
     return os.environ.get("JSONCARGO_API_KEY", "")
 JSONCARGO_BASE = "https://api.jsoncargo.com/api/v1"
 
@@ -117,15 +123,41 @@ JSONCARGO_BASE = "https://api.jsoncargo.com/api/v1"
 _JSONCARGO_CACHE_TTL = 6 * 3600
 
 def _jc_cache_get(container_num):
+    """
+    Fetch cached JsonCargo lookup for a container from Postgres within the configured TTL.
+    
+    Parameters:
+        container_num (str): Container identifier (e.g., "MSKU1234567").
+    
+    Returns:
+        dict or None: Cached JsonCargo response for the container if present and not expired, `None` otherwise.
+    """
     return pg_jc_cache_get(container_num, _JSONCARGO_CACHE_TTL)
 
 def _jc_cache_set(container_num, data):
+    """
+    Store a JsonCargo lookup result for a container in the Postgres-backed cache.
+    
+    Parameters:
+        container_num (str): Container identifier to key the cache entry.
+        data (dict): JSON-serializable lookup result (API response or derived payload) to persist.
+    """
     pg_jc_cache_set(container_num, data)
 
 
 def _jsoncargo_bol_lookup(bol_num, ssl_line):
-    """Look up container number from BOL/booking via JsonCargo API.
-    Returns the first associated container number, or None."""
+    """
+    Resolve the first container number associated with a BOL/booking via the JsonCargo API.
+    
+    May return `None` if no associated container is found, if the JsonCargo API key is missing, or if an error occurs. Cached results may be used when available.
+    
+    Parameters:
+        bol_num (str): The bill of lading or booking number to look up.
+        ssl_line (str): Shipping line identifier to scope the lookup (e.g., SSL code or name).
+    
+    Returns:
+        container (str or None): The first associated container number when found, `None` otherwise.
+    """
     if not bol_num or not ssl_line:
         return None
     cache_key = f"bol:{bol_num}"
@@ -157,7 +189,23 @@ def _jsoncargo_bol_lookup(bol_num, ssl_line):
 
 # -- SeaRates Container Tracking API ─────────────────────────────────────
 def _searates_container_track(container_num, ssl_line):
-    """Track a container via SeaRates API. Returns 4-tuple or None if not configured."""
+    """
+    Query SeaRates tracking for a container and extract ETA, pickup, return, and a normalized status.
+    
+    Parameters:
+        container_num (str): Container identifier to track.
+        ssl_line (str): Optional carrier code or name hint used for lookup/logging.
+    
+    Returns:
+        tuple|None: If the SEARATES_API_KEY environment variable is unset, returns None.
+        Otherwise returns a 4-tuple (eta, pickup, return_date, status):
+            - eta (str|None): Estimated time of arrival or None if not found.
+            - pickup (str|None): Pickup/gate-out date or None if not found.
+            - return_date (str|None): Empty-container return date or None if not found.
+            - status (str|None): One of the deduced statuses (e.g., "Returned to Port", "Released",
+              "Discharged", "Vessel", "Vessel Arrived", "Rail") or None if not determined.
+        If SeaRates reports the container as not found or invalid, returns (None, None, None, "_fallback").
+    """
     sr_key = os.environ.get("SEARATES_API_KEY", "")
     if not sr_key:
         return None
@@ -598,8 +646,15 @@ BOL_PREFIX_TO_SSL = {
 
 
 def _ssl_from_bol_prefix(bol):
-    """Auto-detect SSL code from BOL/booking prefix (first 4 chars).
-    Returns (ssl_code, url) or (None, None)."""
+    """
+    Detect the shipping line code and associated URL from a BOL/booking string's four-character prefix.
+    
+    Parameters:
+        bol (str): Bill of lading or booking identifier; may contain surrounding whitespace.
+    
+    Returns:
+        tuple: (ssl_code, url) where `ssl_code` is the detected SSL code string if the prefix maps to a carrier, `None` otherwise; `url` is the carrier's tracking URL if known, `None` otherwise.
+    """
     if not bol or len(bol.strip()) < 5:
         return None, None
     prefix = bol.strip()[:4].upper()
@@ -1572,7 +1627,18 @@ def _parse_smline_detail(page):
 
 
 def run_sm_line(browser, url, bol, container):
-    """SM Line scraper: search by container first, fall back to BL + click-through."""
+    """
+    Scrapes SM Line tracking for ETA, pickup, return date, and status using a container-first search with a BL fallback.
+    
+    Parameters:
+        browser: Playwright browser instance used to open a new page and perform interactions.
+        url (str): SM Line tracking page URL.
+        bol (str | None): Bill of Lading or booking number used as a fallback search key.
+        container (str): Container number to search first.
+    
+    Returns:
+        tuple: (eta, pickup, return_date, status) where each element is a string or None. Each value may be None if not found or on error.
+    """
     page = browser.new_page()
     _stealth.apply_stealth_sync(page)
     try:
@@ -1639,7 +1705,12 @@ def run_sm_line(browser, url, bol, container):
         page.close()
 
 def _browser_scrape_by_ssl(browser, ssl_code, url, bol, container):
-    """Route to the correct specialized browser scraper based on SSL code."""
+    """
+    Selects and invokes the appropriate browser-based scraper for the given carrier SSL code, falling back to the generic dray-import scraper when a URL is provided.
+    
+    Returns:
+        tuple: `(eta, pickup, return_date, status)` where each element is a date string or `None`. If no matching scraper or URL is available, returns `(None, None, None, None)`. The `status` element may contain special marker strings (for example `"_fallback"`) returned by underlying scrapers.
+    """
     if ssl_code == "EVERGREEN":
         return run_shipmentlink(browser, url, bol, container)
     elif ssl_code == "HAPAG_LLOYD":
@@ -1654,7 +1725,15 @@ def _browser_scrape_by_ssl(browser, ssl_code, url, bol, container):
 
 
 def _extract_domain(url):
-    """Extract carrier domain from URL for circuit breaker tracking."""
+    """
+    Extract the network location (domain) from a URL, without a leading "www.".
+    
+    Parameters:
+        url (str): The URL to parse.
+    
+    Returns:
+        domain (str): The domain/netloc portion of the URL with a leading "www." removed; returns an empty string if the URL cannot be parsed.
+    """
     try:
         return urlparse(url).netloc.replace("www.", "")
     except Exception:
@@ -1662,7 +1741,19 @@ def _extract_domain(url):
 
 
 def _record_cb(cb, domain, eta, pickup, ret, status):
-    """Record browser scraper result on circuit breaker."""
+    """
+    Update the circuit breaker for a domain based on scraper results.
+    
+    If any of `eta`, `pickup`, `ret`, or `status` is present/truthy, record a success for `domain` on the provided circuit breaker; otherwise record a failure.
+    
+    Parameters:
+        cb: CircuitBreaker-like object with `record_success(domain)` and `record_failure(domain)` methods.
+        domain (str): The carrier domain used as the circuit-breaker key.
+        eta: ETA value or None; treated as truthy presence indicator.
+        pickup: Pickup/LFD value or None; treated as truthy presence indicator.
+        ret: Return date value or None; treated as truthy presence indicator.
+        status: Status string or None; treated as truthy presence indicator.
+    """
     if cb and domain:
         if eta or pickup or ret or status:
             cb.record_success(domain)
@@ -1674,12 +1765,33 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                           circuit_breaker=None, vessel="", carrier_name="",
                           pending_updates=None, proxy_ok=True, ssl_code=None,
                           existing_row=None):
-    """Route a dray import row to the appropriate tracker.
-
-    Primary path: SSL code -> JsonCargo API
-    Fallback:     SSL code -> specialized browser scraper
-    Last resort:  generic browser scraper (if URL available)
     """
+                          Route a single Dray Import row through API-first tracking with browser fallbacks and collect tracking results.
+                          
+                          This function attempts to determine ETA, pickup (LFD), return date, and status for a shipment using the preferred API path (JsonCargo by SSL code) and falls back to carrier-specific or generic browser scrapers when needed. If a pending_updates list is provided the function will append sheet update entries to that list instead of writing to the sheet immediately.
+                          
+                          Parameters:
+                              browser: Playwright browser or context used for browser-based scrapes.
+                              ws: Worksheet object used when writing results immediately.
+                              sheet_row (int): 1-based row index in the sheet for this record.
+                              url (str|None): Carrier/tracking URL to use for browser fallbacks.
+                              bol (str|None): Bill of Lading or booking identifier.
+                              container (str|None): Container number (preferred for API tracking).
+                              circuit_breaker (CircuitBreaker|None): Optional per-domain circuit breaker; used to skip repeated failing domains.
+                              vessel (str): Vessel name (informational).
+                              carrier_name (str): Human-readable carrier name (informational).
+                              pending_updates (list|None): If provided, sheet update entries will be appended to this list instead of being written immediately.
+                              proxy_ok (bool): Whether proxy/browser network is available; when False browser fallbacks are skipped.
+                              ssl_code (str|None): Optional carrier SSL code to route API and SSL-specific scrapers.
+                              existing_row (list|None): Existing sheet row values used to avoid overwriting manually-entered ETA/Pickup/Return/Status.
+                          
+                          Returns:
+                              tuple: (eta, pickup, return_date, status)
+                                  - eta (str|None): Estimated time of arrival string if found, otherwise None.
+                                  - pickup (str|None): Pickup / LFD string if found and not equal to ETA, otherwise None.
+                                  - return_date (str|None): Return date string if found, otherwise None.
+                                  - status (str|None): Tracking status string if found, otherwise None.
+                          """
     print(f"\n  [Dray Import] row {sheet_row} — Container: {container}  BOL: {bol}")
 
     # ── Auto-detect SSL from BOL prefix if not provided ─────────────────────
@@ -1815,7 +1927,14 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
 # ─────────────────────────────────────────────
 
 def load_last_check():
-    """Return the previously saved state dict from Postgres, keyed by tab:container."""
+    """
+    Load the previously saved import-state mapping keyed by tab and container.
+    
+    If Postgres contains persisted state, that mapping is returned. If Postgres is empty, attempts to read the legacy JSON file specified by LAST_CHECK_FILE and return its contents; if that file is missing or cannot be read, returns an empty dict.
+    
+    Returns:
+        state_dict (dict): Mapping of "tab:container" to stored state values, or an empty dict if no persisted state is available.
+    """
     state = pg_load_all_import_state()
     if state:
         return state
@@ -1856,7 +1975,16 @@ def load_account_lookup(sheet):
 
 
 def get_account_tabs(sheet, account_lookup):
-    """Return tab titles that are in account_lookup and not in SKIP_TABS."""
+    """
+    Identify worksheet tabs that correspond to known accounts and are not in the skip list.
+    
+    Parameters:
+    	sheet (gspread.Spreadsheet): The Google Sheets spreadsheet object to inspect.
+    	account_lookup (dict): Mapping of tab title to account metadata; a tab is included only if its title exists as a key in this mapping.
+    
+    Returns:
+    	list[str]: Ordered list of worksheet titles that exist in account_lookup and are not present in SKIP_TABS.
+    """
     all_tabs = [ws.title for ws in sheet.worksheets()]
     tabs = [t for t in all_tabs if t not in SKIP_TABS and t in account_lookup]
     print(f"  Account tabs to process: {tabs}")
@@ -2121,6 +2249,32 @@ def archive_completed_row(sheet, tab_name, sheet_row, row_data, url, eta, pickup
 # ─────────────────────────────────────────────
 
 def run_once(args):
+    """
+    Perform a single Dray Import processing cycle: read active shipments from Postgres, resolve tracking via APIs and browser scrapers, persist per-row state, update Google Sheets, archive completed loads, and send notifications.
+    
+    This run performs the full workflow once:
+    - Ensures tracking tables exist in Postgres.
+    - Loads active "Dray Import" shipments and groups them by account.
+    - Normalizes origin values and writes fixes back to Postgres/Sheets (best-effort).
+    - For each shipment: attempts API-first container tracking (JsonCargo/SeaRates), falls back to browser scrapers when needed, updates Postgres state, writes guarded fields back to the shipments table and Master Sheet, and records detected changes.
+    - Optionally performs terminal (NOLA) cross-checks and archives loads whose status becomes "Returned to Port", including sending archive emails to the account rep.
+    - Uses a circuit breaker to skip repeatedly failing domains and performs a proxy health check before browser scraping.
+    - Persists state per-row via pg_set_import_state() so overall state is durable even if the run aborts.
+    
+    Parameters:
+        args (argparse.Namespace): Command-line arguments. Relevant attributes:
+            - tab (str | None): If provided, restrict processing to this account/tab.
+            - dry_run (bool): If True, skip any persistent writes (Postgres updates, sheet writes, archiving, and emails).
+    
+    Side effects:
+        - Connects to Postgres (reads and updates shipments, cache, and tracking tables).
+        - May launch a headless Playwright browser and perform network requests (requires proxy env vars).
+        - Updates Google Sheets (best-effort) and may send emails via configured SMTP.
+        - Archives shipments and deletes/updates sheet rows when applicable.
+    
+    Raises:
+        - Prints and returns early on fatal Postgres read errors; otherwise errors during per-row work are caught and logged but do not abort the whole run.
+    """
     from zoneinfo import ZoneInfo as _ZI
     from collections import defaultdict
     now_str = _time.strftime("%Y-%m-%d %H:%M ET", _time.localtime())

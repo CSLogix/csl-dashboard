@@ -29,6 +29,14 @@ JSONCARGO_CACHE_FILE = "/root/csl-bot/jsoncargo_cache.json"
 
 
 def get_conn():
+    """
+    Create a PostgreSQL connection using environment variables with sensible defaults.
+    
+    Reads DB_HOST, DB_PORT, DB_NAME, DB_USER, and DB_PASSWORD from the environment (defaults: host "localhost", port 5432, dbname "csl_doc_tracker", user "csl_admin", empty password) and returns a psycopg2 connection configured with a 10-second connect timeout.
+    
+    Returns:
+        conn (psycopg2.extensions.connection): Connected psycopg2 connection to the configured database.
+    """
     return psycopg2.connect(
         host=os.environ.get("DB_HOST", "localhost"),
         port=int(os.environ.get("DB_PORT", "5432")),
@@ -40,7 +48,11 @@ def get_conn():
 
 
 def create_tables(conn):
-    """Create the 3 tracking state tables (idempotent)."""
+    """
+    Create the three tracking state tables in the connected PostgreSQL database if they do not exist.
+    
+    Creates the tables: import_tracking_state, export_tracking_state, and jsoncargo_cache. The operation is idempotent.
+    """
     with conn.cursor() as cur:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS import_tracking_state (
@@ -71,7 +83,14 @@ def create_tables(conn):
 
 
 def migrate_import_state(conn):
-    """Migrate last_check.json -> import_tracking_state."""
+    """
+    Migrate import state entries from LAST_CHECK_FILE into the import_tracking_state table.
+    
+    Reads the JSON object at LAST_CHECK_FILE (skips and returns 0 if the file does not exist), inserts each entry into import_tracking_state using an idempotent insert (conflicts on state_key are ignored), commits the transaction, and renames the source file by appending `.migrated`.
+    
+    Returns:
+        int: The number of entries migrated (0 if the source file was missing).
+    """
     if not os.path.exists(LAST_CHECK_FILE):
         print(f"  {LAST_CHECK_FILE} not found — skipping import state migration.")
         return 0
@@ -103,7 +122,14 @@ def migrate_import_state(conn):
 
 
 def migrate_export_state(conn):
-    """Migrate export_state.json -> export_tracking_state."""
+    """
+    Import entries from export_state.json into the export_tracking_state table.
+    
+    If the source file is missing the function does nothing and returns 0. For each top-level key/value pair in the JSON file a row is inserted with columns (state_key, erd, cutoff, cutoff_alerted, updated_at). Duplicate `state_key` values are ignored so the operation is idempotent. On successful completion the source file is renamed to export_state.json.migrated.
+    
+    Returns:
+        int: The number of entries processed from the JSON file; returns 0 if the source file was not found.
+    """
     if not os.path.exists(EXPORT_STATE_FILE):
         print(f"  {EXPORT_STATE_FILE} not found — skipping export state migration.")
         return 0
@@ -134,8 +160,14 @@ def migrate_export_state(conn):
 
 
 def migrate_jsoncargo_cache(conn):
-    """Migrate jsoncargo_cache.json -> jsoncargo_cache table.
-    Only imports entries newer than 48 hours."""
+    """
+    Import recent entries from jsoncargo_cache.json into the jsoncargo_cache table and rename the source file to jsoncargo_cache.json.migrated.
+    
+    Only entries with a `ts` timestamp within the last 48 hours and a present `data` field are inserted; expired or missing-data entries are skipped. Inserted rows use conflict-safe semantics so existing cache_key values are not duplicated.
+    
+    Returns:
+        count (int): Number of cache entries migrated (expired or invalid entries are not counted).
+    """
     if not os.path.exists(JSONCARGO_CACHE_FILE):
         print(f"  {JSONCARGO_CACHE_FILE} not found — skipping cache migration.")
         return 0
@@ -168,6 +200,11 @@ def migrate_jsoncargo_cache(conn):
 
 
 def main():
+    """
+    Orchestrates migration of three local JSON state files into PostgreSQL tables.
+    
+    Creates required tables if missing, runs the three migration steps (import tracking state, export tracking state, and JsonCargo cache), prints progress and per-table row counts, and closes the database connection. Exits the process with a non-zero status on connection failure or if any migration error occurs. Each migration commits independently and source JSON files are renamed to *.migrated after successful import.
+    """
     print("=== Migrate JSON state files to Postgres ===\n")
 
     try:
