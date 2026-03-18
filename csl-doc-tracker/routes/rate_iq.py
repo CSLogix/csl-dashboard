@@ -98,7 +98,14 @@ for _alias, _cluster in PORT_CLUSTERS.items():
 
 
 def _split_city_state(location: str) -> tuple[str, str]:
-    """Split 'City, ST' into (city, state). Returns (location, '') if no comma."""
+    """
+    Parse a location string of the form "City, ST" into (city, state).
+    
+    If `location` is empty or missing, returns two empty strings. The `city` is the substring before the first comma, trimmed. The `state` is the first token after the first comma, trimmed; if no comma or no token after it, `state` is an empty string.
+    
+    Returns:
+        (city, state): `city` and `state` components extracted from the input.
+    """
     if not location:
         return "", ""
     parts = location.split(",", 1)
@@ -596,9 +603,28 @@ async def api_outbound_quotes(
 @router.get("/api/rate-iq/search-lane")
 async def api_search_lane(origin: str = Query(""), destination: str = Query("")):
     """
-    Unified lane rate search: rate_quotes + lane_rates + won quotes.
-    Groups results by normalized lane. Returns lane_groups[] with
-    floor/avg/ceiling per lane, plus flat matches[] for backwards compat.
+    Search for lane rates across emails, imported lane rates, won quotes, and market benchmarks, and group results by normalized (bidirectional) lane.
+    
+    Given origin and/or destination search terms (port/port-cluster aware), returns matching rate records and aggregated lane groups. If both origin and destination are empty, returns empty results. Results are limited to the 100 best matches ordered by rate then date.
+    
+    Returns:
+        dict: {
+            "matches": list of matching rate records with keys:
+                - id (int): source record id
+                - lane (str): display lane (origin → destination)
+                - origin (str), destination (str)
+                - origin_city (str), origin_state (str), dest_city (str), dest_state (str)
+                - miles (int|None), carrier (str), carrier_email (str|None)
+                - rate (float|None), rate_unit (str), date (ISO str|None)
+                - status (str), source (str: "email"|"import"|"quote"|"market"), move_type (str|None)
+            "lane_groups": list of aggregated lane groups (bidirectional) with keys:
+                - lane (str), origin (str), destination (str), bidirectional (bool)
+                - count (int), rated_count (int), floor (float|None), avg (float|None), ceiling (float|None)
+                - carriers (int), last_quoted (ISO str|None), sources (dict), quotes (list of matches)
+            "carriers": list of matching carrier directory entries with keys:
+                - id, name, mc, email, phone, pickup, destination, can_dray, hazmat, overweight, date_quoted
+            "stats": overall statistics (floor, ceiling, avg, count, total_carriers, total_lanes, sources)
+        }
     """
     if not origin and not destination:
         return {"matches": [], "lane_groups": [], "carriers": [], "stats": {}}

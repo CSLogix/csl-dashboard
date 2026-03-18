@@ -2,6 +2,16 @@ import React, { useState } from 'react';
 import { fmt, grad, MOVE_TYPE_STYLES } from './constants';
 import LaneName from './LaneName';
 
+/**
+ * Render an interactive card summarizing a shipping lane with actions for quick quoting and move-type reclassification.
+ *
+ * @param {Object} props.lane - Lane data used to populate the card (e.g., origin_city, origin_state, dest_city, dest_state, port, destination, origin_zip, dest_zip, load_count, avg_rate, average, miles, trend_pct, move_type, carrier_count, bidirectional).
+ * @param {Function} props.onClick - Handler invoked when the card is clicked.
+ * @param {Function} [props.onQuickQuote] - Optional handler invoked when the "Quick Quote" button is clicked.
+ * @param {Function} [props.onReclassify] - Optional handler invoked with a move type string when a new move type is selected from the picker.
+ * @param {Array<string>} [props.rateIds] - Optional array of rate identifiers included in drag payloads.
+ * @returns {JSX.Element} The rendered LaneCard element.
+ */
 export default function LaneCard({ lane, onClick, onQuickQuote, onReclassify, rateIds }) {
   const [hovered, setHovered] = useState(false);
   const [showMtPicker, setShowMtPicker] = useState(false);

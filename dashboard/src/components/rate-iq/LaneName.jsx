@@ -2,16 +2,16 @@ import React from 'react';
 import { splitCityState } from './constants';
 
 /**
- * Renders a city/state location with the state de-emphasized.
- * City appears bold in primary text color, state appears smaller and dimmed.
+ * Render a city label with an optional, visually de-emphasized state.
  *
  * @param {object} props
- * @param {string} props.city - Pre-parsed city name
- * @param {string} props.state - Pre-parsed state abbreviation
- * @param {string} props.raw - Fallback "City, ST" string (parsed client-side if city/state not provided)
- * @param {boolean} props.bold - Whether city text is bold (default: true)
- * @param {number} props.citySize - City font size in px (default: inherit)
- * @param {number} props.stateSize - State font size in px (default: 11)
+ * @param {string} props.city - Pre-parsed city name.
+ * @param {string} props.state - Pre-parsed state abbreviation.
+ * @param {string} props.raw - Fallback "City, ST" string to parse client-side when `city`/`state` are not provided.
+ * @param {boolean} [props.bold=true] - Whether the city text should use a heavier font weight.
+ * @param {number|string} [props.citySize] - City font size (px or CSS size); when omitted, inherits font size.
+ * @param {number} [props.stateSize=11] - State font size in px.
+ * @returns {JSX.Element} A span containing the formatted city and optional state, or an em dash when no city is available.
  */
 export default function LaneName({ city, state, raw, bold = true, citySize, stateSize = 11 }) {
   let displayCity = city;

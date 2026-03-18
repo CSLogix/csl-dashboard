@@ -1,25 +1,30 @@
 import React, { useState } from 'react';
 
 /**
- * Carrier rates table with inline editing, live RPM column, and row actions.
+ * Render a carrier rates table with inline editing, live RPM calculation, and per-row actions.
  *
- * @param {Object} props
- * @param {Array} props.carriers - Carrier rate objects
- * @param {Object} props.carrierCapMap - Carrier capabilities lookup
- * @param {number|null} props.editingLaneRateId
- * @param {string|null} props.editingLaneField
- * @param {string} props.editingLaneValue
- * @param {Function} props.setEditingLaneRateId
- * @param {Function} props.setEditingLaneField
- * @param {Function} props.setEditingLaneValue
- * @param {Function} props.handleLaneRateUpdate
- * @param {string} props.laneOrigin
- * @param {string} props.laneDestination
- * @param {number|null} props.miles - One-way miles for RPM calculation
- * @param {string} props.moveType - "dray"|"ftl"|"transload"
- * @param {Function} [props.onUseRate]
- * @param {Function} [props.onUpdateCarrierInfo]
- * @param {Function} [props.onDeleteRate]
+ * Renders carrier rows with capability badges, editable MC number and dispatch email, editable numeric rate cells,
+ * an RPM column computed from rates and provided miles (doubled for dray move type), and row-level actions for quoting,
+ * copying email/MC, and deleting rates.
+ *
+ * @param {Object} props - Component props.
+ * @param {Array<Object>} props.carriers - Array of carrier rate objects to display.
+ * @param {Object<string, Object>} props.carrierCapMap - Lookup of carrier capabilities keyed by lowercased carrier_name.
+ * @param {number|null} props.editingLaneRateId - ID of the rate row currently being edited, or null.
+ * @param {string|null} props.editingLaneField - Field key currently being edited (e.g., "total", "dray_rate"), or null.
+ * @param {string} props.editingLaneValue - Current string value for the inline rate edit input.
+ * @param {Function} props.setEditingLaneRateId - Setter to change the editingLaneRateId.
+ * @param {Function} props.setEditingLaneField - Setter to change the editingLaneField.
+ * @param {Function} props.setEditingLaneValue - Setter to change the editingLaneValue.
+ * @param {Function} props.handleLaneRateUpdate - Callback invoked to persist a rate change: (rateId, field, value) => void.
+ * @param {string} props.laneOrigin - Origin identifier for the lane (display/context only).
+ * @param {string} props.laneDestination - Destination identifier for the lane (display/context only).
+ * @param {number|null} props.miles - One-way miles used to compute RPM; if null RPM is not shown. For moveType "dray", miles are doubled.
+ * @param {string} props.moveType - Move type affecting RPM ("dray" | "ftl" | "transload"); treated case-insensitively.
+ * @param {Function} [props.onUseRate] - Optional callback when a row's "Quote" action is used: (carrierRate) => void.
+ * @param {Function} [props.onUpdateCarrierInfo] - Optional callback to persist carrier info edits: (carrierName, field, value) => Promise.
+ * @param {Function} [props.onDeleteRate] - Optional callback to delete a rate: (rateId) => Promise<boolean>.
+ * @returns {JSX.Element} The rendered carrier rates table component.
  */
 export default function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingLaneField, editingLaneValue, setEditingLaneRateId, setEditingLaneField, setEditingLaneValue, handleLaneRateUpdate, laneOrigin, laneDestination, miles, moveType, onUseRate, onUpdateCarrierInfo, onDeleteRate }) {
   const [showAllCols, setShowAllCols] = useState(false);

@@ -51,7 +51,11 @@ export const STATE_ABBREVS = {
   "district of columbia":"DC"
 };
 
-// Normalize a city/location string for grouping: strip zip, abbreviate state, title-case
+/**
+ * Normalize a location string by removing trailing ZIP codes, converting full state names to their two-letter abbreviations, and title-casing the place while uppercasing short words and the final state abbreviation.
+ * @param {string} text - Location input that may include a trailing ZIP code and/or a state name (e.g., "boston massachusetts 02118" or "los angeles, california").
+ * @returns {string} The normalized location with ZIP removed, state abbreviated and uppercased when present, and words title-cased (words of length ≤ 2 are fully uppercased).
+ */
 export function normalizeLocation(text) {
   if (!text) return "";
   let s = text.trim().replace(/\s+\d{5}(-\d{4})?$/, "").trim();
@@ -64,6 +68,13 @@ export function normalizeLocation(text) {
   return s;
 }
 
+/**
+ * Normalize a free-form port or location string to a canonical port cluster or a normalized location.
+ *
+ * Accepts inputs containing city names, port aliases, optional state suffixes, and optional ZIP codes.
+ * @param {string} text - The port/location string to normalize (may include state or ZIP).
+ * @returns {string} The canonical port cluster name when a known alias is matched; otherwise a normalized location string; returns an empty string for falsy input.
+ */
 export function normalizePort(text) {
   if (!text) return "";
   const lower = text.trim().toLowerCase();
@@ -82,7 +93,16 @@ export function normalizePort(text) {
   return normalizeLocation(text);
 }
 
-// For lane grouping: strip state suffix so "Baltimore, MD" groups with "Baltimore"
+/**
+ * Normalize a city name for lane grouping by removing trailing state suffixes when appropriate.
+ *
+ * If the input corresponds to a known port cluster, returns that canonical cluster name.
+ * Otherwise, strips a trailing ", ST" or " ST" state suffix when it looks like a state abbreviation
+ * and the shortened form is a plausible city name; returns the original normalized port string if no change is made.
+ *
+ * @param {string} text - A port or city string to normalize (e.g., "Baltimore, MD", "Los Angeles CA").
+ * @returns {string} The normalized city or canonical port cluster suitable for lane grouping.
+ */
 export function normalizeLaneCity(text) {
   const port = normalizePort(text);
   const portLower = port.toLowerCase();
@@ -98,7 +118,11 @@ export function normalizeLaneCity(text) {
 // Backwards compat alias
 export const normalizeOrigin = normalizeLaneCity;
 
-// Split a "City, ST" string into { city, state }
+/**
+ * Parse a location string and extract the city and two-letter state abbreviation.
+ * @param {string} text - Location string (for example, "Boston, MA" or "Los Angeles, MA 02110").
+ * @returns {{city: string, state: string}} An object where `city` is the normalized city name (or the normalized input if no state found) and `state` is the uppercase two-letter state abbreviation or an empty string.
+ */
 export function splitCityState(text) {
   if (!text) return { city: "", state: "" };
   const normalized = normalizeLocation(text);

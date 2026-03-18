@@ -2,6 +2,19 @@ import React, { useEffect } from 'react';
 import { fmtDec } from './constants';
 import LaneName from './LaneName';
 
+/**
+ * Render rate history grouped by market with loading and empty states.
+ *
+ * When loading, displays a centered loading message. When empty, displays a friendly empty state.
+ * Otherwise groups entries by `port_group` (fallback to `origin`, then `"Unknown"`), orders groups by size,
+ * and renders each group's rates showing origin → destination, carrier name, formatted rate, and a short date.
+ *
+ * @param {Object[]} rateHistory - Array of rate history entries. Each entry is expected to include:
+ *   `{ origin, destination, port_group?, carrier_name, rate_amount, date? }`.
+ * @param {boolean} historyLoading - Whether rate history is currently loading.
+ * @param {Function} onLoad - Callback invoked once when the component mounts.
+ * @returns {JSX.Element} The component UI for the history tab content.
+ */
 export default function HistoryTabContent({ rateHistory, historyLoading, onLoad }) {
   useEffect(() => { onLoad(); }, []);
   if (historyLoading) return <div style={{ padding: 40, textAlign: "center", color: "#5A6478" }}>Loading rate history...</div>;

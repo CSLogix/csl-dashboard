@@ -2,6 +2,17 @@ import React, { useState } from 'react';
 import { apiFetch, API_BASE } from '../../helpers/api';
 import { fmt, grad } from './constants';
 
+/**
+ * Render a Market Rate card showing aggregated rate statistics and interactive feedback controls.
+ *
+ * Displays average rate, range, confidence badge, rate-per-mile (with dray round-trip handling),
+ * activity level, data points, carrier count, source badges, and optional ZIP-code pair.
+ *
+ * @param {Object} props
+ * @param {Object} props.laneGroup - Aggregated lane data; expected fields include `carriers`, `minRate`, `maxRate`, `total`, `count`, `port`, `destination`, `miles`, `origin_zip`, `dest_zip`, and `move_type`.
+ * @param {Object} props.carrierCapMap - Unused prop reserved for carrier capacity mappings.
+ * @returns {JSX.Element|null} The Market Rate card element, or `null` when `laneGroup` is falsy.
+ */
 export default function MarketRateCard({ laneGroup, carrierCapMap }) {
   const [feedback, setFeedback] = useState(null);
   if (!laneGroup) return null;

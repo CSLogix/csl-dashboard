@@ -15,13 +15,20 @@ const defaultFetcher = (url) => apiFetch(url).then(r => {
 });
 
 /**
- * @param {string|null} key - URL or cache key (null to skip fetching)
- * @param {object} options
- * @param {Function} options.fetcher - Custom fetcher (default: apiFetch → json)
- * @param {number} options.staleTime - Ms before data is considered stale (default: 60000)
- * @param {number} options.revalidateInterval - Ms between auto-revalidation polls (0 = disabled)
- * @param {*} options.fallbackData - Initial data before first fetch
- * @returns {{ data, isLoading, isValidating, error, mutate }}
+ * Lightweight SWR-style hook that provides cached data fetching with stale-while-revalidate semantics and request deduplication.
+ *
+ * @param {string|null} key - Resource URL or cache key; pass `null` to disable fetching.
+ * @param {object} options - Configuration options.
+ * @param {Function} [options.fetcher] - Custom fetch function that accepts the key and resolves to the data (default: JSON fetcher).
+ * @param {number} [options.staleTime=60000] - Time in milliseconds before cached data is considered stale.
+ * @param {number} [options.revalidateInterval=0] - Polling interval in milliseconds for automatic revalidation (0 disables).
+ * @param {*} [options.fallbackData=null] - Initial data to use before the first successful fetch.
+ * @returns {{data: *, isLoading: boolean, isValidating: boolean, error: Error|null, mutate: Function}} An object containing:
+ *   - data: the current cached or fetched value.
+ *   - isLoading: `true` while the initial fetch is in progress and no cached data exists.
+ *   - isValidating: `true` while a revalidation request is in progress.
+ *   - error: the last fetch error, or `null` when successful or not attempted.
+ *   - mutate: function(newData[, shouldRevalidate=true]) — optimistically update cache and local state with `newData` (or updater function) and optionally trigger revalidation.
  */
 export function useSWR(key, options = {}) {
   const {
@@ -133,12 +140,18 @@ export function useSWR(key, options = {}) {
   return { data, isLoading, isValidating, error, mutate };
 }
 
-// Invalidate a specific cache key (useful from outside React)
+/**
+ * Remove the cached entry for the given cache key.
+ *
+ * @param {string} key - Cache key (e.g., request URL) to remove from the in-memory cache.
+ */
 export function invalidateCache(key) {
   cache.delete(key);
 }
 
-// Clear all cached data
+/**
+ * Remove all entries from the in-memory request cache.
+ */
 export function clearCache() {
   cache.clear();
 }

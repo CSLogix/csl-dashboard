@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 import { fmt } from './constants';
 
+/**
+ * Render a Market Benchmark card showing market statistics, trend, comparison to the carrier average, and an optional expandable list of individual rates.
+ *
+ * @param {object} benchmark - Benchmark data; expected shape:
+ *   - stats: { avg: number, min: number, max: number, count: number, trend_pct: number|null, oldest_date?: string, latest_date?: string }
+ *   - rates?: Array<{ date?: string, terminal?: string, base?: number, fsc_pct?: number, total?: number }>
+ * @param {number} carrierAvg - Carrier average used to compute the delta against `stats.avg`.
+ * @returns {JSX.Element|null} A Market Benchmark card element, or `null` when `benchmark.stats` is not provided.
 export default function MarketBenchmarkCard({ benchmark, carrierAvg }) {
   if (!benchmark?.stats) return null;
   const { stats, rates } = benchmark;
