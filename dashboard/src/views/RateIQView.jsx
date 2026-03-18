@@ -932,6 +932,29 @@ export default function RateIQView() {
     });
   }, [dirCarriers, dirSearch, dirMarket, dirCaps, dirHideDnu, dirPort, portGroups]);
 
+  // ── Group filtered carriers by market/region for organized browse view ──
+  const groupedDir = useMemo(() => {
+    const map = {};
+    filteredDir.forEach(c => {
+      const markets = c.markets?.length > 0 ? c.markets : ["Unassigned"];
+      // Add carrier under each of its markets
+      markets.forEach(m => {
+        if (!map[m]) map[m] = { market: m, carriers: [], tierCounts: { 1: 0, 2: 0, 3: 0 }, totalTrucks: 0 };
+        // Avoid duplicates if carrier is already listed under this market
+        if (!map[m].carriers.some(existing => existing.id === c.id)) {
+          map[m].carriers.push(c);
+          if (c.tier_rank >= 1 && c.tier_rank <= 3) map[m].tierCounts[c.tier_rank]++;
+          if (c.trucks) map[m].totalTrucks += c.trucks;
+        }
+      });
+    });
+    return Object.values(map)
+      .sort((a, b) => b.carriers.length - a.carriers.length);
+  }, [filteredDir]);
+
+  const [dirGroupView, setDirGroupView] = useState(true); // default to grouped
+  const [expandedMarkets, setExpandedMarkets] = useState({});
+
   // ── Group lane results by origin ↔ destination (bidirectional, normalized) ──
   // Merges A→B and B→A into a single lane card so round-trip lanes aren't split
   const groupedLanes = useMemo(() => {
@@ -2462,12 +2485,78 @@ export default function RateIQView() {
             {dirHideDnu ? "Show DNU" : "Hide DNU"}
           </button>
         </div>
-        <div style={{ fontSize: 11, color: "#5A6478", marginBottom: 12 }}>{filteredDir.length} carriers · {allMarkets.length} markets</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: "#5A6478" }}>{filteredDir.length} carriers · {allMarkets.length} markets</div>
+          <button onClick={() => setDirGroupView(!dirGroupView)}
+            style={{ padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: "pointer", border: "1px solid rgba(255,255,255,0.08)", background: dirGroupView ? "rgba(0,212,170,0.08)" : "transparent", color: dirGroupView ? "#00D4AA" : "#8B95A8", fontFamily: "inherit" }}>
+            {dirGroupView ? "⊞ Grouped" : "☰ Flat List"}
+          </button>
+        </div>
 
         {/* Carrier Cards */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {filteredDir.length === 0 && <div style={{ padding: 40, textAlign: "center", color: "#5A6478", fontSize: 12 }}>No carriers match your filters.</div>}
-          {filteredDir.slice(0, 100).map((c, i) => {
+
+          {/* ── Grouped by market view ── */}
+          {dirGroupView && groupedDir.map(group => {
+            const isMarketOpen = !!expandedMarkets[group.market];
+            return (
+              <div key={group.market} className="glass" style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.04)" }}>
+                <div onClick={() => setExpandedMarkets(prev => ({ ...prev, [group.market]: !prev[group.market] }))}
+                  style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", transition: "background 0.15s" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 11, color: "#5A6478", transform: isMarketOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s", display: "inline-block" }}>▼</span>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#F0F2F5" }}>{group.market}</div>
+                      <div style={{ fontSize: 10, color: "#5A6478", marginTop: 1 }}>
+                        {group.carriers.length} carrier{group.carriers.length !== 1 ? "s" : ""}
+                        {group.totalTrucks > 0 && <span> · {group.totalTrucks} trucks</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {group.tierCounts[1] > 0 && <span style={{ padding: "2px 7px", borderRadius: 4, fontSize: 9, fontWeight: 700, background: "rgba(34,197,94,0.12)", color: "#34d399" }}>T1: {group.tierCounts[1]}</span>}
+                    {group.tierCounts[2] > 0 && <span style={{ padding: "2px 7px", borderRadius: 4, fontSize: 9, fontWeight: 700, background: "rgba(245,158,11,0.12)", color: "#FBBF24" }}>T2: {group.tierCounts[2]}</span>}
+                    {group.tierCounts[3] > 0 && <span style={{ padding: "2px 7px", borderRadius: 4, fontSize: 9, fontWeight: 700, background: "rgba(251,146,60,0.12)", color: "#fb923c" }}>T3: {group.tierCounts[3]}</span>}
+                  </div>
+                </div>
+                {isMarketOpen && (
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                    {group.carriers.map((c, i) => {
+                      const isExp = dirExpanded === (c.id || `${group.market}-${i}`);
+                      const tierColors = { 1: { bg: "rgba(34,197,94,0.12)", color: "#34d399", label: "Tier 1" }, 2: { bg: "rgba(245,158,11,0.12)", color: "#FBBF24", label: "Tier 2" }, 3: { bg: "rgba(251,146,60,0.12)", color: "#fb923c", label: "Tier 3" }, 0: { bg: "rgba(239,68,68,0.12)", color: "#f87171", label: "DNU" } };
+                      const tier = tierColors[c.tier_rank] || { bg: "rgba(107,114,128,0.08)", color: "#6B7280", label: "—" };
+                      return (
+                        <div key={c.id || i} style={{ padding: "8px 16px 8px 36px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid rgba(255,255,255,0.02)", cursor: "pointer", transition: "background 0.1s" }}
+                          onClick={() => setDirExpanded(isExp ? null : (c.id || `${group.market}-${i}`))}
+                          onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
+                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: c.dnu ? "#f87171" : "#F0F2F5", textDecoration: c.dnu ? "line-through" : "none" }}>{c.carrier_name}</span>
+                              {c.mc_number && <span style={{ fontSize: 10, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>MC-{c.mc_number}</span>}
+                            </div>
+                            <div style={{ display: "flex", gap: 3, marginTop: 2, flexWrap: "wrap" }}>
+                              {CAP_OPTIONS.filter(cap => c[cap.key]).map(cap => (
+                                <span key={cap.key} style={{ padding: "0px 5px", borderRadius: 3, fontSize: 7, fontWeight: 700, background: cap.color + "18", color: cap.color }}>{cap.label}</span>
+                              ))}
+                            </div>
+                          </div>
+                          <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: tier.bg, color: tier.color, flexShrink: 0 }}>{tier.label}</span>
+                          {c.trucks && <div style={{ textAlign: "center", minWidth: 30, flexShrink: 0 }}><div style={{ fontSize: 12, fontWeight: 800, color: "#F0F2F5" }}>{c.trucks}</div><div style={{ fontSize: 7, color: "#5A6478" }}>TRUCKS</div></div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* ── Flat list view (original) ── */}
+          {!dirGroupView && filteredDir.slice(0, 100).map((c, i) => {
             const isExp = dirExpanded === (c.id || i);
             const tierColors = { 1: { bg: "rgba(34,197,94,0.12)", color: "#34d399", label: "Tier 1" }, 2: { bg: "rgba(245,158,11,0.12)", color: "#FBBF24", label: "Tier 2" }, 3: { bg: "rgba(251,146,60,0.12)", color: "#fb923c", label: "Tier 3" }, 0: { bg: "rgba(239,68,68,0.12)", color: "#f87171", label: "DNU" } };
             const tier = tierColors[c.tier_rank] || { bg: "rgba(107,114,128,0.08)", color: "#6B7280", label: "Unranked" };
@@ -2596,7 +2685,7 @@ export default function RateIQView() {
               </div>
             );
           })}
-          {filteredDir.length > 100 && <div style={{ padding: 12, textAlign: "center", color: "#5A6478", fontSize: 11 }}>Showing 100 of {filteredDir.length} carriers. Refine your search.</div>}
+          {!dirGroupView && filteredDir.length > 100 && <div style={{ padding: 12, textAlign: "center", color: "#5A6478", fontSize: 11 }}>Showing 100 of {filteredDir.length} carriers. Refine your search.</div>}
         </div>
       </div>
     );
