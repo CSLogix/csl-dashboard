@@ -360,6 +360,7 @@ def run_once():
     print(f"\n[{now_str}] FTL poll cycle (Postgres mode)...")
 
     # ── Read active FTL loads from Postgres ────────────────────────────────
+    conn = None
     try:
         conn = _pg_connect()
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -374,10 +375,12 @@ def run_once():
                 ORDER BY account, efj
             """)
             all_loads = cur.fetchall()
-        conn.close()
     except Exception as exc:
         print(f"FATAL: Could not read from Postgres: {exc}")
         return
+    finally:
+        if conn is not None:
+            conn.close()
 
     # Group by account
     from collections import defaultdict
