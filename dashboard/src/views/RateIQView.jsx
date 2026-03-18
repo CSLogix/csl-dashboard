@@ -1004,7 +1004,21 @@ export default function RateIQView() {
       if (ls.avg_rate > 0) { map[origin].totalRate += ls.avg_rate * (ls.load_count || 1); map[origin].rateCount += (ls.load_count || 1); }
     });
     return Object.values(map)
-      .map(g => ({ ...g, avgRate: g.rateCount > 0 ? Math.round(g.totalRate / g.rateCount) : 0 }))
+      .map(g => {
+        const avgRate = g.rateCount > 0 ? Math.round(g.totalRate / g.rateCount) : 0;
+        // Calculate weighted average miles across lanes for RPM
+        let totalMilesWeighted = 0, milesWeightCount = 0;
+        g.lanes.forEach(ls => {
+          if (ls.miles && ls.miles > 0 && ls.avg_rate > 0) {
+            const w = ls.load_count || 1;
+            totalMilesWeighted += ls.miles * w;
+            milesWeightCount += w;
+          }
+        });
+        const avgMiles = milesWeightCount > 0 ? totalMilesWeighted / milesWeightCount : 0;
+        const avgRpm = avgMiles > 0 && avgRate > 0 ? (avgRate / avgMiles).toFixed(2) : null;
+        return { ...g, avgRate, avgMiles: Math.round(avgMiles), avgRpm };
+      })
       .sort((a, b) => b.totalLoads - a.totalLoads);
   }, [rateLaneSummaries, moveTypeFilter]);
 
@@ -1627,6 +1641,12 @@ export default function RateIQView() {
                         </div>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                        {group.avgRpm && (
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>${group.avgRpm}</div>
+                            <div style={{ fontSize: 10, color: "#5A6478", fontWeight: 600 }}>avg rpm</div>
+                          </div>
+                        )}
                         {group.avgRate > 0 && (
                           <div style={{ textAlign: "right" }}>
                             <div style={{ fontSize: 18, fontWeight: 800, color: "#34d399", fontFamily: "'JetBrains Mono', monospace" }}>{fmt(group.avgRate)}</div>

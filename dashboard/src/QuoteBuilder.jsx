@@ -105,12 +105,18 @@ function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, te
     return sum + (marginType === "flat" ? base + flatMarkup : base * (1 + margin));
   }, 0);
 
-  // Accessorials — all with amounts show; only checked count toward total
-  const accRows = accessorials.filter(a => parseNum(a.amount) > 0).map(a => ({
-    desc: ((a.qty || 1) > 1 ? `${a.qty}x ` : "") + a.charge + (a.frequency && a.frequency !== "flat" ? ` ${a.frequency}` : ""),
-    rate: parseNum(a.amount),
-    included: a.checked,
-  }));
+  // Accessorials — show per-unit rate on the row; qty × rate goes into total
+  const accRows = accessorials.filter(a => parseNum(a.amount) > 0).map(a => {
+    const qty = Math.max(1, parseNum(a.qty) || 1);
+    const unitRate = parseNum(a.rate);
+    const freqLabel = a.frequency && a.frequency !== "flat" ? ` ${a.frequency}` : "";
+    const qtyLabel = qty > 1 ? ` (${qty}${freqLabel.includes("day") ? " days" : freqLabel.includes("hour") ? " hrs" : "x"})` : "";
+    return {
+      desc: a.charge + qtyLabel + freqLabel,
+      rate: unitRate,
+      included: a.checked,
+    };
+  });
   const accTotal = accessorials.filter(a => a.checked).reduce((sum, a) => sum + parseNum(a.amount), 0);
   const total = sellSubtotal + accTotal;
 
@@ -512,6 +518,7 @@ export default function QuoteBuilder({ prefill } = {}) {
       ...prev,
       pod: prefill.origin || prev.pod,
       finalDelivery: prefill.destination || prev.finalDelivery,
+      ...(prefill.miles ? { oneWayMiles: String(prefill.miles), roundTripMiles: String(prefill.miles * 2) } : {}),
     }));
     if (prefill.carrier) setCarrierName(prefill.carrier);
     // Auto-fill linehaul rows from carrier rate data
@@ -1318,7 +1325,20 @@ export default function QuoteBuilder({ prefill } = {}) {
                               {isOpen && (
                                 <div style={{ background: "rgba(0,0,0,0.15)" }}>
                                   {grp.quotes.map((q, qi) => (
-                                    <div key={qi} onClick={() => { setCarrierName(q.carrier); if (q.rate) setLinehaul([{ description: `${grp.lane || "Linehaul"}`, rate: String(q.rate), section: defaultSection(route.shipmentType) }]); }}
+                                    <div key={qi} onClick={() => {
+                                      setCarrierName(q.carrier);
+                                      if (q.rate) setLinehaul([{ description: `${grp.lane || "Linehaul"}`, rate: String(q.rate), section: defaultSection(route.shipmentType) }]);
+                                      // Auto-populate destination from lane name (e.g. "Houston → dumas" → "dumas")
+                                      if (grp.lane) {
+                                        const parts = grp.lane.split(/\s*→\s*/);
+                                        if (parts.length >= 2) updateRoute("finalDelivery", parts[parts.length - 1].trim());
+                                      }
+                                      // Auto-populate mileage from rate intel data
+                                      if (rateIntel?.one_way_miles || rateIntel?.round_trip_miles) {
+                                        if (rateIntel.one_way_miles) updateRoute("oneWayMiles", String(rateIntel.one_way_miles));
+                                        if (rateIntel.round_trip_miles) updateRoute("roundTripMiles", String(rateIntel.round_trip_miles));
+                                      }
+                                    }}
                                       style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 8px 4px 20px", cursor: "pointer", fontSize: 10.5, transition: "background 0.1s" }}
                                       onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}
                                       onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
@@ -1346,7 +1366,18 @@ export default function QuoteBuilder({ prefill } = {}) {
                       /* Fallback: flat list */
                       <div style={{ maxHeight: 160, overflowY: "auto" }}>
                         {rateIntel.matches.slice(0, 10).map((m, i) => (
-                          <div key={m.id || i} onClick={() => { setCarrierName(m.carrier); if (m.rate) setLinehaul([{ description: `${m.lane || "Linehaul"}`, rate: String(m.rate), section: defaultSection(route.shipmentType) }]); }}
+                          <div key={m.id || i} onClick={() => {
+                            setCarrierName(m.carrier);
+                            if (m.rate) setLinehaul([{ description: `${m.lane || "Linehaul"}`, rate: String(m.rate), section: defaultSection(route.shipmentType) }]);
+                            if (m.lane) {
+                              const parts = m.lane.split(/\s*→\s*/);
+                              if (parts.length >= 2) updateRoute("finalDelivery", parts[parts.length - 1].trim());
+                            }
+                            if (rateIntel?.one_way_miles || rateIntel?.round_trip_miles) {
+                              if (rateIntel.one_way_miles) updateRoute("oneWayMiles", String(rateIntel.one_way_miles));
+                              if (rateIntel.round_trip_miles) updateRoute("roundTripMiles", String(rateIntel.round_trip_miles));
+                            }
+                          }}
                             style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 8px", borderRadius: 6, cursor: "pointer", fontSize: 11, transition: "background 0.1s" }}
                             onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}
                             onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
