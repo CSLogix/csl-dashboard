@@ -123,19 +123,6 @@ def _jc_cache_set(container_num, data):
     pg_jc_cache_set(container_num, data)
 
 
-_SSL_LINE_MAP = {
-    "cma": "CMA_CGM", "cgm": "CMA_CGM", "maersk": "MAERSK",
-    "hapag": "HAPAG_LLOYD", "msc": "MSC", "evergreen": "EVERGREEN",
-    "one": "ONE", "cosco": "COSCO", "zim": "ZIM",
-    "yang ming": "YANG_MING", "hmm": "HMM",
-}
-
-def _detect_ssl_line(vessel, carrier_name=""):
-    combined = f"{vessel} {carrier_name}".lower()
-    for key, val in _SSL_LINE_MAP.items():
-        if key in combined:
-            return val
-    return None
 
 # -- SeaRates Container Tracking API ─────────────────────────────────────
 def _searates_container_track(container_num, ssl_line):
@@ -481,7 +468,8 @@ SSL_LINKS = {
     "maersk":    {"code": "MAERSK",      "url": "https://www.maersk.com/tracking"},
     "hapag":     {"code": "HAPAG_LLOYD",  "url": "https://www.hapag-lloyd.com/en/online-business/track"},
     "hapag-lloyd": {"code": "HAPAG_LLOYD","url": "https://www.hapag-lloyd.com/en/online-business/track"},
-    "one":       {"code": "ONE",          "url": "https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking"},
+    "one line":  {"code": "ONE",          "url": "https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking"},
+    "ocean network": {"code": "ONE",   "url": "https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking"},
     "evergreen": {"code": "EVERGREEN",    "url": "https://www.shipmentlink.com/tvs2/jsp/TVS2_498.jsp"},
     "hmm":       {"code": "HMM",          "url": "https://www.hmm21.com/cms/business/ebiz/trackTrace"},
     "cma cgm":   {"code": "CMA_CGM",      "url": "https://www.cma-cgm.com/ebusiness/tracking"},
@@ -1522,165 +1510,101 @@ def run_sm_line(browser, url, bol, container):
     finally:
         page.close()
 
+def _browser_scrape_by_ssl(browser, ssl_code, url, bol, container):
+    """Route to the correct specialized browser scraper based on SSL code."""
+    if ssl_code == "EVERGREEN":
+        return run_shipmentlink(browser, url, bol, container)
+    elif ssl_code == "HAPAG_LLOYD":
+        return run_hapag_lloyd(browser, url, bol, container)
+    elif ssl_code == "ONE":
+        return run_one_line(browser, url, bol, container)
+    elif ssl_code == "SM_LINE":
+        return run_sm_line(browser, url, bol, container)
+    elif url:
+        return run_dray_import(browser, url, bol)
+    return None, None, None, None
+
+
+def _extract_domain(url):
+    """Extract carrier domain from URL for circuit breaker tracking."""
+    try:
+        return urlparse(url).netloc.replace("www.", "")
+    except Exception:
+        return ""
+
+
+def _record_cb(cb, domain, eta, pickup, ret, status):
+    """Record browser scraper result on circuit breaker."""
+    if cb and domain:
+        if eta or pickup or ret or status:
+            cb.record_success(domain)
+        else:
+            cb.record_failure(domain)
+
+
 def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
                           circuit_breaker=None, vessel="", carrier_name="",
                           pending_updates=None, proxy_ok=True, ssl_code=None,
                           existing_row=None):
+    """Route a dray import row to the appropriate tracker.
+
+    Primary path: SSL code -> JsonCargo API
+    Fallback:     SSL code -> specialized browser scraper
+    Last resort:  generic browser scraper (if URL available)
+    """
     print(f"\n  [Dray Import] row {sheet_row} — Container: {container}  BOL: {bol}")
-    url_lower = url.lower() if url else ""
 
-    # Extract carrier domain for circuit breaker
-    carrier_domain = ""
-    try:
-        carrier_domain = urlparse(url).netloc.replace("www.", "")
-    except Exception:
-        pass
+    # ── No SSL code = can't call API ─────────────────────────────────────────
+    if not ssl_code:
+        if not url or not proxy_ok:
+            reason = "no URL" if not url else "proxy down"
+            print(f"    SKIPPED (no SSL code + {reason})")
+            return None, None, None, None
 
-    # Determine if this carrier uses a fast API route (no circuit breaker needed)
-    api_route = any(d in url_lower for d in ("maersk.com", "hmm21.com", "hapag-lloyd.com", "shipmentlink.com", "apl.com", "cma-cgm.com", "one-line.com"))
+        carrier_domain = _extract_domain(url)
+        if circuit_breaker and carrier_domain and circuit_breaker.should_skip(carrier_domain):
+            print(f"    CIRCUIT BREAKER: skipping {carrier_domain}")
+            return None, None, None, None
 
-    # Circuit breaker check — only for browser scrapers (API calls are <1s, no benefit)
-    if circuit_breaker and carrier_domain and not api_route and circuit_breaker.should_skip(carrier_domain):
-        print(f"    CIRCUIT BREAKER: skipping {carrier_domain} (too many failures)")
-        return None, None, None, None
-
-    # Route via ssl_code (from SSL Links tab) when available
-    if ssl_code:
-        print(f"    Using SSL Links lookup (ssl_code={ssl_code})")
-        eta, pickup, ret, status = _jsoncargo_container_track(container, ssl_code)
-        if status == "_fallback":
-            if proxy_ok and url:
-                print("    API prefix not found - falling back to browser scraper")
-                # Route browser scraper based on ssl_code
-                if ssl_code == "EVERGREEN":
-                    eta, pickup, ret, status = run_shipmentlink(browser, url, bol, container)
-                elif ssl_code == "HAPAG_LLOYD":
-                    eta, pickup, ret, status = run_hapag_lloyd(browser, url, bol, container)
-                elif ssl_code == "ONE":
-                    eta, pickup, ret, status = run_one_line(browser, url, bol, container)
-                elif ssl_code == "SM_LINE":
-                    eta, pickup, ret, status = run_sm_line(browser, url, bol, container)
-                else:
-                    eta, pickup, ret, status = run_dray_import(browser, url, bol)
-                api_route = False
-            else:
-                print("    API prefix not found + no fallback available - skipping")
-                eta, pickup, ret, status = None, None, None, None
-    # Route to carrier-specific scraper or API (legacy hyperlink-based routing)
-    elif "maersk.com" in url_lower:
-        ssl = "MAERSK"
-        print(f"    Using Container API (ssl_line={ssl})")
-        eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
-        if status == "_fallback":
-            if proxy_ok:
-                print("    API prefix not found - falling back to browser scraper")
-                eta, pickup, ret, status = run_dray_import(browser, url, bol)
-                api_route = False  # enable circuit breaker for browser fallback
-            else:
-                print("    API prefix not found + proxy down - skipping")
-                eta, pickup, ret, status = None, None, None, None
-    elif "hmm21.com" in url_lower:
-        ssl = "HMM"
-        print(f"    Using Container API (ssl_line={ssl})")
-        eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
-        if status == "_fallback":
-            if proxy_ok:
-                print("    API prefix not found - falling back to browser scraper")
-                eta, pickup, ret, status = run_dray_import(browser, url, bol)
-                api_route = False
-            else:
-                print("    API prefix not found + proxy down - skipping")
-                eta, pickup, ret, status = None, None, None, None
-    elif "apl.com" in url_lower:
-        ssl = "CMA_CGM"
-        print(f"    Using JsonCargo API (ssl_line={ssl}) [APL/CMA CGM]")
-        eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
-        if status == "_fallback":
-            if proxy_ok:
-                print("    API prefix not found - falling back to browser scraper")
-                eta, pickup, ret, status = run_dray_import(browser, url, bol)
-                api_route = False
-            else:
-                print("    API prefix not found + proxy down - skipping")
-                eta, pickup, ret, status = None, None, None, None
-    elif not proxy_ok:
-        # Proxy is down - skip all browser-based scrapers
-        print("    SKIPPED (proxy down - browser scraping unavailable)")
-        eta, pickup, ret, status = None, None, None, None
-    elif "shipmentlink.com" in url_lower:
-        ssl = "EVERGREEN"
-        print(f"    Using Container API (ssl_line={ssl})")
-        eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
-        if status == "_fallback":
-            if proxy_ok:
-                print("    API prefix not found - falling back to browser scraper")
-                eta, pickup, ret, status = run_shipmentlink(browser, url, bol, container)
-                api_route = False
-            else:
-                print("    API prefix not found + proxy down - skipping")
-                eta, pickup, ret, status = None, None, None, None
-    elif "hapag-lloyd.com" in url_lower:
-        ssl = "HAPAG_LLOYD"
-        print(f"    Using Container API (ssl_line={ssl})")
-        eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
-        if status == "_fallback":
-            if proxy_ok:
-                print("    API prefix not found - falling back to browser scraper")
-                eta, pickup, ret, status = run_hapag_lloyd(browser, url, bol, container)
-                api_route = False
-            else:
-                print("    API prefix not found + proxy down - skipping")
-                eta, pickup, ret, status = None, None, None, None
-    elif "one-line.com" in url_lower:
-        ssl = "ONE"
-        print(f"    Using Container API (ssl_line={ssl})")
-        eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
-        if status == "_fallback":
-            if proxy_ok:
-                print("    API prefix not found - falling back to browser scraper")
-                eta, pickup, ret, status = run_one_line(browser, url, bol, container)
-                api_route = False
-            else:
-                print("    API prefix not found + proxy down - skipping")
-                eta, pickup, ret, status = None, None, None, None
-    elif "cma-cgm.com" in url_lower:
-        ssl = "CMA_CGM"
-        print(f"    Using Container API (ssl_line={ssl})")
-        eta, pickup, ret, status = _jsoncargo_container_track(container, ssl)
-        if status == "_fallback":
-            if proxy_ok:
-                print("    API prefix not found - falling back to browser scraper")
-                eta, pickup, ret, status = run_dray_import(browser, url, bol)
-                api_route = False
-            else:
-                print("    API prefix not found + proxy down - skipping")
-                eta, pickup, ret, status = None, None, None, None
-    else:
+        print(f"    No SSL code — using generic browser scraper")
         eta, pickup, ret, status = run_dray_import(browser, url, bol)
+        _record_cb(circuit_breaker, carrier_domain, eta, pickup, ret, status)
 
-    # Track circuit breaker (browser scrapers only — API routes and proxy-down skips excluded)
-    if circuit_breaker and carrier_domain and not api_route and proxy_ok:
-        if eta or pickup or ret or status:
-            circuit_breaker.record_success(carrier_domain)
-        else:
-            circuit_breaker.record_failure(carrier_domain)
-
-    # Fallback: if browser scraper returned nothing with BOL, retry with container number
-    if not (eta or pickup or ret or status) and container and bol and container.strip() != bol.strip() and proxy_ok and url:
-        print(f"    BOL search returned nothing — retrying with container: {container}")
-        url_lower_fb = url.lower() if url else ""
-        if "shipmentlink.com" in url_lower_fb:
-            eta, pickup, ret, status = run_shipmentlink(browser, url, container, container)
-        elif "hapag-lloyd.com" in url_lower_fb:
-            eta, pickup, ret, status = run_hapag_lloyd(browser, url, container, container)
-        elif "one-line.com" in url_lower_fb:
-            eta, pickup, ret, status = run_one_line(browser, url, container, container)
-        elif "smlines.com" in url_lower_fb:
-            eta, pickup, ret, status = run_sm_line(browser, url, container, container)
-        elif not any(d in url_lower_fb for d in ("maersk.com", "hmm21.com", "cma-cgm.com", "apl.com")):
+        # Retry with container number if BOL search returned nothing
+        if not (eta or pickup or ret or status) and container and bol and container.strip() != bol.strip():
+            print(f"    BOL returned nothing — retrying with container: {container}")
             eta, pickup, ret, status = run_dray_import(browser, url, container)
-        if eta or pickup or ret or status:
-            print(f"    Container search found results!")
+
+    else:
+        # ── Primary path: JsonCargo API via SSL code ─────────────────────────
+        print(f"    Using Container API (ssl_line={ssl_code})")
+        eta, pickup, ret, status = _jsoncargo_container_track(container, ssl_code)
+
+        if status == "_fallback":
+            # API didn't recognize container prefix — try browser scraper
+            if not proxy_ok or not url:
+                reason = "proxy down" if not proxy_ok else "no URL"
+                print(f"    API prefix not found + {reason} — skipping")
+                eta, pickup, ret, status = None, None, None, None
+            else:
+                carrier_domain = _extract_domain(url)
+                if circuit_breaker and carrier_domain and circuit_breaker.should_skip(carrier_domain):
+                    print(f"    CIRCUIT BREAKER: skipping browser fallback for {ssl_code}")
+                    eta, pickup, ret, status = None, None, None, None
+                else:
+                    print(f"    API prefix not found — falling back to browser ({ssl_code})")
+                    eta, pickup, ret, status = _browser_scrape_by_ssl(
+                        browser, ssl_code, url, bol, container)
+                    _record_cb(circuit_breaker, carrier_domain, eta, pickup, ret, status)
+
+                    # Retry with container number if BOL search returned nothing
+                    if (not (eta or pickup or ret or status) and container and bol
+                            and container.strip() != bol.strip()):
+                        print(f"    BOL returned nothing — retrying with container: {container}")
+                        eta, pickup, ret, status = _browser_scrape_by_ssl(
+                            browser, ssl_code, url, container, container)
+                        if eta or pickup or ret or status:
+                            print(f"    Container search found results!")
 
     # Don't report pickup/LFD if it's the same as ETA (not a real LFD)
     if pickup and eta and pickup == eta:
@@ -1764,51 +1688,6 @@ def load_account_lookup(sheet):
 
 
 
-
-SSL_LINKS_TAB = "SSL Links"
-
-def load_ssl_links(sheet):
-    """Read 'SSL Links' tab -> dict mapping lowercase ssl name -> {url, code}."""
-    try:
-        ws = sheet.worksheet(SSL_LINKS_TAB)
-        rows = ws.get_all_values()
-        lookup = {}
-        for row in rows[1:]:  # skip header
-            if len(row) >= 3 and row[0].strip():
-                ssl_name = row[0].strip()
-                url = row[1].strip()
-                code = row[2].strip()
-                if ssl_name and (url or code):
-                    lookup[ssl_name.lower()] = {"url": url, "code": code}
-        print(f"  Loaded {len(lookup)} SSL link(s) from '{SSL_LINKS_TAB}'")
-        return lookup
-    except Exception as exc:
-        print(f"  WARNING: Could not load '{SSL_LINKS_TAB}' tab: {exc}")
-        return {}
-
-
-def resolve_ssl_from_column_f(col_f_value, ssl_links):
-    """Match Column F value to an SSL Links entry using keyword matching.
-    Returns {url, code} or None."""
-    if not col_f_value or not ssl_links:
-        return None
-    val = col_f_value.strip().lower()
-    if not val:
-        return None
-    # Try exact match first
-    if val in ssl_links:
-        return ssl_links[val]
-    # Try keyword: check if any SSL key is contained in the Column F value
-    for ssl_key, info in ssl_links.items():
-        if ssl_key in val or val in ssl_key:
-            return info
-    # Try partial word matching (e.g. "hapag" matches "hapag-lloyd")
-    for ssl_key, info in ssl_links.items():
-        key_words = ssl_key.replace("-", " ").split()
-        for word in key_words:
-            if len(word) >= 3 and word in val:
-                return info
-    return None
 
 def get_account_tabs(sheet, account_lookup):
     """Return tab titles that are in account_lookup and not in SKIP_TABS."""
