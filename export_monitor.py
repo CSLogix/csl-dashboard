@@ -341,8 +341,11 @@ def jsoncargo_bol_lookup(booking_num, ssl_line):
             containers=data["data"].get("associated_container_numbers",[])
             if containers:
                 print(f"    BOL lookup: found containers {containers}")
-                _jc_cache_set(f"bol:{booking_num}", containers[0])
-                return containers[0]
+                if not _is_container_num(containers[0]):
+                    print(f"    BOL lookup: invalid container format: {containers[0]} - skipping")
+                else:
+                    _jc_cache_set(f"bol:{booking_num}", containers[0])
+                    return containers[0]
         print(f"    BOL lookup: {data.get('error',{}).get('title','no result')}")
         return None
     except Exception as e:
