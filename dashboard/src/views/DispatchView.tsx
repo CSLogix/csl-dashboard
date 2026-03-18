@@ -147,10 +147,14 @@ export default function DispatchView({
     { key: "efj", label: "EFJ #", w: 90, sortFn: (a, b) => a.loadNumber.localeCompare(b.loadNumber) },
     { key: "container", label: "Container/Load #", w: 120, sortFn: (a, b) => a.container.localeCompare(b.container) },
     ...(hasFTL ? [{ key: "mpStatus", label: "MP Status", w: 110, sortFn: (a, b) => {
-      const efjA = (a.efj || "").replace(/^EFJ\s*/i, ""); const efjB = (b.efj || "").replace(/^EFJ\s*/i, "");
-      const aS = (a.mpDisplayStatus || trackingSummary?.[efjA]?.mpDisplayStatus || "").toLowerCase();
-      const bS = (b.mpDisplayStatus || trackingSummary?.[efjB]?.mpDisplayStatus || "").toLowerCase();
-      const pri = s => s === "behind schedule" ? 5 : s === "no signal" ? 4 : s === "awaiting update" ? 3 : s === "at delivery" ? 2 : s === "at pickup" ? 1 : 0;
+      const aS = (a.mpStatus || "").toLowerCase();
+      const bS = (b.mpStatus || "").toLowerCase();
+      // Sort: red statuses first, then purple, then green active, then green idle
+      const pri = s => s.includes("requesting") || s.includes("expired") || s.includes("denied") || s.includes("hidden") || s.includes("invalid") ? 5
+        : s.includes("unresponsive") || s.includes("waiting for update") ? 4
+        : s.includes("tracking now") ? 2
+        : s.includes("completed") ? 1
+        : s.includes("ready to track") ? 0 : 3;
       return pri(bS) - pri(aS);
     }}] : []),
     { key: "pickup", label: "Pickup", w: 110, sortFn: (a, b) => (a.pickupDate || "").localeCompare(b.pickupDate || "") },
@@ -717,7 +721,7 @@ export default function DispatchView({
                     )}
                   </td>}
                   {hasFTL && isColVisible("mpStatus") && <td style={cellStyleFor("mpStatus")}>
-                    {(isFTL || s.mpStatus || s.mpDisplayStatus || tracking?.mpDisplayStatus || tracking?.status) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.mpStatus} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} mpLastUpdated={s.mpLastUpdated} /> : <span style={{ color: "#5A6478", fontSize: 11, fontStyle: "italic" }}>No MP</span>}
+                    {(isFTL || s.mpStatus || s.mpDisplayStatus || tracking?.mpDisplayStatus || tracking?.status) ? <TrackingBadge tracking={tracking} mpStatus={s.mpStatus || tracking?.status} mpDisplayStatus={s.mpDisplayStatus || tracking?.mpDisplayStatus} mpDisplayDetail={s.mpDisplayDetail || tracking?.mpDisplayDetail} mpLastUpdated={s.mpLastUpdated} /> : <span style={{ color: "#5A6478", fontSize: 11, fontStyle: "italic" }}>No MP</span>}
                   </td>}
                   {isColVisible("pickup") && <td style={cellStyleFor("pickup")} onClick={(e) => { e.stopPropagation(); setInlineEditId(s.id); setInlineEditField("pickup"); setInlineEditValue(""); }}>
                     {isInlineEditing && inlineEditField === "pickup" ? (
