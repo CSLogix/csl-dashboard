@@ -184,7 +184,7 @@ def _call_claude(content: list) -> dict:
     import anthropic
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model="claude-sonnet-4-6",
         max_tokens=2048,
         messages=[{"role": "user", "content": content}],
     )
@@ -844,19 +844,15 @@ async def api_lane_stats():
 
 # ── Manual Intake (carrier rate from email / file / text) ────────────
 
-@router.post("/api/rate-iq/manual-intake")
-async def post_manual_intake(request: Request):
-    """Extract a carrier rate from pasted text or uploaded file (image, PDF, .msg, .eml, HTML).
-    Uses Claude Vision for files, Claude text extraction for pasted text.
-    Saves extracted rate to rate_quotes table."""
+async def _parse_intake_request(request: Request):
+    """Parse input from a manual-intake or extract-preview request.
+    Returns (text, file_bytes, filename, move_type, extracted_override) or raises JSONResponse."""
     content_type = request.headers.get("content-type", "")
-    has_claude = bool(config.ANTHROPIC_API_KEY)
-
-    # Determine input source
     text = None
     file_bytes = None
     filename = ""
     move_type = "dray"
+    extracted_override = None
 
     if "multipart/form-data" in content_type:
         form = await request.form()
@@ -872,35 +868,39 @@ async def post_manual_intake(request: Request):
         body = await request.json()
         text = (body.get("text") or "").strip()
         move_type = (body.get("move_type") or "dray").strip().lower()
+        extracted_override = body.get("extracted")
 
-    if not text and not file_bytes:
-        return JSONResponse(status_code=400, content={"error": "No text or file provided"})
+    return text, file_bytes, filename, move_type, extracted_override
 
-    # Extract rate data
+
+def _extract_rate_data(text, file_bytes, filename, move_type):
+    """Run Claude extraction (or regex fallback) and normalize the result.
+    Returns (extracted_dict, error_response) — error_response is a JSONResponse if extraction failed."""
+    has_claude = bool(config.ANTHROPIC_API_KEY)
     extracted = None
+
     if file_bytes and has_claude:
         try:
             blocks = _file_to_content_blocks(file_bytes, filename, _CARRIER_EXTRACT_PROMPT)
             extracted = _call_claude(blocks)
         except Exception as e:
             log.warning("Claude file extraction failed: %s", e)
-            return JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
+            return None, JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
     elif text and has_claude:
         try:
             blocks = [{"type": "text", "text": _CARRIER_EXTRACT_PROMPT + "\n\n" + text[:8000]}]
             extracted = _call_claude(blocks)
         except Exception as e:
             log.warning("Claude text extraction failed: %s", e)
-            return JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
+            return None, JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
     elif text:
-        # Regex fallback (basic)
         from routes.quotes import _parse_rate_text
         extracted = _parse_rate_text(text)
     else:
-        return JSONResponse(status_code=422, content={"error": "File extraction requires ANTHROPIC_API_KEY"})
+        return None, JSONResponse(status_code=422, content={"error": "File extraction requires ANTHROPIC_API_KEY"})
 
     if not extracted:
-        return JSONResponse(status_code=400, content={"error": "Could not extract rate data"})
+        return None, JSONResponse(status_code=400, content={"error": "Could not extract rate data"})
 
     # Compute total rate if not directly provided
     rate_amount = None
@@ -922,15 +922,74 @@ async def post_manual_intake(request: Request):
     shipment_type = (extracted.get("shipment_type") or move_type or "dray").lower()
 
     if not origin or not destination:
-        return JSONResponse(status_code=400, content={
+        return None, JSONResponse(status_code=400, content={
             "error": "Could not extract origin and destination",
             "extracted": extracted,
         })
 
-    lane = f"{origin} → {destination}"
     extracted["rate_amount"] = rate_amount
     extracted["origin"] = origin
     extracted["destination"] = destination
+    extracted["shipment_type"] = shipment_type
+
+    return extracted, None
+
+
+@router.post("/api/rate-iq/extract-preview")
+async def post_extract_preview(request: Request):
+    """Extract rate data from file/text but do NOT save — returns extracted JSON for user review."""
+    text, file_bytes, filename, move_type, _ = await _parse_intake_request(request)
+
+    if not text and not file_bytes:
+        return JSONResponse(status_code=400, content={"error": "No text or file provided"})
+
+    extracted, error = _extract_rate_data(text, file_bytes, filename, move_type)
+    if error:
+        return error
+
+    return {"ok": True, "extracted": extracted}
+
+
+@router.post("/api/rate-iq/manual-intake")
+async def post_manual_intake(request: Request):
+    """Extract a carrier rate from pasted text or uploaded file (image, PDF, .msg, .eml, HTML).
+    Uses Claude Vision for files, Claude text extraction for pasted text.
+    Saves extracted rate to rate_quotes table.
+    If 'extracted' is provided in body, skips AI extraction and uses the pre-reviewed data."""
+    text, file_bytes, filename, move_type, extracted_override = await _parse_intake_request(request)
+
+    if extracted_override:
+        # User already reviewed — use pre-reviewed data directly
+        extracted = extracted_override
+        origin = (extracted.get("origin") or "").strip()
+        destination = (extracted.get("destination") or "").strip()
+        if not origin or not destination:
+            return JSONResponse(status_code=400, content={"error": "Origin and destination are required"})
+        # Normalize rate_amount
+        rate_amount = None
+        if extracted.get("rate_amount"):
+            try:
+                rate_amount = float(str(extracted["rate_amount"]).replace(",", "").replace("$", ""))
+            except (ValueError, TypeError):
+                pass
+        extracted["rate_amount"] = rate_amount
+        extracted["origin"] = origin
+        extracted["destination"] = destination
+        shipment_type = (extracted.get("shipment_type") or move_type or "dray").lower()
+    else:
+        if not text and not file_bytes:
+            return JSONResponse(status_code=400, content={"error": "No text or file provided"})
+
+        extracted, error = _extract_rate_data(text, file_bytes, filename, move_type)
+        if error:
+            return error
+        shipment_type = (extracted.get("shipment_type") or move_type or "dray").lower()
+
+    origin = extracted["origin"]
+    destination = extracted["destination"]
+    rate_amount = extracted.get("rate_amount")
+    carrier_name = (extracted.get("carrier_name") or "").strip()
+    lane = f"{origin} → {destination}"
 
     # Parse accessorials from extracted data
     carrier_email = (extracted.get("carrier_email") or extracted.get("email") or "").strip() or None
@@ -1008,6 +1067,8 @@ async def post_manual_intake(request: Request):
 
     # Also save to lane_rates for carrier rate table display (with full accessorial breakdown)
     # Dedup: skip if same carrier+origin+dest+total already exists
+    duplicate_skipped = False
+    duplicate_id = None
     if carrier_name and rate_amount:
         try:
             with db.get_conn() as conn:
@@ -1016,7 +1077,11 @@ async def post_manual_intake(request: Request):
                         "SELECT id FROM lane_rates WHERE LOWER(carrier_name) = LOWER(%s) AND LOWER(port) = LOWER(%s) AND LOWER(destination) = LOWER(%s) AND total = %s LIMIT 1",
                         (carrier_name, origin, destination, rate_amount)
                     )
-                    if not cur.fetchone():
+                    existing = cur.fetchone()
+                    if existing:
+                        duplicate_skipped = True
+                        duplicate_id = existing["id"]
+                    else:
                         cur.execute(
                             """INSERT INTO lane_rates
                             (port, destination, carrier_name, dray_rate, fsc, total,
@@ -1063,7 +1128,11 @@ async def post_manual_intake(request: Request):
         except Exception as e:
             log.warning("carrier directory update failed: %s", e)
 
-    return {"ok": True, "extracted": extracted}
+    result = {"ok": True, "extracted": extracted}
+    if duplicate_skipped:
+        result["duplicate_skipped"] = True
+        result["duplicate_id"] = duplicate_id
+    return result
 
 
 # ── Market Rates (LoadMatch / benchmark data — no carrier) ──────────

@@ -603,6 +603,16 @@ async def api_update_lane_rate(rate_id: int, request: Request):
     return JSONResponse(_serialize_row(row))
 
 
+@router.delete("/api/lane-rates/{rate_id}")
+async def api_delete_lane_rate(rate_id: int):
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute("DELETE FROM lane_rates WHERE id = %s RETURNING id", (rate_id,))
+            row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Lane rate not found")
+    return {"ok": True, "deleted_id": rate_id}
+
 
 # ═══════════════════════════════════════════════════════════
 # EXCEL BULK IMPORT
