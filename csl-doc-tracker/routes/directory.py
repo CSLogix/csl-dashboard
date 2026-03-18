@@ -555,15 +555,18 @@ async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Qu
             ORDER BY quote_date DESC NULLS LAST LIMIT 500
         """, rq_params)
         rq_rows = [_serialize_row(r) for r in cur.fetchall()]
-        # Mark source for rate_quotes entries
+        # Mark source and prefix IDs to avoid collisions with lane_rates
         for r in rq_rows:
             r["_source"] = r.get("source") or "rate_quote"
+            r["id"] = f"rq-{r['id']}"
+        for r in rows:
+            r["id"] = f"lr-{r['id']}"
         rows.extend(rq_rows)
 
     return JSONResponse({"lane_rates": rows, "total": len(rows)})
 
 @router.put("/api/lane-rates/{rate_id}")
-async def api_update_lane_rate(rate_id: int, request: Request):
+async def api_update_lane_rate(rate_id: str, request: Request):
     body = await request.json()
     allowed = {"port", "destination", "carrier_name", "dray_rate", "fsc", "total",
                "chassis_per_day", "prepull", "storage_per_day", "detention",
@@ -593,15 +596,40 @@ async def api_update_lane_rate(rate_id: int, request: Request):
     # Auto-recalculate total if dray_rate or fsc changed but total not explicitly sent
     if ("dray_rate" in body or "fsc" in body) and "total" not in body:
         sets.append("total = COALESCE(dray_rate, 0) + CASE WHEN fsc ~ '^[0-9.]+$' THEN fsc::numeric ELSE 0 END")
-    params.append(rate_id)
+    # Parse namespaced ID (lr-123 or rq-456 or bare integer)
+    if str(rate_id).startswith("lr-"):
+        table, real_id = "lane_rates", int(rate_id[3:])
+    elif str(rate_id).startswith("rq-"):
+        table, real_id = "rate_quotes", int(rate_id[3:])
+    else:
+        table, real_id = "lane_rates", int(rate_id)
+    params.append(real_id)
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
-            cur.execute(f"UPDATE lane_rates SET {', '.join(sets)} WHERE id = %s RETURNING *", params)
+            cur.execute(f"UPDATE {table} SET {', '.join(sets)} WHERE id = %s RETURNING *", params)
             row = cur.fetchone()
     if not row:
         raise HTTPException(404, "Lane rate not found")
     return JSONResponse(_serialize_row(row))
 
+
+@router.delete("/api/lane-rates/{rate_id}")
+async def api_delete_lane_rate(rate_id: str):
+    # IDs are namespaced: "lr-123" for lane_rates, "rq-456" for rate_quotes
+    if rate_id.startswith("rq-"):
+        table, real_id = "rate_quotes", int(rate_id[3:])
+    elif rate_id.startswith("lr-"):
+        table, real_id = "lane_rates", int(rate_id[3:])
+    else:
+        # Legacy: bare integer ID — assume lane_rates
+        table, real_id = "lane_rates", int(rate_id)
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            cur.execute(f"DELETE FROM {table} WHERE id = %s RETURNING id", (real_id,))
+            row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Lane rate not found")
+    return {"ok": True, "deleted_id": rate_id}
 
 
 # ═══════════════════════════════════════════════════════════

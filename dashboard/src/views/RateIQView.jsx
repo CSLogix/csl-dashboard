@@ -242,7 +242,16 @@ function MarketRateCard({ laneGroup, carrierCapMap }) {
   );
 }
 
-// ── Market Benchmark Card (LoadMatch data — no carrier) ──
+/**
+ * Render a market benchmark card showing LoadMatch statistics and a selectable list of individual rates.
+ *
+ * Displays aggregate statistics (average, min/max, data window, trend) from the provided benchmark and, when a carrier average is supplied, shows the delta between the carrier average and the market average. Includes an expandable table of individual rate rows (date, terminal, base, FSC, total) when present.
+ *
+ * @param {Object} props
+ * @param {{ stats: { avg: number, min: number, max: number, count: number, trend_pct: number|null, latest_date?: string, oldest_date?: string }, rates?: Array<{date?: string, terminal?: string, base?: number, fsc_pct?: number, total?: number}> }} props.benchmark - LoadMatch benchmark data: `stats` contains aggregated metrics and optional date window; `rates` is an optional array of individual rate records.
+ * @param {number} props.carrierAvg - The average rate for the selected carrier used to compute and display the delta vs market.
+ * @returns {JSX.Element|null} A styled benchmark card element when `benchmark.stats` is present; otherwise `null`.
+ */
 function MarketBenchmarkCard({ benchmark, carrierAvg }) {
   if (!benchmark?.stats) return null;
   const { stats, rates } = benchmark;
@@ -321,13 +330,39 @@ function MarketBenchmarkCard({ benchmark, carrierAvg }) {
   );
 }
 
-// ── Carrier Rate Table (simplified — key columns visible, rest expandable) ──
-function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingLaneField, editingLaneValue, setEditingLaneRateId, setEditingLaneField, setEditingLaneValue, handleLaneRateUpdate, laneOrigin, laneDestination, onUseRate, onUpdateCarrierInfo }) {
+/**
+ * Render a carrier rates table with editable rate fields, carrier contact/MC editing, copy actions, and row-level actions (quote, email copy, delete).
+ *
+ * The table shows primary and optional secondary columns, allows inline editing of numeric rate fields (committed via handleLaneRateUpdate),
+ * inline editing of carrier MC number and contact email (committed via onUpdateCarrierInfo), copying MC/email to the clipboard, and
+ * exposes per-row actions: onUseRate to select a rate for quoting and onDeleteRate to remove a lane rate.
+ *
+ * @param {Object} props
+ * @param {Array<Object>} props.carriers - Array of carrier rate objects to display (each may include id, carrier_name, dray_rate, fsc, total, created_at, mc_number, contact_email, etc.).
+ * @param {Object<string, Object>} props.carrierCapMap - Map from lowercased carrier name to capability/metadata (e.g., tier_rank, mc_number, contact_email, capability flags).
+ * @param {number|null} props.editingLaneRateId - Currently-editing lane rate id (used to render numeric-field editors).
+ * @param {string|null} props.editingLaneField - Field name currently being edited on the lane rate (e.g., "dray_rate").
+ * @param {string} props.editingLaneValue - Current edited value for the numeric field editor.
+ * @param {Function} props.setEditingLaneRateId - Setter to mark which lane rate id is being edited.
+ * @param {Function} props.setEditingLaneField - Setter to mark which lane field is being edited.
+ * @param {Function} props.setEditingLaneValue - Setter to update the editing value for the numeric field editor.
+ * @param {Function} props.handleLaneRateUpdate - Called with (rateId, field, value) to persist an edited numeric lane rate field.
+ * @param {string} props.laneOrigin - Origin label for the current lane (used for contextual UI; optional).
+ * @param {string} props.laneDestination - Destination label for the current lane (used for contextual UI; optional).
+ * @param {Function} [props.onUseRate] - Optional callback invoked with the carrier rate object when the user chooses "Quote".
+ * @param {Function} [props.onUpdateCarrierInfo] - Optional callback invoked with (carrierName, field, value) to persist inline carrier info edits (MC number or contact email).
+ * @param {Function} [props.onDeleteRate] - Optional callback invoked with (rateId) to delete a lane rate; when provided the UI will show a delete confirmation flow.
+ *
+ * @returns {JSX.Element} The rendered carrier rates table component.
+ */
+function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingLaneField, editingLaneValue, setEditingLaneRateId, setEditingLaneField, setEditingLaneValue, handleLaneRateUpdate, laneOrigin, laneDestination, onUseRate, onUpdateCarrierInfo, onDeleteRate }) {
   const [showAllCols, setShowAllCols] = useState(false);
   const [copiedMC, setCopiedMC] = useState(null);
   const [hoveredRow, setHoveredRow] = useState(null);
   const [editingCarrierInfo, setEditingCarrierInfo] = useState(null); // { carrierName, field: 'mc_number'|'contact_email', value }
   const [savingCarrierInfo, setSavingCarrierInfo] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const primaryCols = ["Carrier", "Linehaul", "FSC", "Total", "Chassis/day", "Prepull", "OW", ""];
   const secondaryCols = ["Storage/day", "Detention", "Split", "Tolls", "HAZ", "Triaxle", "Reefer", "Bond"];
   const visibleCols = showAllCols ? ["Carrier", "Linehaul", "FSC", "Total", "Chassis/day", "Prepull", "OW", ...secondaryCols, ""] : primaryCols;
@@ -498,6 +533,28 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
                             {copiedEmail === dispatchEmail ? "\u2713 Copied" : "Email"}
                           </button>
                         )}
+                        {onDeleteRate && cr.id && deleteConfirmId !== cr.id && (
+                          <button onClick={e => { e.stopPropagation(); setDeleteConfirmId(cr.id); }}
+                            title="Delete this rate"
+                            style={{ padding: "4px 6px", borderRadius: 5, border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.08)", color: "#f87171", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.15s" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "rgba(248,113,113,0.15)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "rgba(248,113,113,0.08)"; }}>
+                            &#128465;
+                          </button>
+                        )}
+                        {onDeleteRate && deleteConfirmId === cr.id && (
+                          <>
+                            <button onClick={async e => { e.stopPropagation(); setDeletingId(cr.id); const ok = await onDeleteRate(cr.id); if (ok) setDeleteConfirmId(null); setDeletingId(null); }}
+                              disabled={deletingId === cr.id}
+                              style={{ padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(248,113,113,0.4)", background: "rgba(248,113,113,0.15)", color: "#f87171", fontSize: 10, fontWeight: 700, cursor: deletingId === cr.id ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                              {deletingId === cr.id ? "..." : "Delete?"}
+                            </button>
+                            <button onClick={e => { e.stopPropagation(); setDeleteConfirmId(null); }}
+                              style={{ padding: "4px 6px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "#5A6478", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                              No
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </td>
@@ -638,6 +695,8 @@ export default function RateIQView() {
   const [intakeResult, setIntakeResult] = useState(null); // { ok, extracted } or { error }
   const [intakeFile, setIntakeFile] = useState(null);
   const [intakeDragOver, setIntakeDragOver] = useState(false);
+  const [intakePreview, setIntakePreview] = useState(null); // extracted data for review before save
+  const [intakeSaving, setIntakeSaving] = useState(false);
   const intakeFileRef = useRef(null);
 
   // ── Market rates paste state ──
@@ -981,9 +1040,15 @@ export default function RateIQView() {
       });
       if (r.ok) {
         const data = await r.json();
+        const addedName = (data.carrier || data).carrier_name || newCarrier.carrier_name;
         setDirCarriers(prev => [data.carrier || data, ...prev]);
         setNewCarrier({ carrier_name: "", mc_number: "", pickup_area: "" });
         setShowAddCarrier(false);
+        // Clear filters so the newly added carrier is visible
+        setDirMarket("all");
+        setDirPort("all");
+        setDirCaps([]);
+        setDirSearch(addedName);
       }
     } catch (e) { console.error("Add carrier failed:", e); }
     setAddCarrierSaving(false);
@@ -1039,6 +1104,17 @@ export default function RateIQView() {
     } catch (e) { console.error("Lane rate update failed:", e); }
     setEditingLaneRateId(null);
     setEditingLaneField(null);
+  };
+
+  const handleDeleteLaneRate = async (rateId) => {
+    try {
+      const r = await apiFetch(`${API_BASE}/api/lane-rates/${rateId}`, { method: "DELETE" });
+      if (r.ok) {
+        setLaneResults(prev => prev.filter(r => r.id !== rateId));
+        return true;
+      }
+    } catch (e) { console.error("Lane rate delete failed:", e); }
+    return false;
   };
 
   // ── Update carrier directory info (MC#, email) from lane card ──
@@ -1181,6 +1257,7 @@ export default function RateIQView() {
     if (!intakeText.trim() && !f) return;
     setIntakeProcessing(true);
     setIntakeResult(null);
+    setIntakePreview(null);
     try {
       let res;
       if (f) {
@@ -1188,19 +1265,18 @@ export default function RateIQView() {
         formData.append("file", f);
         formData.append("move_type", intakeMoveType);
         if (intakeText.trim()) formData.append("text", intakeText);
-        res = await apiFetch(`${API_BASE}/api/rate-iq/manual-intake`, { method: "POST", body: formData });
+        res = await apiFetch(`${API_BASE}/api/rate-iq/extract-preview`, { method: "POST", body: formData });
       } else {
-        res = await apiFetch(`${API_BASE}/api/rate-iq/manual-intake`, {
+        res = await apiFetch(`${API_BASE}/api/rate-iq/extract-preview`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: intakeText, move_type: intakeMoveType }),
         });
       }
       const data = await res.json();
       if (res.ok && data.ok) {
-        setIntakeResult({ ok: true, extracted: data.extracted });
+        setIntakePreview(data.extracted);
         setIntakeText("");
         setIntakeFile(null);
-        fetchData();
       } else {
         setIntakeResult({ error: data.error || "Extraction failed", extracted: data.extracted });
       }
@@ -1208,7 +1284,30 @@ export default function RateIQView() {
       setIntakeResult({ error: e.message });
     }
     setIntakeProcessing(false);
-  }, [intakeText, intakeFile, intakeMoveType, fetchData]);
+  }, [intakeText, intakeFile, intakeMoveType]);
+
+  const handleIntakeSave = useCallback(async () => {
+    if (!intakePreview) return;
+    setIntakeSaving(true);
+    setIntakeResult(null);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/rate-iq/manual-intake`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ extracted: intakePreview, move_type: intakePreview.shipment_type || intakeMoveType }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setIntakeResult({ ok: true, extracted: data.extracted, duplicate_skipped: data.duplicate_skipped });
+        setIntakePreview(null);
+        fetchData();
+      } else {
+        setIntakeResult({ error: data.error || "Save failed" });
+      }
+    } catch (e) {
+      setIntakeResult({ error: e.message });
+    }
+    setIntakeSaving(false);
+  }, [intakePreview, intakeMoveType, fetchData]);
 
   // ── API: Market rates — paste text OR upload screenshot ──
   const handleMarketRatePaste = useCallback(async (file) => {
@@ -1690,6 +1789,7 @@ export default function RateIQView() {
                 handleLaneRateUpdate={handleLaneRateUpdate}
                 laneOrigin={currentGroup.port} laneDestination={currentGroup.destination}
                 onUpdateCarrierInfo={handleUpdateCarrierInfo}
+                onDeleteRate={handleDeleteLaneRate}
                 onUseRate={(cr) => {
                   // Build linehaul items from carrier rate fields
                   const items = [];
@@ -1979,13 +2079,109 @@ export default function RateIQView() {
           </div>
         </div>
 
+        {/* Extraction Review Card */}
+        {intakePreview && (
+          <div className="glass" style={{ borderRadius: 12, padding: 20, marginTop: 16, border: "1px solid rgba(0,212,170,0.2)", background: "rgba(0,212,170,0.03)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#34d399" }}>Review Extracted Data</span>
+              <span style={{ fontSize: 10, color: "#5A6478" }}>Edit any field before saving</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+              <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Carrier
+                <input value={intakePreview.carrier_name || ""} onChange={e => setIntakePreview(p => ({ ...p, carrier_name: e.target.value }))}
+                  style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </label>
+              <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Rate Amount
+                <input value={intakePreview.rate_amount ?? ""} onChange={e => setIntakePreview(p => ({ ...p, rate_amount: e.target.value }))}
+                  style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+              </label>
+              <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Origin
+                <input value={intakePreview.origin || ""} onChange={e => setIntakePreview(p => ({ ...p, origin: e.target.value }))}
+                  style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </label>
+              <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Destination
+                <input value={intakePreview.destination || ""} onChange={e => setIntakePreview(p => ({ ...p, destination: e.target.value }))}
+                  style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </label>
+              <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>MC#
+                <input value={intakePreview.carrier_mc || ""} onChange={e => setIntakePreview(p => ({ ...p, carrier_mc: e.target.value }))}
+                  style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+              </label>
+              <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Move Type
+                <select value={intakePreview.shipment_type || intakeMoveType} onChange={e => setIntakePreview(p => ({ ...p, shipment_type: e.target.value }))}
+                  style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}>
+                  <option value="dray">Dray</option>
+                  <option value="ftl">FTL</option>
+                  <option value="transload">Transload</option>
+                </select>
+              </label>
+            </div>
+            {/* Linehaul items */}
+            {(intakePreview.linehaul_items || []).length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Linehaul Items</span>
+                {intakePreview.linehaul_items.map((item, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+                    <input value={item.description || ""} onChange={e => setIntakePreview(p => {
+                      const items = [...(p.linehaul_items || [])];
+                      items[i] = { ...items[i], description: e.target.value };
+                      return { ...p, linehaul_items: items };
+                    })} style={{ flex: 1, padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#C8D0DC", fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+                    <input value={item.rate || ""} onChange={e => setIntakePreview(p => {
+                      const items = [...(p.linehaul_items || [])];
+                      items[i] = { ...items[i], rate: e.target.value };
+                      return { ...p, linehaul_items: items };
+                    })} style={{ width: 80, padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#C8D0DC", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", textAlign: "right" }} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Accessorials */}
+            {(intakePreview.accessorials || []).length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Accessorials</span>
+                {intakePreview.accessorials.map((acc, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+                    <input value={acc.charge || ""} onChange={e => setIntakePreview(p => {
+                      const accs = [...(p.accessorials || [])];
+                      accs[i] = { ...accs[i], charge: e.target.value };
+                      return { ...p, accessorials: accs };
+                    })} style={{ flex: 1, padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#C8D0DC", fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+                    <input value={acc.rate || ""} onChange={e => setIntakePreview(p => {
+                      const accs = [...(p.accessorials || [])];
+                      accs[i] = { ...accs[i], rate: e.target.value };
+                      return { ...p, accessorials: accs };
+                    })} style={{ width: 80, padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#C8D0DC", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", textAlign: "right" }} />
+                    <span style={{ fontSize: 10, color: "#5A6478", minWidth: 50 }}>{acc.frequency || "flat"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+              <button onClick={() => setIntakePreview(null)}
+                style={{ padding: "6px 16px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "#8B95A8", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                Discard
+              </button>
+              <button onClick={handleIntakeSave} disabled={intakeSaving}
+                style={{ padding: "6px 20px", borderRadius: 6, border: "none", background: grad, color: "#0A0F1C", fontSize: 11, fontWeight: 700, cursor: intakeSaving ? "wait" : "pointer", fontFamily: "inherit", opacity: intakeSaving ? 0.6 : 1 }}>
+                {intakeSaving ? "Saving..." : "Save Rate"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Results / Actions */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 14 }}>
           <div style={{ fontSize: 11, color: "#5A6478" }}>
             {intakeFile ? "Ready to extract from file" : intakeText.length > 0 ? `${intakeText.length.toLocaleString()} chars` : ""}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {intakeResult?.ok && (
+            {intakeResult?.ok && intakeResult.duplicate_skipped && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#FBBF24" }}>
+                ⚠ Duplicate rate already exists — {intakeResult.extracted?.carrier_name} {intakeResult.extracted?.origin} → {intakeResult.extracted?.destination} @ ${intakeResult.extracted?.rate_amount}
+              </span>
+            )}
+            {intakeResult?.ok && !intakeResult.duplicate_skipped && (
               <span style={{ fontSize: 11, fontWeight: 700, color: "#34d399" }}>
                 ✓ {intakeResult.extracted ? `Added: ${intakeResult.extracted.carrier_name} — ${intakeResult.extracted.origin} → ${intakeResult.extracted.destination}${intakeResult.extracted.rate_amount ? ` @ $${intakeResult.extracted.rate_amount}` : ""}` : `Saved ${intakeResult.inserted || 0} rate(s)`}
               </span>
@@ -2001,7 +2197,7 @@ export default function RateIQView() {
             {marketRateResult?.error && (
               <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171" }}>✗ {marketRateResult.error}</span>
             )}
-            {(intakeText.trim() || intakeFile) && (
+            {!intakePreview && (intakeText.trim() || intakeFile) && (
               <button onClick={() => {
                 // Auto-detect: if text looks like tab-separated market data and has origin/dest, use market rate handler
                 const isTabSeparated = intakeText && intakeText.includes("\t") && marketRateOrigin.trim() && marketRateDest.trim();
@@ -2014,7 +2210,7 @@ export default function RateIQView() {
                 }
               }} disabled={intakeProcessing || marketRateProcessing}
                 style={{ padding: "8px 24px", borderRadius: 8, border: "none", background: grad, color: "#0A0F1C", fontSize: 12, fontWeight: 700, cursor: (intakeProcessing || marketRateProcessing) ? "wait" : "pointer", fontFamily: "inherit", opacity: (intakeProcessing || marketRateProcessing) ? 0.6 : 1 }}>
-                {(intakeProcessing || marketRateProcessing) ? "Extracting..." : "Extract & Save"}
+                {(intakeProcessing || marketRateProcessing) ? "Extracting..." : "Extract & Review"}
               </button>
             )}
           </div>

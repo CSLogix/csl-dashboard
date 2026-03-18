@@ -180,11 +180,23 @@ Dates should be normalized to YYYY-MM-DD format. Omit $ signs and commas from nu
 
 
 def _call_claude(content: list) -> dict:
-    """Call Claude API with content blocks and return parsed JSON."""
+    """
+    Send prepared content blocks to the Claude API and return the parsed JSON response.
+    
+    Parameters:
+        content (list): List of content blocks formatted for the Anthropic/Claude request.
+    
+    Returns:
+        dict: Parsed JSON object from Claude's response.
+    
+    Raises:
+        json.JSONDecodeError: If the API response cannot be parsed as JSON.
+        Exception: Propagates errors raised by the Anthropics/Claude client (e.g., network or API errors).
+    """
     import anthropic
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model="claude-sonnet-4-6",
         max_tokens=2048,
         messages=[{"role": "user", "content": content}],
     )
@@ -844,19 +856,34 @@ async def api_lane_stats():
 
 # ── Manual Intake (carrier rate from email / file / text) ────────────
 
-@router.post("/api/rate-iq/manual-intake")
-async def post_manual_intake(request: Request):
-    """Extract a carrier rate from pasted text or uploaded file (image, PDF, .msg, .eml, HTML).
-    Uses Claude Vision for files, Claude text extraction for pasted text.
-    Saves extracted rate to rate_quotes table."""
+async def _parse_intake_request(request: Request):
+    """
+    Parse an incoming manual-intake or extract-preview request and extract text, file, move type, and any pre-extracted override.
+    
+    When the request is multipart/form-data, reads form fields:
+    - "text" (optional)
+    - "move_type" (optional, defaults to "dray")
+    - "file" (optional file upload; file bytes and filename are returned)
+    
+    When the request has a JSON body, reads keys:
+    - "text" (optional)
+    - "move_type" (optional, defaults to "dray")
+    - "extracted" (optional pre-reviewed extraction override)
+    
+    Returns:
+        tuple: (text, file_bytes, filename, move_type, extracted_override)
+            text (str | None): Trimmed text content if provided, otherwise None.
+            file_bytes (bytes | None): Uploaded file contents if provided, otherwise None.
+            filename (str): Uploaded filename or empty string.
+            move_type (str): Normalized move type (lowercased), defaults to "dray".
+            extracted_override (dict | None): Parsed override from JSON "extracted" key, or None.
+    """
     content_type = request.headers.get("content-type", "")
-    has_claude = bool(config.ANTHROPIC_API_KEY)
-
-    # Determine input source
     text = None
     file_bytes = None
     filename = ""
     move_type = "dray"
+    extracted_override = None
 
     if "multipart/form-data" in content_type:
         form = await request.form()
@@ -872,35 +899,83 @@ async def post_manual_intake(request: Request):
         body = await request.json()
         text = (body.get("text") or "").strip()
         move_type = (body.get("move_type") or "dray").strip().lower()
+        extracted_override = body.get("extracted")
 
-    if not text and not file_bytes:
-        return JSONResponse(status_code=400, content={"error": "No text or file provided"})
+    return text, file_bytes, filename, move_type, extracted_override
 
-    # Extract rate data
+
+def _extract_rate_data(text, file_bytes, filename, move_type):
+    """
+    Normalize and validate extracted rate data from text or an uploaded file.
+    
+    Attempts AI extraction when an Anthropic API key is configured (preferring file extraction when file bytes are present, otherwise using text); if AI is not available and only text is provided, falls back to a regex-based text parser. Ensures extracted payload contains origin and destination, normalizes origin/destination/carrier/shipment_type, and computes `rate_amount` from an explicit field or by summing `linehaul_items` when necessary.
+    
+    Parameters:
+        text (str|None): Plain-text content to extract from (may be None if a file is provided).
+        file_bytes (bytes|None): Raw uploaded file bytes to send to the extractor (preferred when present).
+        filename (str|None): The filename associated with `file_bytes` (used to determine handling).
+        move_type (str|None): Fallback shipment type to use when extraction does not provide one.
+    
+    Returns:
+        tuple: (extracted_dict, error_response)
+            - extracted_dict (dict|None): Normalized extraction result with keys including
+              `origin`, `destination`, `shipment_type`, and `rate_amount` when extraction succeeded.
+            - error_response (fastapi.responses.JSONResponse|None): A JSONResponse describing the error when
+              extraction or validation failed; `None` on success.
+    
+    Error behavior:
+        - Returns a 422 error response when a file is provided but no Anthropic API key is configured.
+        - Returns a 500 error response when AI extraction raises an unexpected exception.
+        - Returns a 400 error response when extraction returns no data or when origin/destination cannot be determined.
+    """
+    has_claude = bool(config.ANTHROPIC_API_KEY)
     extracted = None
+
+    # Text-decodable file extensions that can fall back to regex parsing
+    _TEXT_EXTS = {".txt", ".csv", ".eml", ".htm", ".html", ".tsv"}
+    file_ext = ("." + filename.rsplit(".", 1)[-1].lower()) if filename and "." in filename else ""
+
     if file_bytes and has_claude:
         try:
             blocks = _file_to_content_blocks(file_bytes, filename, _CARRIER_EXTRACT_PROMPT)
             extracted = _call_claude(blocks)
         except Exception as e:
             log.warning("Claude file extraction failed: %s", e)
-            return JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
+            # For text-like files, fall back to regex instead of failing
+            if file_ext in _TEXT_EXTS:
+                try:
+                    decoded = file_bytes.decode("utf-8", errors="ignore")
+                    from routes.quotes import _parse_rate_text
+                    extracted = _parse_rate_text(decoded)
+                except Exception:
+                    pass
+            if not extracted:
+                return None, JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
     elif text and has_claude:
         try:
             blocks = [{"type": "text", "text": _CARRIER_EXTRACT_PROMPT + "\n\n" + text[:8000]}]
             extracted = _call_claude(blocks)
         except Exception as e:
             log.warning("Claude text extraction failed: %s", e)
-            return JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
+            return None, JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
     elif text:
-        # Regex fallback (basic)
         from routes.quotes import _parse_rate_text
         extracted = _parse_rate_text(text)
+    elif file_bytes and file_ext in _TEXT_EXTS:
+        # No Claude key but file is text-decodable — use regex fallback
+        try:
+            decoded = file_bytes.decode("utf-8", errors="ignore")
+            from routes.quotes import _parse_rate_text
+            extracted = _parse_rate_text(decoded)
+        except Exception:
+            pass
+        if not extracted:
+            return None, JSONResponse(status_code=422, content={"error": "Could not parse text file"})
     else:
-        return JSONResponse(status_code=422, content={"error": "File extraction requires ANTHROPIC_API_KEY"})
+        return None, JSONResponse(status_code=422, content={"error": "File extraction requires ANTHROPIC_API_KEY"})
 
     if not extracted:
-        return JSONResponse(status_code=400, content={"error": "Could not extract rate data"})
+        return None, JSONResponse(status_code=400, content={"error": "Could not extract rate data"})
 
     # Compute total rate if not directly provided
     rate_amount = None
@@ -921,16 +996,82 @@ async def post_manual_intake(request: Request):
     carrier_name = (extracted.get("carrier_name") or "").strip()
     shipment_type = (extracted.get("shipment_type") or move_type or "dray").lower()
 
-    if not origin or not destination:
-        return JSONResponse(status_code=400, content={
-            "error": "Could not extract origin and destination",
-            "extracted": extracted,
-        })
+    # Don't fail on missing origin/dest — let the preview step surface partial extractions
+    # so the user can fill in missing fields. Validation happens in post_manual_intake.
 
-    lane = f"{origin} → {destination}"
     extracted["rate_amount"] = rate_amount
     extracted["origin"] = origin
     extracted["destination"] = destination
+    extracted["shipment_type"] = shipment_type
+
+    return extracted, None
+
+
+@router.post("/api/rate-iq/extract-preview")
+async def post_extract_preview(request: Request):
+    """
+    Extract rate data from the provided file or text and return the parsed extraction for user review without persisting it.
+    
+    Returns:
+        dict: On success, a dictionary {"ok": True, "extracted": <extracted_data>} where <extracted_data> is the normalized extraction result.
+        JSONResponse: On failure, a JSONResponse with an error status and message (e.g., 400 when no input is provided or an extraction error response).
+    """
+    text, file_bytes, filename, move_type, _ = await _parse_intake_request(request)
+
+    if not text and not file_bytes:
+        return JSONResponse(status_code=400, content={"error": "No text or file provided"})
+
+    extracted, error = _extract_rate_data(text, file_bytes, filename, move_type)
+    if error:
+        return error
+
+    return {"ok": True, "extracted": extracted}
+
+
+@router.post("/api/rate-iq/manual-intake")
+async def post_manual_intake(request: Request):
+    """
+    Accept and ingest a carrier rate from pasted text or an uploaded file, saving it to rate_quotes and lane_rates.
+    
+    If an `extracted` override is provided in the request body, that pre-reviewed data is used instead of running extraction. Validates that origin and destination are present, normalizes numeric values (rates, fsc, linehaul, accessorials), and parses linehaul_items and accessorials into structured fields used for database inserts. Inserts a row into rate_quotes and attempts to insert a detailed row into lane_rates; lane_rates insertion is deduplicated by carrier + origin + destination + total, and deduplication is reported. If carrier MC number or email is present, the carriers directory is created or updated.
+    
+    Returns:
+        dict: Result payload containing at minimum `{"ok": True, "extracted": <extracted_data>}`. If a lane_rates insert was skipped due to a duplicate, includes `duplicate_skipped: True` and `duplicate_id: <id>`.
+    """
+    text, file_bytes, filename, move_type, extracted_override = await _parse_intake_request(request)
+
+    if extracted_override:
+        # User already reviewed — use pre-reviewed data directly
+        extracted = extracted_override
+        origin = (extracted.get("origin") or "").strip()
+        destination = (extracted.get("destination") or "").strip()
+        if not origin or not destination:
+            return JSONResponse(status_code=400, content={"error": "Origin and destination are required"})
+        # Normalize rate_amount
+        rate_amount = None
+        if extracted.get("rate_amount"):
+            try:
+                rate_amount = float(str(extracted["rate_amount"]).replace(",", "").replace("$", ""))
+            except (ValueError, TypeError):
+                pass
+        extracted["rate_amount"] = rate_amount
+        extracted["origin"] = origin
+        extracted["destination"] = destination
+        shipment_type = (extracted.get("shipment_type") or move_type or "dray").lower()
+    else:
+        if not text and not file_bytes:
+            return JSONResponse(status_code=400, content={"error": "No text or file provided"})
+
+        extracted, error = _extract_rate_data(text, file_bytes, filename, move_type)
+        if error:
+            return error
+        shipment_type = (extracted.get("shipment_type") or move_type or "dray").lower()
+
+    origin = extracted["origin"]
+    destination = extracted["destination"]
+    rate_amount = extracted.get("rate_amount")
+    carrier_name = (extracted.get("carrier_name") or "").strip()
+    lane = f"{origin} → {destination}"
 
     # Parse accessorials from extracted data
     carrier_email = (extracted.get("carrier_email") or extracted.get("email") or "").strip() or None
@@ -1008,6 +1149,8 @@ async def post_manual_intake(request: Request):
 
     # Also save to lane_rates for carrier rate table display (with full accessorial breakdown)
     # Dedup: skip if same carrier+origin+dest+total already exists
+    duplicate_skipped = False
+    duplicate_id = None
     if carrier_name and rate_amount:
         try:
             with db.get_conn() as conn:
@@ -1016,7 +1159,11 @@ async def post_manual_intake(request: Request):
                         "SELECT id FROM lane_rates WHERE LOWER(carrier_name) = LOWER(%s) AND LOWER(port) = LOWER(%s) AND LOWER(destination) = LOWER(%s) AND total = %s LIMIT 1",
                         (carrier_name, origin, destination, rate_amount)
                     )
-                    if not cur.fetchone():
+                    existing = cur.fetchone()
+                    if existing:
+                        duplicate_skipped = True
+                        duplicate_id = existing["id"]
+                    else:
                         cur.execute(
                             """INSERT INTO lane_rates
                             (port, destination, carrier_name, dray_rate, fsc, total,
@@ -1063,7 +1210,11 @@ async def post_manual_intake(request: Request):
         except Exception as e:
             log.warning("carrier directory update failed: %s", e)
 
-    return {"ok": True, "extracted": extracted}
+    result = {"ok": True, "extracted": extracted}
+    if duplicate_skipped:
+        result["duplicate_skipped"] = True
+        result["duplicate_id"] = duplicate_id
+    return result
 
 
 # ── Market Rates (LoadMatch / benchmark data — no carrier) ──────────

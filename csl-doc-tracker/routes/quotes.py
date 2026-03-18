@@ -219,11 +219,19 @@ Only include fields you can confidently extract. For linehaul_items, list each c
 
 
 def _extract_with_claude(content: list) -> dict:
-    """Call Claude API with content blocks (text or image), return parsed rate data."""
+    """
+    Send content blocks to the Claude model and return the parsed rate/quote data as a dictionary.
+    
+    Parameters:
+        content (list): A list of content blocks to send to Claude. Each block may be plain text or an image payload formatted per the Anthropic client expectations.
+    
+    Returns:
+        dict: Parsed JSON object containing extracted rate/quote fields.
+    """
     import anthropic
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model="claude-sonnet-4-6",
         max_tokens=1024,
         messages=[{"role": "user", "content": content}],
     )

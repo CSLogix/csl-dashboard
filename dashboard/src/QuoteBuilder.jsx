@@ -36,11 +36,11 @@ const defaultSection = (type) => {
 
 // ─── Default accessorials ───
 const DEFAULT_ACCESSORIALS = [
-  { charge: "Storage", rate: "45.00", frequency: "per day", checked: false, amount: "45.00" },
-  { charge: "Pre-Pull", rate: "150.00", frequency: "flat", checked: false, amount: "150.00" },
-  { charge: "Chassis (2 days)", rate: "45.00", frequency: "per day", checked: false, amount: "45.00" },
-  { charge: "Overweight", rate: "150.00", frequency: "flat", checked: false, amount: "150.00" },
-  { charge: "Detention", rate: "85.00", frequency: "per hour", checked: false, amount: "85.00" },
+  { charge: "Storage", rate: "45.00", frequency: "per day", checked: false, amount: "45.00", qty: 1 },
+  { charge: "Pre-Pull", rate: "150.00", frequency: "flat", checked: false, amount: "150.00", qty: 1 },
+  { charge: "Chassis", rate: "45.00", frequency: "per day", checked: false, amount: "45.00", qty: 1 },
+  { charge: "Overweight", rate: "150.00", frequency: "flat", checked: false, amount: "150.00", qty: 1 },
+  { charge: "Detention", rate: "85.00", frequency: "per hour", checked: false, amount: "85.00", qty: 1 },
 ];
 
 const DEFAULT_TERMS = [
@@ -52,7 +52,20 @@ const DEFAULT_TERMS = [
 
 // ════════════════════════════════════════════════════════════
 // ─── Quote Preview Card (customer-facing, screenshot-optimized) ───
-// ════════════════════════════════════════════════════════════
+/**
+ * Render a compact quote preview card showing route details, grouped linehaul charges with margin applied, accessorial charges, and an estimated invoice total.
+ *
+ * @param {Object} props
+ * @param {Object} props.route - Route information (e.g., pod, finalDelivery, roundTripMiles, oneWayMiles, transitTime, durationHours, shipmentType).
+ * @param {Array<Object>} props.linehaul - Linehaul entries; each entry should include at least `description` and `rate`, and may include `section`.
+ * @param {Array<Object>} props.accessorials - Accessorial entries; each entry may include `charge`, `amount`, `checked`, `qty`, and `frequency`.
+ * @param {number|string} props.marginPct - Margin value interpreted as a percentage when `marginType` is `"pct"`, or as a flat dollar markup when `marginType` is `"flat"`.
+ * @param {"pct"|"flat"} props.marginType - How `marginPct` is applied to linehaul rates: percent multiplier (`"pct"`) or flat addition (`"flat"`).
+ * @param {Array<string>} props.terms - Quote terms lines (accepted but not rendered by this component).
+ * @param {string} props.quoteNumber - Optional quote identifier displayed in the header.
+ * @param {string} props.shipmentType - Shipment type used to determine round-trip behavior (e.g., `"Dray"`).
+ * @returns {JSX.Element} The formatted quote preview card as a JSX element.
+ */
 function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, terms, quoteNumber, shipmentType }) {
   const margin = parseNum(marginPct) / 100;
   const flatMarkup = marginType === "flat" ? parseNum(marginPct) : 0;
@@ -94,7 +107,7 @@ function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, te
 
   // Accessorials — all with amounts show; only checked count toward total
   const accRows = accessorials.filter(a => parseNum(a.amount) > 0).map(a => ({
-    desc: a.charge + (a.frequency && a.frequency !== "flat" ? ` ${a.frequency}` : ""),
+    desc: ((a.qty || 1) > 1 ? `${a.qty}x ` : "") + a.charge + (a.frequency && a.frequency !== "flat" ? ` ${a.frequency}` : ""),
     rate: parseNum(a.amount),
     included: a.checked,
   }));
@@ -645,9 +658,16 @@ export default function QuoteBuilder({ prefill } = {}) {
   const removeLH = (i) => setLinehaul(prev => prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev);
 
   // ── Accessorial handlers ──
-  const updateAcc = (i, field, val) => setAccessorials(prev => prev.map((a, idx) => idx === i ? { ...a, [field]: val } : a));
+  const updateAcc = (i, field, val) => setAccessorials(prev => prev.map((a, idx) => {
+    if (idx !== i) return a;
+    const updated = { ...a, [field]: val };
+    if (field === "qty" || field === "rate") {
+      updated.amount = (parseNum(updated.rate) * Math.max(1, parseNum(updated.qty) || 1)).toFixed(2);
+    }
+    return updated;
+  }));
   const toggleAcc = (i) => setAccessorials(prev => prev.map((a, idx) => idx === i ? { ...a, checked: !a.checked } : a));
-  const addAcc = () => setAccessorials(prev => [...prev, { charge: "", rate: "", frequency: "flat", checked: false, amount: "" }]);
+  const addAcc = () => setAccessorials(prev => [...prev, { charge: "", rate: "", frequency: "flat", checked: false, amount: "", qty: 1 }]);
   const removeAcc = (i) => setAccessorials(prev => prev.filter((_, idx) => idx !== i));
 
   // ── Drag-to-reorder accessorials ──
@@ -705,12 +725,12 @@ export default function QuoteBuilder({ prefill } = {}) {
         setAccessorials(prev => {
           const merged = prev.map(a => {
             const match = data.accessorials.find(ex => ex.charge?.toLowerCase() === a.charge?.toLowerCase());
-            return match ? { ...a, rate: match.rate || a.rate, frequency: match.frequency || a.frequency, amount: match.amount || a.amount, checked: false } : a;
+            return match ? { ...a, rate: match.rate || a.rate, frequency: match.frequency || a.frequency, amount: match.amount || a.amount, qty: match.qty || a.qty, checked: false } : a;
           });
           // Add any new accessorials not in defaults
           const existing = new Set(prev.map(a => a.charge?.toLowerCase()));
           const extras = data.accessorials.filter(ex => !existing.has(ex.charge?.toLowerCase())).map(ex => ({
-            charge: ex.charge || "", rate: ex.rate || "", frequency: ex.frequency || "flat", checked: false, amount: ex.amount || "",
+            charge: ex.charge || "", rate: ex.rate || "", frequency: ex.frequency || "flat", checked: false, amount: ex.amount || "", qty: ex.qty || 1,
           }));
           return [...merged, ...extras];
         });
@@ -764,11 +784,11 @@ export default function QuoteBuilder({ prefill } = {}) {
         setAccessorials(prev => {
           const merged = prev.map(a => {
             const match = data.accessorials.find(ex => ex.charge?.toLowerCase() === a.charge?.toLowerCase());
-            return match ? { ...a, rate: match.rate || a.rate, frequency: match.frequency || a.frequency, amount: match.amount || a.amount, checked: false } : a;
+            return match ? { ...a, rate: match.rate || a.rate, frequency: match.frequency || a.frequency, amount: match.amount || a.amount, qty: match.qty || a.qty, checked: false } : a;
           });
           const existing = new Set(prev.map(a => a.charge?.toLowerCase()));
           const extras = data.accessorials.filter(ex => !existing.has(ex.charge?.toLowerCase())).map(ex => ({
-            charge: ex.charge || "", rate: ex.rate || "", frequency: ex.frequency || "flat", checked: false, amount: ex.amount || "",
+            charge: ex.charge || "", rate: ex.rate || "", frequency: ex.frequency || "flat", checked: false, amount: ex.amount || "", qty: ex.qty || 1,
           }));
           return [...merged, ...extras];
         });
@@ -1402,8 +1422,17 @@ export default function QuoteBuilder({ prefill } = {}) {
                 <span style={{ cursor: "grab", color: "#3D4557", fontSize: 14, flexShrink: 0, userSelect: "none" }} title="Drag to reorder">⠿</span>
                 <input type="checkbox" checked={acc.checked} onChange={() => toggleAcc(i)}
                   style={{ accentColor: "#00D4AA", cursor: "pointer", flexShrink: 0 }} />
+                <input type="number" min="1" value={acc.qty || 1} onChange={e => updateAcc(i, "qty", parseInt(e.target.value, 10) || 1)}
+                  title="Quantity"
+                  style={{ ...inputStyle, width: 48, textAlign: "center", fontSize: 11.5, flexShrink: 0, padding: "8px 4px" }} />
                 <input value={acc.charge} onChange={e => updateAcc(i, "charge", e.target.value)} placeholder="Charge"
                   style={{ ...inputStyle, flex: 3, fontSize: 11.5, minWidth: 0 }} />
+                <div style={{ position: "relative", flexShrink: 0, width: 70 }}>
+                  <span style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "#5A6478", fontSize: 11.5 }}>$</span>
+                  <input value={acc.rate} onChange={e => updateAcc(i, "rate", e.target.value)} placeholder="0.00"
+                    title="Rate per unit"
+                    style={{ ...inputStyle, paddingLeft: 20, fontSize: 11.5, width: "100%" }} />
+                </div>
                 <select value={acc.frequency} onChange={e => updateAcc(i, "frequency", e.target.value)}
                   style={{ ...inputStyle, flex: 1.2, fontSize: 11, cursor: "pointer", padding: "8px 4px" }}>
                   {["flat", "per day", "per hour", "per mile"].map(f => <option key={f} value={f}>{f}</option>)}
@@ -1411,6 +1440,7 @@ export default function QuoteBuilder({ prefill } = {}) {
                 <div style={{ position: "relative", flex: 1.2 }}>
                   <span style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "#5A6478", fontSize: 11.5 }}>$</span>
                   <input value={acc.amount} onChange={e => updateAcc(i, "amount", e.target.value)} placeholder="0.00"
+                    title="Total amount (auto-calculated from qty × rate)"
                     style={{ ...inputStyle, paddingLeft: 20, fontSize: 11.5 }} />
                 </div>
                 <button onClick={() => removeAcc(i)} style={{ background: "none", border: "none", color: "#EF4444", fontSize: 14, cursor: "pointer", padding: "0 2px", flexShrink: 0 }}>x</button>
