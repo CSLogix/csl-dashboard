@@ -28,4 +28,4 @@ scp csl_sheet_sync.py root@187.77.217.61:/root/csl-bot/csl-doc-tracker/csl_sheet
 
 **Sync verification:** Compare local vs server with `md5sum` on all changed `.py` files to confirm deploy.
 
-**Current state (2026-03-18):** All PRs through #19 merged and deployed. PR #19 migrated frontend to TypeScript (JSX→TSX renames, type definitions in `src/types/`, typed helpers). CI/CD pipeline green.
+**Current state (2026-03-18):** All PRs through #20 merged and deployed. PR #19 migrated frontend to TypeScript (JSX→TSX renames, type definitions in `src/types/`, typed helpers). PR #20 added CarrierRankCard component (CSL Score: rate 50%, reliability 30%, equipment 20%), per-mile rate display on LaneCards, and origin_state/dest_state fields in lane aggregation. CI/CD pipeline green.
