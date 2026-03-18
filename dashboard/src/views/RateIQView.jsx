@@ -932,6 +932,80 @@ export default function RateIQView() {
     });
   }, [dirCarriers, dirSearch, dirMarket, dirCaps, dirHideDnu, dirPort, portGroups]);
 
+  // ── Group filtered carriers by region/city for organized geographic browse ──
+  const groupedDir = useMemo(() => {
+    // Map common market/city names to state for geographic grouping
+    const CITY_STATE_MAP = {
+      "houston": "TX", "dallas": "TX", "san antonio": "TX", "ft worth": "TX", "fort worth": "TX", "el paso": "TX", "laredo": "TX",
+      "los angeles": "CA", "long beach": "CA", "oakland": "CA", "san francisco": "CA",
+      "chicago": "IL",
+      "savannah": "GA", "atlanta": "GA",
+      "new york": "NY", "newark": "NY/NJ", "elizabeth": "NY/NJ", "ny/nj": "NY/NJ",
+      "charleston": "SC",
+      "norfolk": "VA", "richmond": "VA",
+      "baltimore": "MD",
+      "boston": "MA",
+      "seattle": "WA", "tacoma": "WA",
+      "portland": "OR",
+      "miami": "FL", "jacksonville": "FL", "tampa": "FL", "port everglades": "FL",
+      "new orleans": "LA", "mobile": "AL", "memphis": "TN", "nashville": "TN",
+      "charlotte": "NC", "wilmington": "NC",
+      "philadelphia": "PA",
+      "detroit": "MI",
+      "cleveland": "OH", "columbus": "OH", "cincinnati": "OH",
+      "indianapolis": "IN",
+      "minneapolis": "MN", "st paul": "MN",
+      "kansas city": "MO", "st louis": "MO",
+      "louisville": "KY",
+      "denver": "CO",
+      "salt lake city": "UT",
+      "phoenix": "AZ",
+      "las vegas": "NV",
+    };
+    const inferState = (c) => {
+      // Try pickup_area first (e.g. "Houston, TX")
+      if (c.pickup_area) {
+        const parts = c.pickup_area.split(",").map(s => s.trim());
+        if (parts.length >= 2 && parts[1].length <= 5) return parts[1].toUpperCase();
+      }
+      // Try markets
+      for (const m of (c.markets || [])) {
+        const st = CITY_STATE_MAP[m.toLowerCase()];
+        if (st) return st;
+      }
+      return null;
+    };
+    const inferCity = (c) => {
+      if (c.pickup_area) return c.pickup_area.split(",")[0].trim();
+      if (c.markets?.length > 0) return c.markets[0];
+      return null;
+    };
+
+    // Build state → city → carriers hierarchy
+    const stateMap = {};
+    filteredDir.forEach(c => {
+      const state = inferState(c) || "Other";
+      const city = inferCity(c) || "Unassigned";
+      if (!stateMap[state]) stateMap[state] = { state, cities: {}, totalCarriers: 0, totalTrucks: 0, tierCounts: { 1: 0, 2: 0, 3: 0 } };
+      if (!stateMap[state].cities[city]) stateMap[state].cities[city] = [];
+      stateMap[state].cities[city].push(c);
+      stateMap[state].totalCarriers++;
+      if (c.trucks) stateMap[state].totalTrucks += c.trucks;
+      if (c.tier_rank >= 1 && c.tier_rank <= 3) stateMap[state].tierCounts[c.tier_rank]++;
+    });
+    return Object.values(stateMap)
+      .map(s => ({
+        ...s,
+        cities: Object.entries(s.cities)
+          .map(([city, carriers]) => ({ city, carriers: carriers.sort((a, b) => (a.tier_rank || 99) - (b.tier_rank || 99)) }))
+          .sort((a, b) => b.carriers.length - a.carriers.length),
+      }))
+      .sort((a, b) => b.totalCarriers - a.totalCarriers);
+  }, [filteredDir]);
+
+  const [dirGroupView, setDirGroupView] = useState(true); // default to grouped
+  const [expandedMarkets, setExpandedMarkets] = useState({});
+
   // ── Group lane results by origin ↔ destination (bidirectional, normalized) ──
   // Merges A→B and B→A into a single lane card so round-trip lanes aren't split
   const groupedLanes = useMemo(() => {
@@ -1004,7 +1078,21 @@ export default function RateIQView() {
       if (ls.avg_rate > 0) { map[origin].totalRate += ls.avg_rate * (ls.load_count || 1); map[origin].rateCount += (ls.load_count || 1); }
     });
     return Object.values(map)
-      .map(g => ({ ...g, avgRate: g.rateCount > 0 ? Math.round(g.totalRate / g.rateCount) : 0 }))
+      .map(g => {
+        const avgRate = g.rateCount > 0 ? Math.round(g.totalRate / g.rateCount) : 0;
+        // Calculate weighted average miles across lanes for RPM
+        let totalMilesWeighted = 0, milesWeightCount = 0;
+        g.lanes.forEach(ls => {
+          if (ls.miles && ls.miles > 0 && ls.avg_rate > 0) {
+            const w = ls.load_count || 1;
+            totalMilesWeighted += ls.miles * w;
+            milesWeightCount += w;
+          }
+        });
+        const avgMiles = milesWeightCount > 0 ? totalMilesWeighted / milesWeightCount : 0;
+        const avgRpm = avgMiles > 0 && avgRate > 0 ? (avgRate / avgMiles).toFixed(2) : null;
+        return { ...g, avgRate, avgMiles: Math.round(avgMiles), avgRpm };
+      })
       .sort((a, b) => b.totalLoads - a.totalLoads);
   }, [rateLaneSummaries, moveTypeFilter]);
 
@@ -1627,6 +1715,12 @@ export default function RateIQView() {
                         </div>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                        {group.avgRpm && (
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>${group.avgRpm}</div>
+                            <div style={{ fontSize: 10, color: "#5A6478", fontWeight: 600 }}>avg rpm</div>
+                          </div>
+                        )}
                         {group.avgRate > 0 && (
                           <div style={{ textAlign: "right" }}>
                             <div style={{ fontSize: 18, fontWeight: 800, color: "#34d399", fontFamily: "'JetBrains Mono', monospace" }}>{fmt(group.avgRate)}</div>
@@ -1667,6 +1761,12 @@ export default function RateIQView() {
                                       {ls.trend_pct > 0 ? "↑" : "↓"} {Math.abs(ls.trend_pct).toFixed(1)}%
                                     </span>
                                   )}
+                                  {(() => {
+                                    const mKey = `${group.origin}|${ls.destination}`;
+                                    const mi = ls.miles || (laneMiles[mKey] && laneMiles[mKey].miles);
+                                    if (mi > 0 && avgRate > 0) return <span style={{ fontSize: 11, fontWeight: 600, color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>${(avgRate / mi).toFixed(2)}/mi</span>;
+                                    return null;
+                                  })()}
                                   {avgRate > 0 && (
                                     <span style={{ fontSize: 15, fontWeight: 800, color: "#34d399", fontFamily: "'JetBrains Mono', monospace" }}>{fmt(avgRate)}</span>
                                   )}
@@ -2442,12 +2542,218 @@ export default function RateIQView() {
             {dirHideDnu ? "Show DNU" : "Hide DNU"}
           </button>
         </div>
-        <div style={{ fontSize: 11, color: "#5A6478", marginBottom: 12 }}>{filteredDir.length} carriers · {allMarkets.length} markets</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: "#5A6478" }}>{filteredDir.length} carriers · {allMarkets.length} markets</div>
+          <button onClick={() => setDirGroupView(!dirGroupView)}
+            style={{ padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: "pointer", border: "1px solid rgba(255,255,255,0.08)", background: dirGroupView ? "rgba(0,212,170,0.08)" : "transparent", color: dirGroupView ? "#00D4AA" : "#8B95A8", fontFamily: "inherit" }}>
+            {dirGroupView ? "⊞ Grouped" : "☰ Flat List"}
+          </button>
+        </div>
 
         {/* Carrier Cards */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {filteredDir.length === 0 && <div style={{ padding: 40, textAlign: "center", color: "#5A6478", fontSize: 12 }}>No carriers match your filters.</div>}
-          {filteredDir.slice(0, 100).map((c, i) => {
+
+          {/* ── Grouped by state/city view ── */}
+          {dirGroupView && groupedDir.map(stateGroup => {
+            const isStateOpen = !!expandedMarkets[`state:${stateGroup.state}`];
+            return (
+              <div key={stateGroup.state} className="glass" style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
+                {/* State header */}
+                <div onClick={() => setExpandedMarkets(prev => ({ ...prev, [`state:${stateGroup.state}`]: !prev[`state:${stateGroup.state}`] }))}
+                  style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", transition: "background 0.15s", background: "rgba(255,255,255,0.015)" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.035)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.015)"}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ fontSize: 11, color: "#5A6478", transform: isStateOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s", display: "inline-block" }}>▼</span>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 16, fontWeight: 800, color: "#F0F2F5" }}>{stateGroup.state}</span>
+                        <span style={{ fontSize: 11, color: "#5A6478" }}>{stateGroup.cities.length} cit{stateGroup.cities.length !== 1 ? "ies" : "y"}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: "#5A6478", marginTop: 1 }}>
+                        {stateGroup.totalCarriers} carrier{stateGroup.totalCarriers !== 1 ? "s" : ""}
+                        {stateGroup.totalTrucks > 0 && <span> · {stateGroup.totalTrucks} trucks</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {stateGroup.tierCounts[1] > 0 && <span style={{ padding: "2px 7px", borderRadius: 4, fontSize: 9, fontWeight: 700, background: "rgba(34,197,94,0.12)", color: "#34d399" }}>T1: {stateGroup.tierCounts[1]}</span>}
+                    {stateGroup.tierCounts[2] > 0 && <span style={{ padding: "2px 7px", borderRadius: 4, fontSize: 9, fontWeight: 700, background: "rgba(245,158,11,0.12)", color: "#FBBF24" }}>T2: {stateGroup.tierCounts[2]}</span>}
+                    {stateGroup.tierCounts[3] > 0 && <span style={{ padding: "2px 7px", borderRadius: 4, fontSize: 9, fontWeight: 700, background: "rgba(251,146,60,0.12)", color: "#fb923c" }}>T3: {stateGroup.tierCounts[3]}</span>}
+                  </div>
+                </div>
+                {/* Cities within state */}
+                {isStateOpen && (
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                    {stateGroup.cities.map(cityGroup => {
+                      const isCityOpen = !!expandedMarkets[`city:${stateGroup.state}:${cityGroup.city}`];
+                      return (
+                        <div key={cityGroup.city}>
+                          {/* City sub-header */}
+                          <div onClick={() => setExpandedMarkets(prev => ({ ...prev, [`city:${stateGroup.state}:${cityGroup.city}`]: !prev[`city:${stateGroup.state}:${cityGroup.city}`] }))}
+                            style={{ padding: "8px 18px 8px 40px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.03)", transition: "background 0.1s" }}
+                            onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
+                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ fontSize: 10, color: "#5A6478", transform: isCityOpen ? "rotate(90deg)" : "rotate(0)", transition: "transform 0.15s", display: "inline-block" }}>▶</span>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: "#C8D0DC" }}>{cityGroup.city}</span>
+                              <span style={{ fontSize: 10, color: "#5A6478" }}>{cityGroup.carriers.length}</span>
+                            </div>
+                          </div>
+                          {/* Carriers in city */}
+                          {isCityOpen && cityGroup.carriers.map((c, ci) => {
+                            const tierColors = { 1: { bg: "rgba(34,197,94,0.12)", color: "#34d399", label: "T1" }, 2: { bg: "rgba(245,158,11,0.12)", color: "#FBBF24", label: "T2" }, 3: { bg: "rgba(251,146,60,0.12)", color: "#fb923c", label: "T3" }, 0: { bg: "rgba(239,68,68,0.12)", color: "#f87171", label: "DNU" } };
+                            const tier = tierColors[c.tier_rank] || { bg: "rgba(107,114,128,0.08)", color: "#6B7280", label: "—" };
+                            const isExp = dirExpanded === c.id;
+                            return (
+                              <div key={c.id || ci}>
+                                <div style={{ padding: "7px 18px 7px 64px", display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid rgba(255,255,255,0.02)", cursor: "pointer", transition: "background 0.1s" }}
+                                  onClick={() => setDirExpanded(isExp ? null : c.id)}
+                                  onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
+                                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                      <span style={{ fontSize: 12, fontWeight: 600, color: c.dnu ? "#f87171" : "#F0F2F5", textDecoration: c.dnu ? "line-through" : "none" }}>{c.carrier_name}</span>
+                                      {c.mc_number && <span style={{ fontSize: 10, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>MC-{c.mc_number}</span>}
+                                    </div>
+                                    <div style={{ display: "flex", gap: 3, marginTop: 2, flexWrap: "wrap" }}>
+                                      {CAP_OPTIONS.filter(cap => c[cap.key]).map(cap => (
+                                        <span key={cap.key} style={{ padding: "0px 5px", borderRadius: 3, fontSize: 7, fontWeight: 700, background: cap.color + "18", color: cap.color }}>{cap.label}</span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <span style={{ padding: "2px 7px", borderRadius: 4, fontSize: 9, fontWeight: 700, background: tier.bg, color: tier.color, flexShrink: 0 }}>{tier.label}</span>
+                                  {c.trucks && <div style={{ textAlign: "center", minWidth: 28, flexShrink: 0 }}><div style={{ fontSize: 11, fontWeight: 800, color: "#F0F2F5" }}>{c.trucks}</div><div style={{ fontSize: 7, color: "#5A6478" }}>TRUCKS</div></div>}
+                                  <span style={{ color: "#5A6478", fontSize: 10, transform: isExp ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.15s", flexShrink: 0 }}>▼</span>
+                                </div>
+                                {/* Expanded detail — full edit panel */}
+                                {isExp && (() => {
+                                  const isEdit = editingCarrierId === c.id;
+                                  const iStyle = { width: "100%", padding: "3px 6px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 11, fontFamily: "inherit", outline: "none", boxSizing: "border-box" };
+                                  const editInput = (label, field, opts = {}) => {
+                                    const val = c[field] || "";
+                                    if (!isEdit && !val) return null;
+                                    return (
+                                      <div style={{ fontSize: 11, marginBottom: 4 }}>
+                                        <span style={{ color: "#5A6478" }}>{label}: </span>
+                                        {isEdit ? (
+                                          <input defaultValue={val} key={val} onClick={e => e.stopPropagation()}
+                                            onBlur={e => { const v = e.target.value.trim(); if (v !== (c[field] || "")) handleCarrierUpdate(c.id, field, v || null); }}
+                                            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                                            placeholder={opts.placeholder || ""} style={iStyle} />
+                                        ) : (
+                                          <span style={{ color: opts.color || "#C8D0DC", cursor: opts.copyable ? "pointer" : "default" }}
+                                            onClick={opts.copyable ? (e => { e.stopPropagation(); navigator.clipboard.writeText(val); }) : undefined}>
+                                            {val}{opts.copyable ? " 📋" : ""}
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  };
+                                  return (
+                                    <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", padding: "12px 18px 12px 64px", background: "rgba(0,0,0,0.1)" }}>
+                                      {/* Capability badges (editable in edit mode) */}
+                                      {isEdit && (
+                                        <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
+                                          {CAP_OPTIONS.map(cap => (
+                                            <span key={cap.key} onClick={e => { e.stopPropagation(); handleCarrierUpdate(c.id, cap.key, !c[cap.key]); }}
+                                              style={{ padding: "1px 7px", borderRadius: 4, fontSize: 8, fontWeight: 700, cursor: "pointer", transition: "all 0.15s",
+                                                background: c[cap.key] ? cap.color + "18" : "rgba(255,255,255,0.02)", color: c[cap.key] ? cap.color : "#3D4557",
+                                                border: `1px solid ${c[cap.key] ? cap.color + "30" : "rgba(255,255,255,0.06)"}` }}>{cap.label}</span>
+                                          ))}
+                                        </div>
+                                      )}
+                                      {/* Tier selector + trucks (in edit mode) */}
+                                      {isEdit && (
+                                        <div style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "center" }}>
+                                          <div style={{ fontSize: 11 }}>
+                                            <span style={{ color: "#5A6478" }}>Tier: </span>
+                                            <select value={c.tier_rank ?? ""} onClick={e => e.stopPropagation()}
+                                              onChange={e => { const v = e.target.value === "" ? null : parseInt(e.target.value); handleCarrierUpdate(c.id, "tier_rank", v); if (v === 0) handleCarrierUpdate(c.id, "dnu", true); else if (c.dnu) handleCarrierUpdate(c.id, "dnu", false); }}
+                                              style={{ padding: "2px 6px", borderRadius: 4, fontSize: 11, background: "#151926", color: tier.color, border: `1px solid ${tier.color}30`, cursor: "pointer", fontFamily: "inherit" }}>
+                                              <option value="">Unranked</option>
+                                              <option value="1">Tier 1</option>
+                                              <option value="2">Tier 2</option>
+                                              <option value="3">Tier 3</option>
+                                              <option value="0">DNU</option>
+                                            </select>
+                                          </div>
+                                          <div style={{ fontSize: 11 }}>
+                                            <span style={{ color: "#5A6478" }}>Trucks: </span>
+                                            <input type="number" defaultValue={c.trucks || ""} key={c.trucks} onClick={e => e.stopPropagation()}
+                                              onBlur={e => { const v = e.target.value.trim(); const n = v ? parseInt(v) : null; if (n !== c.trucks) handleCarrierUpdate(c.id, "trucks", n); }}
+                                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                                              placeholder="0" style={{ width: 50, padding: "2px 6px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+                                          </div>
+                                        </div>
+                                      )}
+                                      {/* Market badges */}
+                                      {(c.markets || []).length > 0 && (
+                                        <div style={{ display: "flex", gap: 3, marginBottom: 8, flexWrap: "wrap" }}>
+                                          {c.markets.map(m => (
+                                            <span key={m} style={{ padding: "2px 6px", borderRadius: 4, fontSize: 8, fontWeight: 600, background: "rgba(59,130,246,0.1)", color: "#60a5fa", border: "1px solid rgba(59,130,246,0.2)" }}>{m}</span>
+                                          ))}
+                                        </div>
+                                      )}
+                                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                                        <div>
+                                          {editInput("Email", "contact_email", { color: "#00D4AA", copyable: true, placeholder: "carrier@email.com" })}
+                                          {editInput("Phone", "contact_phone", { placeholder: "555-123-4567" })}
+                                          {editInput("MC#", "mc_number", { placeholder: "MC number" })}
+                                          {editInput("Equipment", "equipment_types", { placeholder: "Dry Van, Flatbed..." })}
+                                          {editInput("Insurance", "insurance_info", { placeholder: "Insurance details" })}
+                                        </div>
+                                        <div>
+                                          {editInput("Feedback", "service_feedback", { placeholder: "Good Rates, Reliable..." })}
+                                          {editInput("Notes", "service_notes", { placeholder: "Operational notes" })}
+                                          {editInput("Record", "service_record", { placeholder: "Worked with Previously" })}
+                                          {editInput("Comments", "comments", { color: c.dnu ? "#f87171" : "#C8D0DC", placeholder: "General comments" })}
+                                        </div>
+                                      </div>
+                                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 8 }}>
+                                        <button onClick={e => { e.stopPropagation(); setEditingCarrierId(isEdit ? null : c.id); }}
+                                          style={{ padding: "3px 10px", borderRadius: 5, border: isEdit ? "1px solid rgba(0,212,170,0.3)" : "1px solid rgba(255,255,255,0.06)", background: "transparent", color: isEdit ? "#00D4AA" : "#5A6478", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>
+                                          {isEdit ? "Done" : "Edit"}
+                                        </button>
+                                        {isEdit && (
+                                          deleteConfirm === c.id ? (
+                                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                              <span style={{ fontSize: 10, color: "#f87171" }}>Delete?</span>
+                                              <button onClick={e => { e.stopPropagation(); handleDeleteCarrier(c.id); }}
+                                                style={{ padding: "3px 10px", borderRadius: 5, border: "1px solid rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.15)", color: "#f87171", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                                                Confirm
+                                              </button>
+                                              <button onClick={e => { e.stopPropagation(); setDeleteConfirm(null); }}
+                                                style={{ padding: "3px 10px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>
+                                                Cancel
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <button onClick={e => { e.stopPropagation(); setDeleteConfirm(c.id); }}
+                                              style={{ padding: "3px 10px", borderRadius: 5, border: "1px solid rgba(239,68,68,0.2)", background: "transparent", color: "#f87171", fontSize: 10, cursor: "pointer", fontFamily: "inherit", opacity: 0.7 }}>
+                                              Delete
+                                            </button>
+                                          )
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* ── Flat list view (original) ── */}
+          {!dirGroupView && filteredDir.slice(0, 100).map((c, i) => {
             const isExp = dirExpanded === (c.id || i);
             const tierColors = { 1: { bg: "rgba(34,197,94,0.12)", color: "#34d399", label: "Tier 1" }, 2: { bg: "rgba(245,158,11,0.12)", color: "#FBBF24", label: "Tier 2" }, 3: { bg: "rgba(251,146,60,0.12)", color: "#fb923c", label: "Tier 3" }, 0: { bg: "rgba(239,68,68,0.12)", color: "#f87171", label: "DNU" } };
             const tier = tierColors[c.tier_rank] || { bg: "rgba(107,114,128,0.08)", color: "#6B7280", label: "Unranked" };
@@ -2576,7 +2882,7 @@ export default function RateIQView() {
               </div>
             );
           })}
-          {filteredDir.length > 100 && <div style={{ padding: 12, textAlign: "center", color: "#5A6478", fontSize: 11 }}>Showing 100 of {filteredDir.length} carriers. Refine your search.</div>}
+          {!dirGroupView && filteredDir.length > 100 && <div style={{ padding: 12, textAlign: "center", color: "#5A6478", fontSize: 11 }}>Showing 100 of {filteredDir.length} carriers. Refine your search.</div>}
         </div>
       </div>
     );
