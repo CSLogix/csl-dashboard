@@ -462,16 +462,13 @@ export default function LoadSlideOver({ selectedShipment, setSelectedShipment, s
                 const locLabel = loc ? `${loc.city}, ${loc.state}` : null;
                 return (
                   <div style={{ marginTop: 8 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                      <span style={{ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: statusColor }}>
-                        {trackingData?.trackingStatus || selectedShipment.status || "Pending"}
-                      </span>
-                      {(trackingData?.eta || selectedShipment.eta) && (
+                    {(trackingData?.eta || selectedShipment.eta) && (
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
                         <span style={{ fontSize: 8, color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>
                           ETA {trackingData?.eta || selectedShipment.eta}
                         </span>
-                      )}
-                    </div>
+                      </div>
+                    )}
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ fontSize: 7, color: pct > 0 ? "#8B95A8" : "#5A6478", fontWeight: 600, flexShrink: 0, maxWidth: 70, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {selectedShipment.origin || "Origin"}
