@@ -519,7 +519,12 @@ async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Qu
             clauses.append("move_type = %s")
             params.append(move_type)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        cur.execute(f"SELECT * FROM lane_rates {where} ORDER BY port, destination, total ASC NULLS LAST LIMIT 1000", params)
+        cur.execute(f"""SELECT *,
+            TRIM(SPLIT_PART(destination, ',', 1)) AS dest_city,
+            TRIM(SPLIT_PART(TRIM(SPLIT_PART(destination, ',', 2)), ' ', 1)) AS dest_state,
+            TRIM(SPLIT_PART(port, ',', 1)) AS origin_city,
+            TRIM(SPLIT_PART(TRIM(SPLIT_PART(port, ',', 2)), ' ', 1)) AS origin_state
+            FROM lane_rates {where} ORDER BY port, destination, total ASC NULLS LAST LIMIT 1000""", params)
         rows = [_serialize_row(r) for r in cur.fetchall()]
 
         # Also include rate_quotes (from manual intake, emails, etc.)
@@ -550,7 +555,11 @@ async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Qu
                    NULL::numeric AS residential, NULL::numeric AS all_in_total,
                    move_type, miles, quote_date AS created_at,
                    source, status, NULL::int AS rank,
-                   NULL AS equipment_type, NULL AS notes
+                   NULL AS equipment_type, NULL AS notes,
+                   TRIM(SPLIT_PART(destination, ',', 1)) AS dest_city,
+                   TRIM(SPLIT_PART(TRIM(SPLIT_PART(destination, ',', 2)), ' ', 1)) AS dest_state,
+                   TRIM(SPLIT_PART(origin, ',', 1)) AS origin_city,
+                   TRIM(SPLIT_PART(TRIM(SPLIT_PART(origin, ',', 2)), ' ', 1)) AS origin_state
             FROM rate_quotes {rq_where}
             ORDER BY quote_date DESC NULLS LAST LIMIT 500
         """, rq_params)

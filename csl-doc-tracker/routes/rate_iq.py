@@ -97,6 +97,16 @@ for _alias, _cluster in PORT_CLUSTERS.items():
     _CLUSTER_ALIASES[_cluster].add(_alias)
 
 
+def _split_city_state(location: str) -> tuple[str, str]:
+    """Split 'City, ST' into (city, state). Returns (location, '') if no comma."""
+    if not location:
+        return "", ""
+    parts = location.split(",", 1)
+    city = parts[0].strip()
+    state = parts[1].strip().split()[0] if len(parts) > 1 else ""
+    return city, state
+
+
 def _normalize_port(text: str) -> str:
     """Normalize a port/origin/destination string to its cluster name, or return as-is."""
     if not text:
@@ -717,11 +727,17 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
     # ── Build flat matches (backwards compat) ──
     matches = []
     for r in all_rows:
+        o_city, o_state = _split_city_state(r["origin"] or "")
+        d_city, d_state = _split_city_state(r["destination"] or "")
         matches.append({
             "id": r["id"],
             "lane": r["norm_lane"],
             "origin": r["origin"],
             "destination": r["destination"],
+            "origin_city": o_city,
+            "origin_state": o_state,
+            "dest_city": d_city,
+            "dest_state": d_state,
             "miles": r["miles"],
             "carrier": r["carrier_name"] or "Unknown",
             "carrier_email": r["carrier_email"],
