@@ -242,7 +242,16 @@ function MarketRateCard({ laneGroup, carrierCapMap }) {
   );
 }
 
-// ── Market Benchmark Card (LoadMatch data — no carrier) ──
+/**
+ * Render a market benchmark card showing LoadMatch statistics and a selectable list of individual rates.
+ *
+ * Displays aggregate statistics (average, min/max, data window, trend) from the provided benchmark and, when a carrier average is supplied, shows the delta between the carrier average and the market average. Includes an expandable table of individual rate rows (date, terminal, base, FSC, total) when present.
+ *
+ * @param {Object} props
+ * @param {{ stats: { avg: number, min: number, max: number, count: number, trend_pct: number|null, latest_date?: string, oldest_date?: string }, rates?: Array<{date?: string, terminal?: string, base?: number, fsc_pct?: number, total?: number}> }} props.benchmark - LoadMatch benchmark data: `stats` contains aggregated metrics and optional date window; `rates` is an optional array of individual rate records.
+ * @param {number} props.carrierAvg - The average rate for the selected carrier used to compute and display the delta vs market.
+ * @returns {JSX.Element|null} A styled benchmark card element when `benchmark.stats` is present; otherwise `null`.
+ */
 function MarketBenchmarkCard({ benchmark, carrierAvg }) {
   if (!benchmark?.stats) return null;
   const { stats, rates } = benchmark;
@@ -321,7 +330,31 @@ function MarketBenchmarkCard({ benchmark, carrierAvg }) {
   );
 }
 
-// ── Carrier Rate Table (simplified — key columns visible, rest expandable) ──
+/**
+ * Render a carrier rates table with editable rate fields, carrier contact/MC editing, copy actions, and row-level actions (quote, email copy, delete).
+ *
+ * The table shows primary and optional secondary columns, allows inline editing of numeric rate fields (committed via handleLaneRateUpdate),
+ * inline editing of carrier MC number and contact email (committed via onUpdateCarrierInfo), copying MC/email to the clipboard, and
+ * exposes per-row actions: onUseRate to select a rate for quoting and onDeleteRate to remove a lane rate.
+ *
+ * @param {Object} props
+ * @param {Array<Object>} props.carriers - Array of carrier rate objects to display (each may include id, carrier_name, dray_rate, fsc, total, created_at, mc_number, contact_email, etc.).
+ * @param {Object<string, Object>} props.carrierCapMap - Map from lowercased carrier name to capability/metadata (e.g., tier_rank, mc_number, contact_email, capability flags).
+ * @param {number|null} props.editingLaneRateId - Currently-editing lane rate id (used to render numeric-field editors).
+ * @param {string|null} props.editingLaneField - Field name currently being edited on the lane rate (e.g., "dray_rate").
+ * @param {string} props.editingLaneValue - Current edited value for the numeric field editor.
+ * @param {Function} props.setEditingLaneRateId - Setter to mark which lane rate id is being edited.
+ * @param {Function} props.setEditingLaneField - Setter to mark which lane field is being edited.
+ * @param {Function} props.setEditingLaneValue - Setter to update the editing value for the numeric field editor.
+ * @param {Function} props.handleLaneRateUpdate - Called with (rateId, field, value) to persist an edited numeric lane rate field.
+ * @param {string} props.laneOrigin - Origin label for the current lane (used for contextual UI; optional).
+ * @param {string} props.laneDestination - Destination label for the current lane (used for contextual UI; optional).
+ * @param {Function} [props.onUseRate] - Optional callback invoked with the carrier rate object when the user chooses "Quote".
+ * @param {Function} [props.onUpdateCarrierInfo] - Optional callback invoked with (carrierName, field, value) to persist inline carrier info edits (MC number or contact email).
+ * @param {Function} [props.onDeleteRate] - Optional callback invoked with (rateId) to delete a lane rate; when provided the UI will show a delete confirmation flow.
+ *
+ * @returns {JSX.Element} The rendered carrier rates table component.
+ */
 function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingLaneField, editingLaneValue, setEditingLaneRateId, setEditingLaneField, setEditingLaneValue, handleLaneRateUpdate, laneOrigin, laneDestination, onUseRate, onUpdateCarrierInfo, onDeleteRate }) {
   const [showAllCols, setShowAllCols] = useState(false);
   const [copiedMC, setCopiedMC] = useState(null);

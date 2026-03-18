@@ -180,7 +180,19 @@ Dates should be normalized to YYYY-MM-DD format. Omit $ signs and commas from nu
 
 
 def _call_claude(content: list) -> dict:
-    """Call Claude API with content blocks and return parsed JSON."""
+    """
+    Send prepared content blocks to the Claude API and return the parsed JSON response.
+    
+    Parameters:
+        content (list): List of content blocks formatted for the Anthropic/Claude request.
+    
+    Returns:
+        dict: Parsed JSON object from Claude's response.
+    
+    Raises:
+        json.JSONDecodeError: If the API response cannot be parsed as JSON.
+        Exception: Propagates errors raised by the Anthropics/Claude client (e.g., network or API errors).
+    """
     import anthropic
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     message = client.messages.create(
@@ -845,8 +857,27 @@ async def api_lane_stats():
 # ── Manual Intake (carrier rate from email / file / text) ────────────
 
 async def _parse_intake_request(request: Request):
-    """Parse input from a manual-intake or extract-preview request.
-    Returns (text, file_bytes, filename, move_type, extracted_override) or raises JSONResponse."""
+    """
+    Parse an incoming manual-intake or extract-preview request and extract text, file, move type, and any pre-extracted override.
+    
+    When the request is multipart/form-data, reads form fields:
+    - "text" (optional)
+    - "move_type" (optional, defaults to "dray")
+    - "file" (optional file upload; file bytes and filename are returned)
+    
+    When the request has a JSON body, reads keys:
+    - "text" (optional)
+    - "move_type" (optional, defaults to "dray")
+    - "extracted" (optional pre-reviewed extraction override)
+    
+    Returns:
+        tuple: (text, file_bytes, filename, move_type, extracted_override)
+            text (str | None): Trimmed text content if provided, otherwise None.
+            file_bytes (bytes | None): Uploaded file contents if provided, otherwise None.
+            filename (str): Uploaded filename or empty string.
+            move_type (str): Normalized move type (lowercased), defaults to "dray".
+            extracted_override (dict | None): Parsed override from JSON "extracted" key, or None.
+    """
     content_type = request.headers.get("content-type", "")
     text = None
     file_bytes = None
@@ -874,8 +905,29 @@ async def _parse_intake_request(request: Request):
 
 
 def _extract_rate_data(text, file_bytes, filename, move_type):
-    """Run Claude extraction (or regex fallback) and normalize the result.
-    Returns (extracted_dict, error_response) — error_response is a JSONResponse if extraction failed."""
+    """
+    Normalize and validate extracted rate data from text or an uploaded file.
+    
+    Attempts AI extraction when an Anthropic API key is configured (preferring file extraction when file bytes are present, otherwise using text); if AI is not available and only text is provided, falls back to a regex-based text parser. Ensures extracted payload contains origin and destination, normalizes origin/destination/carrier/shipment_type, and computes `rate_amount` from an explicit field or by summing `linehaul_items` when necessary.
+    
+    Parameters:
+        text (str|None): Plain-text content to extract from (may be None if a file is provided).
+        file_bytes (bytes|None): Raw uploaded file bytes to send to the extractor (preferred when present).
+        filename (str|None): The filename associated with `file_bytes` (used to determine handling).
+        move_type (str|None): Fallback shipment type to use when extraction does not provide one.
+    
+    Returns:
+        tuple: (extracted_dict, error_response)
+            - extracted_dict (dict|None): Normalized extraction result with keys including
+              `origin`, `destination`, `shipment_type`, and `rate_amount` when extraction succeeded.
+            - error_response (fastapi.responses.JSONResponse|None): A JSONResponse describing the error when
+              extraction or validation failed; `None` on success.
+    
+    Error behavior:
+        - Returns a 422 error response when a file is provided but no Anthropic API key is configured.
+        - Returns a 500 error response when AI extraction raises an unexpected exception.
+        - Returns a 400 error response when extraction returns no data or when origin/destination cannot be determined.
+    """
     has_claude = bool(config.ANTHROPIC_API_KEY)
     extracted = None
 
@@ -937,7 +989,13 @@ def _extract_rate_data(text, file_bytes, filename, move_type):
 
 @router.post("/api/rate-iq/extract-preview")
 async def post_extract_preview(request: Request):
-    """Extract rate data from file/text but do NOT save — returns extracted JSON for user review."""
+    """
+    Extract rate data from the provided file or text and return the parsed extraction for user review without persisting it.
+    
+    Returns:
+        dict: On success, a dictionary {"ok": True, "extracted": <extracted_data>} where <extracted_data> is the normalized extraction result.
+        JSONResponse: On failure, a JSONResponse with an error status and message (e.g., 400 when no input is provided or an extraction error response).
+    """
     text, file_bytes, filename, move_type, _ = await _parse_intake_request(request)
 
     if not text and not file_bytes:
@@ -952,10 +1010,14 @@ async def post_extract_preview(request: Request):
 
 @router.post("/api/rate-iq/manual-intake")
 async def post_manual_intake(request: Request):
-    """Extract a carrier rate from pasted text or uploaded file (image, PDF, .msg, .eml, HTML).
-    Uses Claude Vision for files, Claude text extraction for pasted text.
-    Saves extracted rate to rate_quotes table.
-    If 'extracted' is provided in body, skips AI extraction and uses the pre-reviewed data."""
+    """
+    Accept and ingest a carrier rate from pasted text or an uploaded file, saving it to rate_quotes and lane_rates.
+    
+    If an `extracted` override is provided in the request body, that pre-reviewed data is used instead of running extraction. Validates that origin and destination are present, normalizes numeric values (rates, fsc, linehaul, accessorials), and parses linehaul_items and accessorials into structured fields used for database inserts. Inserts a row into rate_quotes and attempts to insert a detailed row into lane_rates; lane_rates insertion is deduplicated by carrier + origin + destination + total, and deduplication is reported. If carrier MC number or email is present, the carriers directory is created or updated.
+    
+    Returns:
+        dict: Result payload containing at minimum `{"ok": True, "extracted": <extracted_data>}`. If a lane_rates insert was skipped due to a duplicate, includes `duplicate_skipped: True` and `duplicate_id: <id>`.
+    """
     text, file_bytes, filename, move_type, extracted_override = await _parse_intake_request(request)
 
     if extracted_override:

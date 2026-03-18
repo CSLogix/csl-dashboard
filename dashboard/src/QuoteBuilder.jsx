@@ -52,7 +52,20 @@ const DEFAULT_TERMS = [
 
 // ════════════════════════════════════════════════════════════
 // ─── Quote Preview Card (customer-facing, screenshot-optimized) ───
-// ════════════════════════════════════════════════════════════
+/**
+ * Render a compact quote preview card showing route details, grouped linehaul charges with margin applied, accessorial charges, and an estimated invoice total.
+ *
+ * @param {Object} props
+ * @param {Object} props.route - Route information (e.g., pod, finalDelivery, roundTripMiles, oneWayMiles, transitTime, durationHours, shipmentType).
+ * @param {Array<Object>} props.linehaul - Linehaul entries; each entry should include at least `description` and `rate`, and may include `section`.
+ * @param {Array<Object>} props.accessorials - Accessorial entries; each entry may include `charge`, `amount`, `checked`, `qty`, and `frequency`.
+ * @param {number|string} props.marginPct - Margin value interpreted as a percentage when `marginType` is `"pct"`, or as a flat dollar markup when `marginType` is `"flat"`.
+ * @param {"pct"|"flat"} props.marginType - How `marginPct` is applied to linehaul rates: percent multiplier (`"pct"`) or flat addition (`"flat"`).
+ * @param {Array<string>} props.terms - Quote terms lines (accepted but not rendered by this component).
+ * @param {string} props.quoteNumber - Optional quote identifier displayed in the header.
+ * @param {string} props.shipmentType - Shipment type used to determine round-trip behavior (e.g., `"Dray"`).
+ * @returns {JSX.Element} The formatted quote preview card as a JSX element.
+ */
 function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, terms, quoteNumber, shipmentType }) {
   const margin = parseNum(marginPct) / 100;
   const flatMarkup = marginType === "flat" ? parseNum(marginPct) : 0;

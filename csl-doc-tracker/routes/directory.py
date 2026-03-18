@@ -564,6 +564,25 @@ async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Qu
 
 @router.put("/api/lane-rates/{rate_id}")
 async def api_update_lane_rate(rate_id: int, request: Request):
+    """
+    Update one or more fields of an existing lane rate record.
+    
+    Accepts a JSON body with any of the allowed lane rate fields; updates the record with the provided values and returns the updated record. If either `dray_rate` or `fsc` is provided and `total` is not included in the request, `total` will be recalculated from `dray_rate` plus the numeric portion of `fsc` when possible.
+    
+    Allowed fields:
+    port, destination, carrier_name, dray_rate, fsc, total,
+    chassis_per_day, prepull, storage_per_day, detention,
+    chassis_split, overweight, tolls, reefer, hazmat,
+    triaxle, bond_fee, residential, all_in_total,
+    rank, equipment_type, move_type, notes
+    
+    Returns:
+    	JSONResponse: The updated lane rate serialized to JSON.
+    
+    Raises:
+    	HTTPException 400: If the request body contains no valid updatable fields.
+    	HTTPException 404: If no lane rate exists with the given id.
+    """
     body = await request.json()
     allowed = {"port", "destination", "carrier_name", "dray_rate", "fsc", "total",
                "chassis_per_day", "prepull", "storage_per_day", "detention",
@@ -605,6 +624,18 @@ async def api_update_lane_rate(rate_id: int, request: Request):
 
 @router.delete("/api/lane-rates/{rate_id}")
 async def api_delete_lane_rate(rate_id: int):
+    """
+    Delete a lane rate by its ID.
+    
+    Parameters:
+        rate_id (int): ID of the lane rate to delete.
+    
+    Returns:
+        dict: A confirmation object with keys `"ok"` set to True and `"deleted_id"` set to the deleted rate's ID.
+    
+    Raises:
+        HTTPException: 404 if no lane rate exists with the given ID.
+    """
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
             cur.execute("DELETE FROM lane_rates WHERE id = %s RETURNING id", (rate_id,))
