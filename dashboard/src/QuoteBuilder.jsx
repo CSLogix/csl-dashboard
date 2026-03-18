@@ -107,7 +107,7 @@ function QuotePreview({ route, linehaul, accessorials, marginPct, marginType, te
 
   // Accessorials — all with amounts show; only checked count toward total
   const accRows = accessorials.filter(a => parseNum(a.amount) > 0).map(a => ({
-    desc: a.charge + ((a.qty || 1) > 1 ? ` (${a.qty})` : "") + (a.frequency && a.frequency !== "flat" ? ` ${a.frequency}` : ""),
+    desc: ((a.qty || 1) > 1 ? `${a.qty}x ` : "") + a.charge + (a.frequency && a.frequency !== "flat" ? ` ${a.frequency}` : ""),
     rate: parseNum(a.amount),
     included: a.checked,
   }));
@@ -662,7 +662,7 @@ export default function QuoteBuilder({ prefill } = {}) {
     if (idx !== i) return a;
     const updated = { ...a, [field]: val };
     if (field === "qty" || field === "rate") {
-      updated.amount = (parseFloat(updated.rate || 0) * Math.max(1, parseInt(updated.qty || 1, 10))).toFixed(2);
+      updated.amount = (parseNum(updated.rate) * Math.max(1, parseNum(updated.qty) || 1)).toFixed(2);
     }
     return updated;
   }));

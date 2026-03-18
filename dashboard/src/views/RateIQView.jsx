@@ -544,7 +544,7 @@ function CarrierRateTable({ carriers, carrierCapMap, editingLaneRateId, editingL
                         )}
                         {onDeleteRate && deleteConfirmId === cr.id && (
                           <>
-                            <button onClick={async e => { e.stopPropagation(); setDeletingId(cr.id); await onDeleteRate(cr.id); setDeleteConfirmId(null); setDeletingId(null); }}
+                            <button onClick={async e => { e.stopPropagation(); setDeletingId(cr.id); const ok = await onDeleteRate(cr.id); if (ok) setDeleteConfirmId(null); setDeletingId(null); }}
                               disabled={deletingId === cr.id}
                               style={{ padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(248,113,113,0.4)", background: "rgba(248,113,113,0.15)", color: "#f87171", fontSize: 10, fontWeight: 700, cursor: deletingId === cr.id ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
                               {deletingId === cr.id ? "..." : "Delete?"}
@@ -1110,11 +1110,11 @@ export default function RateIQView() {
     try {
       const r = await apiFetch(`${API_BASE}/api/lane-rates/${rateId}`, { method: "DELETE" });
       if (r.ok) {
-        setLaneResults(prev => prev.map(lane => ({
-          ...lane, carriers: (lane.carriers || []).filter(cr => cr.id !== rateId),
-        })).filter(lane => (lane.carriers || []).length > 0));
+        setLaneResults(prev => prev.filter(r => r.id !== rateId));
+        return true;
       }
     } catch (e) { console.error("Lane rate delete failed:", e); }
+    return false;
   };
 
   // ── Update carrier directory info (MC#, email) from lane card ──
@@ -2103,20 +2103,16 @@ export default function RateIQView() {
                 <input value={intakePreview.destination || ""} onChange={e => setIntakePreview(p => ({ ...p, destination: e.target.value }))}
                   style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
               </label>
-              {intakePreview.carrier_mc && (
-                <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>MC#
-                  <input value={intakePreview.carrier_mc || ""} onChange={e => setIntakePreview(p => ({ ...p, carrier_mc: e.target.value }))}
-                    style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
-                </label>
-              )}
+              <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>MC#
+                <input value={intakePreview.carrier_mc || ""} onChange={e => setIntakePreview(p => ({ ...p, carrier_mc: e.target.value }))}
+                  style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+              </label>
               <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Move Type
                 <select value={intakePreview.shipment_type || intakeMoveType} onChange={e => setIntakePreview(p => ({ ...p, shipment_type: e.target.value }))}
                   style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}>
                   <option value="dray">Dray</option>
                   <option value="ftl">FTL</option>
-                  <option value="ltl">LTL</option>
                   <option value="transload">Transload</option>
-                  <option value="otr">OTR</option>
                 </select>
               </label>
             </div>

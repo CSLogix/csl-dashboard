@@ -931,13 +931,26 @@ def _extract_rate_data(text, file_bytes, filename, move_type):
     has_claude = bool(config.ANTHROPIC_API_KEY)
     extracted = None
 
+    # Text-decodable file extensions that can fall back to regex parsing
+    _TEXT_EXTS = {".txt", ".csv", ".eml", ".htm", ".html", ".tsv"}
+    file_ext = ("." + filename.rsplit(".", 1)[-1].lower()) if filename and "." in filename else ""
+
     if file_bytes and has_claude:
         try:
             blocks = _file_to_content_blocks(file_bytes, filename, _CARRIER_EXTRACT_PROMPT)
             extracted = _call_claude(blocks)
         except Exception as e:
             log.warning("Claude file extraction failed: %s", e)
-            return None, JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
+            # For text-like files, fall back to regex instead of failing
+            if file_ext in _TEXT_EXTS:
+                try:
+                    decoded = file_bytes.decode("utf-8", errors="ignore")
+                    from routes.quotes import _parse_rate_text
+                    extracted = _parse_rate_text(decoded)
+                except Exception:
+                    pass
+            if not extracted:
+                return None, JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
     elif text and has_claude:
         try:
             blocks = [{"type": "text", "text": _CARRIER_EXTRACT_PROMPT + "\n\n" + text[:8000]}]
@@ -948,6 +961,16 @@ def _extract_rate_data(text, file_bytes, filename, move_type):
     elif text:
         from routes.quotes import _parse_rate_text
         extracted = _parse_rate_text(text)
+    elif file_bytes and file_ext in _TEXT_EXTS:
+        # No Claude key but file is text-decodable — use regex fallback
+        try:
+            decoded = file_bytes.decode("utf-8", errors="ignore")
+            from routes.quotes import _parse_rate_text
+            extracted = _parse_rate_text(decoded)
+        except Exception:
+            pass
+        if not extracted:
+            return None, JSONResponse(status_code=422, content={"error": "Could not parse text file"})
     else:
         return None, JSONResponse(status_code=422, content={"error": "File extraction requires ANTHROPIC_API_KEY"})
 
@@ -973,11 +996,8 @@ def _extract_rate_data(text, file_bytes, filename, move_type):
     carrier_name = (extracted.get("carrier_name") or "").strip()
     shipment_type = (extracted.get("shipment_type") or move_type or "dray").lower()
 
-    if not origin or not destination:
-        return None, JSONResponse(status_code=400, content={
-            "error": "Could not extract origin and destination",
-            "extracted": extracted,
-        })
+    # Don't fail on missing origin/dest — let the preview step surface partial extractions
+    # so the user can fill in missing fields. Validation happens in post_manual_intake.
 
     extracted["rate_amount"] = rate_amount
     extracted["origin"] = origin
