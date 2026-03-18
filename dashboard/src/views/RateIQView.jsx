@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { apiFetch, API_BASE } from '../helpers/api';
 import QuoteBuilder from '../QuoteBuilder';
 import OOGQuoteBuilder from '../OOGQuoteBuilder';
+import { CITY_STATE_MAP, inferCarrierState, inferCarrierCity, buildGroupedDir } from '../utils/carrierGrouping.js';
+import { computeGroupRpm } from '../utils/rpmCalc.js';
 
 // ═══════════════════════════════════════════════════════════════
 // RATE IQ VIEW — Lane-centric redesign (DrayRates.ai-inspired)
@@ -933,75 +935,7 @@ export default function RateIQView() {
   }, [dirCarriers, dirSearch, dirMarket, dirCaps, dirHideDnu, dirPort, portGroups]);
 
   // ── Group filtered carriers by region/city for organized geographic browse ──
-  const groupedDir = useMemo(() => {
-    // Map common market/city names to state for geographic grouping
-    const CITY_STATE_MAP = {
-      "houston": "TX", "dallas": "TX", "san antonio": "TX", "ft worth": "TX", "fort worth": "TX", "el paso": "TX", "laredo": "TX",
-      "los angeles": "CA", "long beach": "CA", "oakland": "CA", "san francisco": "CA",
-      "chicago": "IL",
-      "savannah": "GA", "atlanta": "GA",
-      "new york": "NY", "newark": "NY/NJ", "elizabeth": "NY/NJ", "ny/nj": "NY/NJ",
-      "charleston": "SC",
-      "norfolk": "VA", "richmond": "VA",
-      "baltimore": "MD",
-      "boston": "MA",
-      "seattle": "WA", "tacoma": "WA",
-      "portland": "OR",
-      "miami": "FL", "jacksonville": "FL", "tampa": "FL", "port everglades": "FL",
-      "new orleans": "LA", "mobile": "AL", "memphis": "TN", "nashville": "TN",
-      "charlotte": "NC", "wilmington": "NC",
-      "philadelphia": "PA",
-      "detroit": "MI",
-      "cleveland": "OH", "columbus": "OH", "cincinnati": "OH",
-      "indianapolis": "IN",
-      "minneapolis": "MN", "st paul": "MN",
-      "kansas city": "MO", "st louis": "MO",
-      "louisville": "KY",
-      "denver": "CO",
-      "salt lake city": "UT",
-      "phoenix": "AZ",
-      "las vegas": "NV",
-    };
-    const inferState = (c) => {
-      // Try pickup_area first (e.g. "Houston, TX")
-      if (c.pickup_area) {
-        const parts = c.pickup_area.split(",").map(s => s.trim());
-        if (parts.length >= 2 && parts[1].length <= 5) return parts[1].toUpperCase();
-      }
-      // Try markets
-      for (const m of (c.markets || [])) {
-        const st = CITY_STATE_MAP[m.toLowerCase()];
-        if (st) return st;
-      }
-      return null;
-    };
-    const inferCity = (c) => {
-      if (c.pickup_area) return c.pickup_area.split(",")[0].trim();
-      if (c.markets?.length > 0) return c.markets[0];
-      return null;
-    };
-
-    // Build state → city → carriers hierarchy
-    const stateMap = {};
-    filteredDir.forEach(c => {
-      const state = inferState(c) || "Other";
-      const city = inferCity(c) || "Unassigned";
-      if (!stateMap[state]) stateMap[state] = { state, cities: {}, totalCarriers: 0, totalTrucks: 0, tierCounts: { 1: 0, 2: 0, 3: 0 } };
-      if (!stateMap[state].cities[city]) stateMap[state].cities[city] = [];
-      stateMap[state].cities[city].push(c);
-      stateMap[state].totalCarriers++;
-      if (c.trucks) stateMap[state].totalTrucks += c.trucks;
-      if (c.tier_rank >= 1 && c.tier_rank <= 3) stateMap[state].tierCounts[c.tier_rank]++;
-    });
-    return Object.values(stateMap)
-      .map(s => ({
-        ...s,
-        cities: Object.entries(s.cities)
-          .map(([city, carriers]) => ({ city, carriers: carriers.sort((a, b) => (a.tier_rank || 99) - (b.tier_rank || 99)) }))
-          .sort((a, b) => b.carriers.length - a.carriers.length),
-      }))
-      .sort((a, b) => b.totalCarriers - a.totalCarriers);
-  }, [filteredDir]);
+  const groupedDir = useMemo(() => buildGroupedDir(filteredDir), [filteredDir]);
 
   const [dirGroupView, setDirGroupView] = useState(true); // default to grouped
   const [expandedMarkets, setExpandedMarkets] = useState({});
@@ -1078,21 +1012,7 @@ export default function RateIQView() {
       if (ls.avg_rate > 0) { map[origin].totalRate += ls.avg_rate * (ls.load_count || 1); map[origin].rateCount += (ls.load_count || 1); }
     });
     return Object.values(map)
-      .map(g => {
-        const avgRate = g.rateCount > 0 ? Math.round(g.totalRate / g.rateCount) : 0;
-        // Calculate weighted average miles across lanes for RPM
-        let totalMilesWeighted = 0, milesWeightCount = 0;
-        g.lanes.forEach(ls => {
-          if (ls.miles && ls.miles > 0 && ls.avg_rate > 0) {
-            const w = ls.load_count || 1;
-            totalMilesWeighted += ls.miles * w;
-            milesWeightCount += w;
-          }
-        });
-        const avgMiles = milesWeightCount > 0 ? totalMilesWeighted / milesWeightCount : 0;
-        const avgRpm = avgMiles > 0 && avgRate > 0 ? (avgRate / avgMiles).toFixed(2) : null;
-        return { ...g, avgRate, avgMiles: Math.round(avgMiles), avgRpm };
-      })
+      .map(g => ({ ...g, ...computeGroupRpm(g) }))
       .sort((a, b) => b.totalLoads - a.totalLoads);
   }, [rateLaneSummaries, moveTypeFilter]);
 

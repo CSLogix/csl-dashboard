@@ -7,6 +7,10 @@ export default defineConfig(({ mode }) => {
   return {
     root: import.meta.dirname,
     plugins: [react(), tailwindcss()],
+    test: {
+      environment: 'node',
+      include: ['src/**/*.test.{js,jsx}'],
+    },
     server: {
       port: 5173,
       host: true,
