@@ -9,12 +9,12 @@ Standalone module imported by csl_inbox_scanner.py. Handles:
 """
 import os
 import re
-import logging
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from csl_logging import get_logger
 
-log = logging.getLogger("csl-inbox")
+log = get_logger("csl-inbox")
 
 # ═══════════════════════════════════════════════════════════════
 # CONFIG
@@ -588,5 +588,5 @@ Priority scale:
         result["suggested_rep"] = result.get("suggested_rep") or None
         return result
     except Exception as e:
-        logging.getLogger("csl_email_classifier").warning("AI classify failed: %s", e)
+        log.warning("AI classify failed: %s", e)
         return {}

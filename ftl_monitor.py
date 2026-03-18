@@ -26,7 +26,7 @@ def save_unresponsive_state(state):
 import os
 import re
 import time
-import logging
+from csl_logging import get_logger
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -45,8 +45,7 @@ from csl_ftl_alerts import (
 )
 
 
-log = logging.getLogger("ftl_monitor")
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+log = get_logger("ftl_monitor")
 
 
 # ── Config ──────────────────────────────────────────────────────────────────────
@@ -327,7 +326,7 @@ def archive_ftl_row_pg(efj, load_num, dest, tab_name, pickup_val, delivery_val,
     try:
         pg_archive_shipment(efj)
         sheet_archive_row(efj, tab_name, rep=rep_name)
-        print(f"    Archived {efj} (Delivered)")
+        log.info("Archived load (Delivered)", extra={"efj": efj})
 
         # Send archive email
         if rep_email:
@@ -349,7 +348,7 @@ def archive_ftl_row_pg(efj, load_num, dest, tab_name, pickup_val, delivery_val,
         _send_pod_reminder_ftl(efj, load_num, dest, tab_name, account_lookup, mp_load_id=mp_load_id)
         return True
     except Exception as e:
-        print(f"    WARNING: Archive failed: {e}")
+        log.warning("Archive failed", extra={"efj": efj, "error": str(e)})
         return False
 
 
@@ -357,7 +356,7 @@ def archive_ftl_row_pg(efj, load_num, dest, tab_name, pickup_val, delivery_val,
 def run_once():
     """FTL poll cycle — reads from Postgres, checks webhook-updated tracking cache."""
     now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
-    print(f"\n[{now_str}] FTL poll cycle (Postgres mode)...")
+    log.info("FTL poll cycle (Postgres mode)")
 
     # ── Read active FTL loads from Postgres ────────────────────────────────
     conn = None
@@ -376,7 +375,7 @@ def run_once():
             """)
             all_loads = cur.fetchall()
     except Exception as exc:
-        print(f"FATAL: Could not read from Postgres: {exc}")
+        log.error("Could not read from Postgres", extra={"error": str(exc)})
         return
     finally:
         if conn is not None:
@@ -390,9 +389,9 @@ def run_once():
         by_account[acct].append(row)
 
     account_tabs = sorted(by_account.keys())
-    print(f"  Loaded {len(all_loads)} active FTL load(s) across {len(account_tabs)} account(s)")
+    log.info("Loaded active FTL loads", extra={"load_count": len(all_loads), "account_count": len(account_tabs)})
     if not account_tabs:
-        print("  No active FTL loads found.")
+        log.info("No active FTL loads found")
         return
 
     sent = load_sent_alerts()
@@ -400,7 +399,7 @@ def run_once():
 
     for tab_name in account_tabs:
         loads = by_account[tab_name]
-        print(f"\n  Checking {tab_name}... ({len(loads)} FTL row(s))")
+        log.info("Checking account", extra={"tab": tab_name, "row_count": len(loads)})
 
         for row in loads:
             efj = (row["efj"] or "").strip()
@@ -434,7 +433,7 @@ def run_once():
                     "driver_phone": "",
                 }
                 cached = tracking_cache[cache_key]
-                print(f"  -> {key} (initialized cache entry)")
+                log.info("Initialized cache entry", extra={"efj": efj, "load_num": load_num})
 
             cached_status = cached.get("status", "")
             stop_times = cached.get("stop_times", {})
@@ -442,7 +441,7 @@ def run_once():
             cant_make_it = cached.get("cant_make_it")
             driver_phone = cached.get("driver_phone", "")
 
-            print(f"  -> {key} cached={cached_status!r} pg={existing_status!r}")
+            log.info("Processing load", extra={"efj": efj, "load_num": load_num, "cached_status": cached_status, "pg_status": existing_status})
 
             if not cached_status:
                 continue  # No webhook data yet
@@ -472,11 +471,11 @@ def run_once():
             # Check if status changed
             # ── Block status regression ──
             if dropdown_val and _status_is_regression(existing_status, cached_status):
-                log.info(f"FTL monitor: BLOCKED regression {efj} [{existing_status}] -> [{dropdown_val}]")
+                log.info("Blocked status regression", extra={"efj": efj, "from_status": existing_status, "to_status": dropdown_val})
                 dropdown_val = None
             if dropdown_val and existing_status != dropdown_val:
                 note_parts.append(dropdown_val)
-                print(f"    Status change: {existing_status!r} -> {dropdown_val!r}")
+                log.info("Status change", extra={"efj": efj, "load_num": load_num, "from_status": existing_status, "to_status": dropdown_val})
 
             # ── Write to PG if anything changed ──────────────────────────
             if note_parts:
@@ -498,7 +497,7 @@ def run_once():
                     delivery=final_delivery or None,
                     status=dropdown_val or None,
                 )
-                print(f"    PG updated")
+                log.info("PG updated", extra={"efj": efj, "load_num": load_num})
 
             # ── Check for unresponsive driver ─────────────────────────────
             rep_info = ACCOUNT_REPS_PG.get(tab_name, {})
@@ -526,7 +525,7 @@ def run_once():
                 except (ValueError, IndexError):
                     pass
             if _skip_old:
-                print(f"    Pickup {_date_src} before cutoff {ALERT_CUTOFF_DATE} — skipping email")
+                log.info("Pickup before cutoff — skipping email", extra={"efj": efj, "load_num": load_num, "pickup": _date_src, "cutoff": ALERT_CUTOFF_DATE})
                 continue
 
             # ── Only alert on actual status CHANGES ──────────────────────
@@ -535,7 +534,7 @@ def run_once():
                 continue
 
             if already_sent(sent, key, cached_status):
-                print(f"    Already alerted for '{cached_status}' — skipping")
+                log.info("Already alerted — skipping", extra={"efj": efj, "load_num": load_num, "status": cached_status})
             else:
                 send_ftl_email(efj, load_num, cached_status, tab_name, ACCOUNT_REPS_PG,
                                mp_load_id=mp_load_id, stop_times=stop_times)
@@ -545,7 +544,7 @@ def run_once():
             if cant_make_it:
                 cmi_status = "Can't Make It"
                 if not already_sent(sent, key, cmi_status):
-                    print(f"    CAN'T MAKE IT detected: {cant_make_it}")
+                    log.warning("CAN'T MAKE IT detected", extra={"efj": efj, "load_num": load_num, "reason": cant_make_it})
                     send_ftl_email(efj, load_num, cmi_status, tab_name, ACCOUNT_REPS_PG,
                                    mp_load_id=mp_load_id, stop_times=stop_times)
                     mark_sent(sent, key, cmi_status)
@@ -562,9 +561,7 @@ def run_once():
                 except (TypeError, ValueError):
                     pass
                 if dist_miles is not None and dist_miles > 15:
-                    print(f"    ⚠️  ARCHIVE BLOCKED for {efj}: D1 received but "
-                          f"truck is {dist_miles:.1f} mi from destination — "
-                          f"likely false positive (MP re-track?)")
+                    log.warning("Archive blocked — truck too far from destination, likely false positive", extra={"efj": efj, "load_num": load_num, "distance_miles": dist_miles})
                 else:
                     archive_ftl_row_pg(efj, load_num, dest, tab_name,
                                         final_pickup, final_delivery, ACCOUNT_REPS_PG,
@@ -572,23 +569,23 @@ def run_once():
 
     save_tracking_cache(tracking_cache)
     save_sent_alerts(sent)
-    print("FTL poll complete.")
+    log.info("FTL poll complete")
 
 
 def main():
-    print("FTL Monitor v3 (Postgres mode) started.")
+    log.info("FTL Monitor v3 (Postgres mode) started")
     while True:
         run_once()
-        print(f"  Sleeping {POLL_INTERVAL // 60} minutes...")
+        log.info("Sleeping", extra={"minutes": POLL_INTERVAL // 60})
         time.sleep(POLL_INTERVAL)
 
 
 if __name__ == "__main__":
     import sys
     if "--once" in sys.argv:
-        print("FTL Monitor v3 — single run (Postgres)")
+        log.info("FTL Monitor v3 — single run (Postgres)")
         run_once()
-        print("Run complete.")
+        log.info("Run complete")
     else:
         main()
 

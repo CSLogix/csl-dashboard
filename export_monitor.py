@@ -10,6 +10,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from csl_logging import get_logger
+log = get_logger("export_monitor")
+
 from csl_pg_writer import (pg_update_shipment, pg_archive_shipment,
                           pg_load_all_export_state, pg_set_export_state,
                           pg_delete_export_state, pg_jc_cache_get,
@@ -174,7 +177,7 @@ def _resolve_ssl_export(vessel, carrier, bol=""):
     if bol:
         detected = _ssl_from_bol_prefix(bol)
         if detected:
-            print(f"    Auto-detected SSL from BOL prefix: {bol[:4]} -> {detected}")
+            log.info("Auto-detected SSL from BOL prefix", extra={"bol_prefix": bol[:4], "ssl_line": detected})
             return detected
     return None
 
@@ -217,10 +220,10 @@ def load_ssl_links(creds):
                 ssl_code=row[2].strip()
                 if ssl_name and (url or ssl_code):
                     lookup[ssl_name.lower()]={"url":url,"code":ssl_code}
-        print(f"  Loaded {len(lookup)} SSL link(s) from '{SSL_LINKS_TAB}'")
+        log.info("Loaded SSL links", extra={"count": len(lookup), "tab": SSL_LINKS_TAB})
         return lookup
     except Exception as e:
-        print(f"  WARNING: Could not load SSL Links: {e}")
+        log.warning("Could not load SSL Links", extra={"error": str(e)})
         return {}
 
 def _load_credentials():
@@ -269,10 +272,10 @@ def load_account_lookup(creds):
             if len(row)>=3 and row[0].strip():
                 a,r,e=row[0].strip(),row[1].strip(),row[2].strip()
                 if a and e: lookup[a]={"rep":r,"email":e}
-        print(f"  Loaded {len(lookup)} account(s)")
+        log.info("Loaded accounts", extra={"count": len(lookup)})
         return lookup
     except Exception as e:
-        print(f"  WARNING: {e}"); return {}
+        log.warning("Failed to load account lookup", extra={"error": str(e)}); return {}
 
 def get_account_tabs(sheet,lookup):
     return [ws.title for ws in sheet.worksheets() if ws.title not in SKIP_TABS and ws.title in lookup]
@@ -286,7 +289,7 @@ def get_sheet_hyperlinks(creds,sheet_id,tab_name):
         rows=resp.json()["sheets"][0]["data"][0].get("rowData",[])
         return [[cell.get("hyperlink") for cell in row.get("values",[])] for row in rows]
     except Exception as e:
-        print(f"  WARNING: hyperlink fetch failed: {e}"); return []
+        log.warning("Hyperlink fetch failed", extra={"error": str(e)}); return []
 
 def _parse_date(s):
     s=s.strip()
@@ -330,7 +333,7 @@ def detect_ssl_line(vessel, carrier, ssl_links):
 def jsoncargo_bol_lookup(booking_num, ssl_line):
     cached = _jc_cache_get(f"bol:{booking_num}")
     if cached is not None:
-        print(f"    BOL lookup: cache hit for {booking_num}")
+        log.info("BOL lookup cache hit", extra={"booking": booking_num})
         return cached
     try:
         url=f"{JSONCARGO_BASE}/containers/bol/{booking_num}/"
@@ -340,21 +343,21 @@ def jsoncargo_bol_lookup(booking_num, ssl_line):
         if "data" in data:
             containers=data["data"].get("associated_container_numbers",[])
             if containers:
-                print(f"    BOL lookup: found containers {containers}")
+                log.info("BOL lookup found containers", extra={"booking": booking_num, "containers": containers})
                 if not _is_container_num(containers[0]):
-                    print(f"    BOL lookup: invalid container format: {containers[0]} - skipping")
+                    log.warning("BOL lookup invalid container format", extra={"booking": booking_num, "container": containers[0]})
                 else:
                     _jc_cache_set(f"bol:{booking_num}", containers[0])
                     return containers[0]
-        print(f"    BOL lookup: {data.get('error',{}).get('title','no result')}")
+        log.info("BOL lookup no result", extra={"booking": booking_num, "error": data.get('error',{}).get('title','no result')})
         return None
     except Exception as e:
-        print(f"    BOL lookup error: {e}"); return None
+        log.warning("BOL lookup error", extra={"booking": booking_num, "error": str(e)}); return None
 
 def jsoncargo_container_track(container_num, ssl_line):
     cached = _jc_cache_get(container_num)
     if cached is not None:
-        print(f"    Container track: cache hit for {container_num}")
+        log.info("Container track cache hit", extra={"container": container_num})
         return cached
     try:
         url=f"{JSONCARGO_BASE}/containers/{container_num}/"
@@ -362,14 +365,14 @@ def jsoncargo_container_track(container_num, ssl_line):
                          params={"shipping_line":ssl_line},timeout=20)
         data=resp.json()
         if "error" in data:
-            print(f"    Container track: {data['error'].get('title','error')}")
+            log.info("Container track error response", extra={"container": container_num, "error": data['error'].get('title','error')})
             return None
         events=[]
         raw_events=data.get("data",{}).get("events",[]) or data.get("data",{}).get("moves",[]) or []
         for ev in raw_events:
             desc=(ev.get("description") or ev.get("move") or ev.get("status") or "").lower()
             if desc: events.append(desc)
-        print(f"    Container track: {len(events)} events found")
+        log.info("Container track events found", extra={"container": container_num, "event_count": len(events)})
         gate_in=None
         all_text=" ".join(events)
         for status in GATE_IN_STATUSES:
@@ -379,7 +382,7 @@ def jsoncargo_container_track(container_num, ssl_line):
         _jc_cache_set(container_num, result)
         return result
     except Exception as e:
-        print(f"    Container track error: {e}"); return None
+        log.warning("Container track error", extra={"container": container_num, "error": str(e)}); return None
 
 def _send_email(to,cc,subject,body):
     msg=MIMEMultipart("alternative")
@@ -391,8 +394,8 @@ def _send_email(to,cc,subject,body):
         with smtplib.SMTP(SMTP_HOST,SMTP_PORT) as s:
             s.ehlo();s.starttls();s.login(SMTP_USER,SMTP_PASSWORD)
             s.sendmail(SMTP_USER,rcpt,msg.as_string())
-        print(f"    Email sent to {to}")
-    except Exception as e: print(f"    WARNING: Email failed: {e}")
+        log.info("Email sent", extra={"to": to})
+    except Exception as e: log.warning("Email failed", extra={"to": to, "error": str(e)})
 
 def send_export_alert(tab_name,lookup,alerts):
     if not alerts: return
@@ -416,8 +419,8 @@ def send_export_alert(tab_name,lookup,alerts):
                f'<td {td}>{a["container"]}</td>'
                f'<td {td}>{a["vessel"]}</td>'
                f'<td {td}>{a["booking"]}</td>'
-               f'<td {td}>{a.get("erd") or "\u2014"}</td>'
-               f'<td {td}>{a.get("cutoff") or "\u2014"}</td>'
+               f'<td {td}>{a.get("erd") or chr(8212)}</td>'
+               f'<td {td}>{a.get("cutoff") or chr(8212)}</td>'
                f'<td {td}><b>{alert_text}</b></td>'
                f'</tr>')
     rep_line=f' &mdash; Rep: {rep_name}' if rep_name else ''
@@ -476,8 +479,8 @@ def send_archive_email(tab_name,lookup,job):
           f'<tr><td {tl}>Vessel</td><td {td}>{job["vessel"]}</td></tr>'
           f'<tr><td {tl}>Origin</td><td {td}>{job["origin"]}</td></tr>'
           f'<tr><td {tl}>Destination</td><td {td}>{job["dest"]}</td></tr>'
-          f'<tr><td {tl}>ERD</td><td {td}>{job.get("erd") or "\u2014"}</td></tr>'
-          f'<tr><td {tl}>Cutoff</td><td {td}>{job.get("cutoff") or "\u2014"}</td></tr>'
+          f'<tr><td {tl}>ERD</td><td {td}>{job.get("erd") or chr(8212)}</td></tr>'
+          f'<tr><td {tl}>Cutoff</td><td {td}>{job.get("cutoff") or chr(8212)}</td></tr>'
           f'<tr><td {tl}>Gate In</td><td {td}><b>{job["gate_in_status"]}</b></td></tr>'
           f'</table></div></div>')
     _send_email(rep,cc,subj,body)
@@ -488,11 +491,11 @@ def archive_export_row_pg(job, tab_name):
         pg_archive_shipment(job["efj"])
         sheet_archive_row(job['efj'], tab_name,
                           rep=ACCOUNT_REPS_PG.get(tab_name, {}).get('rep'))
-        print(f"    Archived {job['efj']} (Gate In)")
+        log.info("Archived export row", extra={"efj": job['efj'], "reason": "Gate In"})
         send_archive_email(tab_name, ACCOUNT_REPS_PG, job)
         return True
     except Exception as e:
-        print(f"    WARNING: Archive failed: {e}")
+        log.warning("Archive failed", extra={"efj": job['efj'], "error": str(e)})
         return False
 
 
@@ -515,7 +518,7 @@ def run_once():
     - May call external JsonCargo APIs for lookups and tracking.
     """
     now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
-    print(f"\n[{now_str}] Export poll cycle (Postgres mode)...")
+    log.info("Export poll cycle started", extra={"mode": "Postgres", "timestamp": now_str})
 
     # Ensure tracking state tables exist
     pg_ensure_tracking_tables()
@@ -539,7 +542,7 @@ def run_once():
             """)
             all_loads = cur.fetchall()
     except Exception as exc:
-        print(f"FATAL: Could not read from Postgres: {exc}")
+        log.error("Could not read from Postgres", extra={"error": str(exc)})
         return
     finally:
         if conn is not None:
@@ -553,16 +556,16 @@ def run_once():
         by_account[acct].append(row)
 
     account_tabs = sorted(by_account.keys())
-    print(f"  Loaded {len(all_loads)} active Dray Export load(s) across {len(account_tabs)} account(s)")
+    log.info("Loaded active Dray Export loads", extra={"load_count": len(all_loads), "account_count": len(account_tabs)})
     if not account_tabs:
-        print("  No active export loads found.")
+        log.info("No active export loads found")
         return
 
     state = load_state()
 
     for tab_name in account_tabs:
         loads = by_account[tab_name]
-        print(f"\n  Checking {tab_name}... ({len(loads)} export row(s))")
+        log.info("Checking account", extra={"tab": tab_name, "row_count": len(loads)})
         tab_alerts = []
 
         for row in loads:
@@ -581,7 +584,7 @@ def run_once():
                 continue
 
             key = f"{tab_name}:{efj}:{container}"
-            print(f"\n  -> {efj}|{container} booking={booking} ERD={erd!r} Cutoff={cutoff!r}")
+            log.info("Processing export row", extra={"efj": efj, "container": container, "booking": booking, "erd": erd, "cutoff": cutoff})
 
             prev = state.get(key, {})
             current = {"erd": erd, "cutoff": cutoff, "cutoff_alerted": prev.get("cutoff_alerted", "")}
@@ -592,7 +595,7 @@ def run_once():
 
             alert_reason = _cutoff_alert(cutoff) if cutoff else None
             if alert_reason and current["cutoff_alerted"] == cutoff:
-                print(f"    Cutoff alert already sent for {cutoff} - skipping")
+                log.info("Cutoff alert already sent - skipping", extra={"efj": efj, "cutoff": cutoff})
                 alert_reason = None
 
             if changed or alert_reason:
@@ -612,15 +615,15 @@ def run_once():
             # Resolve SSL line
             ssl_line = _resolve_ssl_export(vessel, carrier, booking)
             if not ssl_line:
-                print(f"    SSL line not detected for {vessel}/{carrier}/{booking} - skipping API")
+                log.info("SSL line not detected - skipping API", extra={"efj": efj, "vessel": vessel, "carrier": carrier, "booking": booking})
                 continue
 
             # Check if container column has booking# instead of container#
             if not _is_container_num(container):
-                print(f"    Col C is booking# - calling BOL lookup...")
+                log.info("Col C is booking# - calling BOL lookup", extra={"efj": efj, "booking": booking})
                 found_container = jsoncargo_bol_lookup(booking, ssl_line)
                 if found_container:
-                    print(f"    Container# found: {found_container}")
+                    log.info("Container# found", extra={"efj": efj, "container": found_container})
                     # Update container in Postgres
                     pg_update_shipment(efj, container=found_container,
                                        account=tab_name, move_type="Dray Export")
@@ -631,16 +634,16 @@ def run_once():
                     pg_update_shipment(efj, bot_notes=f"Container# assigned: {found_container} - {today}")
                     container = found_container
                 else:
-                    print(f"    No container# yet for {efj}")
+                    log.info("No container# yet", extra={"efj": efj})
                     continue
 
-            print(f"    Tracking container# {container}...")
+            log.info("Tracking container", extra={"efj": efj, "container": container})
             track = jsoncargo_container_track(container, ssl_line)
             if not track:
-                print(f"    No tracking data for {container}")
+                log.info("No tracking data", extra={"efj": efj, "container": container})
                 continue
             if track["gate_in"]:
-                print(f"    GATE IN: {track['gate_in']} - archiving")
+                log.info("Gate in detected - archiving", extra={"efj": efj, "container": container, "gate_in": track['gate_in']})
                 job = {
                     "efj": efj, "container": container, "booking": booking,
                     "vessel": vessel, "origin": origin, "dest": dest,
@@ -650,30 +653,30 @@ def run_once():
                 if ok:
                     pg_delete_export_state(key)
             else:
-                print(f"    No gate-in yet for {container}")
+                log.info("No gate-in yet", extra={"efj": efj, "container": container})
 
         if tab_alerts:
-            print(f"\n  Sending alert for {len(tab_alerts)} row(s)...")
+            log.info("Sending alert", extra={"tab": tab_name, "alert_count": len(tab_alerts)})
             send_export_alert(tab_name, ACCOUNT_REPS_PG, tab_alerts)
         else:
-            print(f"  No alerts for {tab_name}")
+            log.info("No alerts", extra={"tab": tab_name})
 
     # State already persisted per-row to Postgres via pg_set_export_state()
-    print("Export poll complete.")
+    log.info("Export poll complete")
 
 
 def main():
-    print("Export Monitor v3 (Postgres mode) started.")
+    log.info("Export Monitor v3 started", extra={"mode": "Postgres"})
     while True:
         run_once()
-        print("  Sleeping 60 min...")
+        log.info("Sleeping 60 min")
         time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
     import sys
     if "--once" in sys.argv:
-        print("Export Monitor v3 — single run (Postgres)")
+        log.info("Export Monitor v3 - single run", extra={"mode": "Postgres"})
         run_once()
-        print("Run complete.")
+        log.info("Run complete")
     else:
         main()

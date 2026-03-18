@@ -14,7 +14,6 @@ Designed to run as cron or systemd service.
 
 import argparse
 import json
-import logging
 from date_normalizer import clean_date
 import os
 import re
@@ -36,11 +35,9 @@ import database as db
 
 from csl_sheet_writer import _fmt_status, _fmt_eta, _tab_cols, TAB_COL_OVERRIDES
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [sheet_sync] %(message)s",
-)
-log = logging.getLogger("sheet_sync")
+from csl_logging import get_logger
+
+log = get_logger("sheet_sync")
 
 CREDS_FILE = "/root/csl-credentials.json"
 BOVIET_SHEET_ID = "1OP-ZDaMCOsPxcxezHSPfN5ftUXlUcOjFgsfCQgDp3wI"

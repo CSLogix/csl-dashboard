@@ -7,7 +7,6 @@ Runs at 7:00 AM ET Mon-Fri via cron with --once flag.
 
 import os
 import sys
-import logging
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -84,11 +83,9 @@ ACCOUNT_REP_LOWER = {k.lower(): v for k, v in ACCOUNT_REP_MAP.items()}
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [DIGEST] %(levelname)s %(message)s",
-)
-log = logging.getLogger("inbox_digest")
+from csl_logging import get_logger
+
+log = get_logger("inbox_digest")
 
 # ---------------------------------------------------------------------------
 # DB helpers

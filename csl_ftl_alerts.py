@@ -9,7 +9,6 @@ import json
 import os
 import re
 import smtplib
-import logging
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -18,7 +17,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-log = logging.getLogger("csl_ftl_alerts")
+from csl_logging import get_logger
+
+log = get_logger("csl_ftl_alerts")
 
 # ── Config ──────────────────────────────────────────────────────────────────────
 SENT_ALERTS_FILE = "/root/csl-bot/ftl_sent_alerts.json"
