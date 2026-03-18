@@ -503,7 +503,26 @@ async def api_warehouse_extract(request: Request):
 async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Query(default=None),
                               destination: str = Query(default=None),
                               move_type: str = Query(default=None)):
-    with db.get_cursor() as cur:
+    """
+                              List lane rates and recent rate quotes filtered by optional criteria.
+                              
+                              Returns a combined list of lane rate records and recent rate quotes matching the provided filters, with normalized fields and source-prefixed IDs.
+                              
+                              Parameters:
+                                  port (str | None): Partial match against lane_rates.port or rate_quotes.origin.
+                                  carrier (str | None): Partial match against carrier_name.
+                                  destination (str | None): Partial match against destination.
+                                  move_type (str | None): Exact match for move_type; pass "all" to disable move_type filtering.
+                              
+                              Returns:
+                                  dict: JSON object with:
+                                      - lane_rates (list): Array of rate objects (both lane_rates and rate_quotes) including derived fields
+                                        `dest_city`, `dest_state`, `origin_city`, and `origin_state`. Each lane_rates record has an `id`
+                                        prefixed with "lr-<id>" and each rate_quote has `id` prefixed with "rq-<id>". Rate quote entries
+                                        include an `_source` field indicating their origin.
+                                      - total (int): Number of returned records.
+                              """
+                              with db.get_cursor() as cur:
         # Query lane_rates table
         clauses, params = [], []
         if port:
@@ -519,7 +538,12 @@ async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Qu
             clauses.append("move_type = %s")
             params.append(move_type)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        cur.execute(f"SELECT * FROM lane_rates {where} ORDER BY port, destination, total ASC NULLS LAST LIMIT 1000", params)
+        cur.execute(f"""SELECT *,
+            TRIM(SPLIT_PART(destination, ',', 1)) AS dest_city,
+            TRIM(SPLIT_PART(TRIM(SPLIT_PART(destination, ',', 2)), ' ', 1)) AS dest_state,
+            TRIM(SPLIT_PART(port, ',', 1)) AS origin_city,
+            TRIM(SPLIT_PART(TRIM(SPLIT_PART(port, ',', 2)), ' ', 1)) AS origin_state
+            FROM lane_rates {where} ORDER BY port, destination, total ASC NULLS LAST LIMIT 1000""", params)
         rows = [_serialize_row(r) for r in cur.fetchall()]
 
         # Also include rate_quotes (from manual intake, emails, etc.)
@@ -550,7 +574,11 @@ async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Qu
                    NULL::numeric AS residential, NULL::numeric AS all_in_total,
                    move_type, miles, quote_date AS created_at,
                    source, status, NULL::int AS rank,
-                   NULL AS equipment_type, NULL AS notes
+                   NULL AS equipment_type, NULL AS notes,
+                   TRIM(SPLIT_PART(destination, ',', 1)) AS dest_city,
+                   TRIM(SPLIT_PART(TRIM(SPLIT_PART(destination, ',', 2)), ' ', 1)) AS dest_state,
+                   TRIM(SPLIT_PART(origin, ',', 1)) AS origin_city,
+                   TRIM(SPLIT_PART(TRIM(SPLIT_PART(origin, ',', 2)), ' ', 1)) AS origin_state
             FROM rate_quotes {rq_where}
             ORDER BY quote_date DESC NULLS LAST LIMIT 500
         """, rq_params)

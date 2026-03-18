@@ -22,7 +22,7 @@ export const GLOBAL_STYLES = `
   @keyframes unbilled-pulse { 0%, 100% { box-shadow: 0 0 8px rgba(249,115,22,0.15); border-color: rgba(249,115,22,0.4); } 50% { box-shadow: 0 0 20px rgba(249,115,22,0.3); border-color: rgba(249,115,22,0.7); } }
   @keyframes row-highlight { 0% { background: rgba(0,212,170,0.25); } 100% { background: transparent; } }
   .row-highlight-pulse { animation: row-highlight 3s ease-out forwards; }
-  .glass { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: var(--radius-card); box-shadow: var(--shadow-card); position: relative; }
+  .glass { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: var(--radius-card); box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255,255,255,0.05); position: relative; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
   .glass::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent); border-radius: var(--radius-card) var(--radius-card) 0 0; pointer-events: none; }
   .glass-strong { background: var(--bg-elevated); border: 1px solid var(--border-emphasis); border-radius: var(--radius-card); box-shadow: var(--shadow-elevated); position: relative; }
   .glass-strong::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent); border-radius: var(--radius-card) var(--radius-card) 0 0; pointer-events: none; }
