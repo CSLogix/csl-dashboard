@@ -587,6 +587,7 @@ export default function DispatchView({
                   </th>
                 );
               })}
+              <th style={{ padding: "7px 4px", width: 32, borderBottom: "1px solid rgba(255,255,255,0.08)", position: "sticky", top: 0, zIndex: 2, background: "#0D1119" }} />
             </tr>
           </thead>
           <tbody>
@@ -619,14 +620,6 @@ export default function DispatchView({
                         onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,184,212,0.06)"; e.currentTarget.style.borderColor = "rgba(0,184,212,0.12)"; e.currentTarget.style.transform = "scale(1)"; }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                           <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M14 9l3 3-3 3" />
-                        </svg>
-                      </button>
-                      <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmEfj(s.efj); }} title="Delete load"
-                        style={{ background: "transparent", border: "1px solid transparent", color: "#5A6478", cursor: "pointer", padding: "3px 4px", borderRadius: 6, lineHeight: 1, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: 0.5 }}
-                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.1)"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.color = "#EF4444"; e.currentTarget.style.opacity = "1"; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.color = "#5A6478"; e.currentTarget.style.opacity = "0.5"; }}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                         </svg>
                       </button>
                     </div>
@@ -863,6 +856,16 @@ export default function DispatchView({
                       <span style={{ fontSize: 11, color: s.notes ? "#F0F2F5" : "#3D4557", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", cursor: "text" }} title={s.notes || ""}>{s.notes || "\u2014"}</span>
                     )}
                   </td>}
+                  <td style={{ padding: "5px 6px", width: 32, textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                    <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmEfj(s.efj); }} title="Delete load"
+                      style={{ background: "transparent", border: "1px solid transparent", color: "#5A6478", cursor: "pointer", padding: "3px 4px", borderRadius: 6, lineHeight: 1, transition: "all 0.15s", display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: 0.4 }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.1)"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.color = "#EF4444"; e.currentTarget.style.opacity = "1"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.color = "#5A6478"; e.currentTarget.style.opacity = "0.4"; }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                    </button>
+                  </td>
                 </tr>
               );
             })}
