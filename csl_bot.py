@@ -113,40 +113,14 @@ def _get_jsoncargo_key():
     return os.environ.get("JSONCARGO_API_KEY", "")
 JSONCARGO_BASE = "https://api.jsoncargo.com/api/v1"
 
-# -- JsonCargo API response cache (reduces monthly API calls by ~70%%) --
-import json as _json
-import time as _time_mod
-
-_JSONCARGO_CACHE_FILE = "/root/csl-bot/jsoncargo_cache.json"
+# -- JsonCargo API response cache (Postgres-backed) --
 _JSONCARGO_CACHE_TTL = 6 * 3600
 
-def _load_jc_cache():
-    try:
-        with open(_JSONCARGO_CACHE_FILE, "r") as f:
-            return _json.load(f)
-    except Exception:
-        return {}
-
-def _save_jc_cache(cache):
-    try:
-        with open(_JSONCARGO_CACHE_FILE, "w") as f:
-            _json.dump(cache, f)
-    except Exception as e:
-        print(f"    Cache save error: {e}")
-
 def _jc_cache_get(container_num):
-    cache = _load_jc_cache()
-    entry = cache.get(container_num)
-    if entry and (_time_mod.time() - entry.get("ts", 0)) < _JSONCARGO_CACHE_TTL:
-        return entry.get("data")
-    return None
+    return pg_jc_cache_get(container_num, _JSONCARGO_CACHE_TTL)
 
 def _jc_cache_set(container_num, data):
-    cache = _load_jc_cache()
-    cache[container_num] = {"ts": _time_mod.time(), "data": data}
-    cutoff = _time_mod.time() - 48 * 3600
-    cache = {k: v for k, v in cache.items() if v.get("ts", 0) > cutoff}
-    _save_jc_cache(cache)
+    pg_jc_cache_set(container_num, data)
 
 
 _SSL_LINE_MAP = {
@@ -433,7 +407,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from csl_pg_writer import pg_update_shipment, pg_archive_shipment
+from csl_pg_writer import (pg_update_shipment, pg_archive_shipment,
+                          pg_load_all_import_state, pg_set_import_state,
+                          pg_jc_cache_get, pg_jc_cache_set,
+                          pg_ensure_tracking_tables)
 from csl_sheet_writer import sheet_update_import, sheet_archive_row
 try:
     from terminal_nola import check_nola_containers as _check_nola
@@ -1748,7 +1725,11 @@ def dray_import_workflow(browser, ws, sheet_row, url, bol, container,
 # ─────────────────────────────────────────────
 
 def load_last_check():
-    """Return the previously saved state dict, keyed by tab:container."""
+    """Return the previously saved state dict from Postgres, keyed by tab:container."""
+    state = pg_load_all_import_state()
+    if state:
+        return state
+    # Fallback: try legacy JSON file if PG returned empty (first run after migration)
     if os.path.exists(LAST_CHECK_FILE):
         try:
             with open(LAST_CHECK_FILE) as f:
@@ -1756,20 +1737,6 @@ def load_last_check():
         except Exception as exc:
             print(f"  WARNING: Could not read {LAST_CHECK_FILE}: {exc}")
     return {}
-
-
-def save_last_check(data):
-    """Persist the current state dict to disk (atomic write)."""
-    try:
-        import shutil
-        if os.path.exists(LAST_CHECK_FILE):
-            shutil.copy2(LAST_CHECK_FILE, LAST_CHECK_FILE + ".bak")
-        tmp = LAST_CHECK_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, LAST_CHECK_FILE)
-    except Exception as exc:
-        print(f"  WARNING: Could not save {LAST_CHECK_FILE}: {exc}")
 
 
 # ─────────────────────────────────────────────
@@ -2114,6 +2081,9 @@ def run_once(args):
     now_str = _time.strftime("%Y-%m-%d %H:%M ET", _time.localtime())
     print(f"\n[{now_str}] Dray Import cycle (Postgres mode)...")
 
+    # Ensure tracking state tables exist
+    pg_ensure_tracking_tables()
+
     # ── Read active dray import loads from Postgres ──────────────────────────
     try:
         conn = _pg_connect()
@@ -2301,6 +2271,8 @@ def run_once(args):
                     "status":      status or "",
                 }
                 new_check[container_key] = current
+                # Persist state to Postgres per-row
+                pg_set_import_state(container_key, **current)
 
                 # ── Write to Postgres (primary) ──────────────────────────────
                 if job["efj"] and not args.dry_run:
@@ -2468,7 +2440,7 @@ def run_once(args):
 
         browser.close()
 
-    save_last_check(new_check)
+    # State already persisted per-row to Postgres via pg_set_import_state()
     print("\nRun complete.")
 
 

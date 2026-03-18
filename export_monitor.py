@@ -10,7 +10,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from csl_pg_writer import pg_update_shipment, pg_archive_shipment
+from csl_pg_writer import (pg_update_shipment, pg_archive_shipment,
+                          pg_load_all_export_state, pg_set_export_state,
+                          pg_delete_export_state, pg_jc_cache_get,
+                          pg_jc_cache_set, pg_ensure_tracking_tables)
 from csl_sheet_writer import sheet_update_export, sheet_archive_row
 
 SHEET_ID=os.environ["SHEET_ID"]
@@ -33,11 +36,10 @@ GATE_IN_STATUSES=["full load on rail for export","gate in full","full in","recei
 JSONCARGO_API_KEY=os.environ["JSONCARGO_API_KEY"]
 JSONCARGO_BASE="https://api.jsoncargo.com/api/v1"
 
-# -- JsonCargo API response cache (reduces monthly API calls by ~70%%) --
+# -- JsonCargo API response cache (Postgres-backed) --
 import json as _json
 import time as _time_mod
 
-_JSONCARGO_CACHE_FILE = "/root/csl-bot/jsoncargo_cache.json"
 _JSONCARGO_CACHE_TTL = 6 * 3600
 
 # ── Postgres migration: hardcoded lookups ────────────────────────────────
@@ -122,33 +124,11 @@ def _resolve_ssl_export(vessel, carrier):
     return None
 
 
-def _load_jc_cache():
-    try:
-        with open(_JSONCARGO_CACHE_FILE, "r") as f:
-            return _json.load(f)
-    except Exception:
-        return {}
-
-def _save_jc_cache(cache):
-    try:
-        with open(_JSONCARGO_CACHE_FILE, "w") as f:
-            _json.dump(cache, f)
-    except Exception as e:
-        print(f"    Cache save error: {e}")
-
 def _jc_cache_get(container_num):
-    cache = _load_jc_cache()
-    entry = cache.get(container_num)
-    if entry and (_time_mod.time() - entry.get("ts", 0)) < _JSONCARGO_CACHE_TTL:
-        return entry.get("data")
-    return None
+    return pg_jc_cache_get(container_num, _JSONCARGO_CACHE_TTL)
 
 def _jc_cache_set(container_num, data):
-    cache = _load_jc_cache()
-    cache[container_num] = {"ts": _time_mod.time(), "data": data}
-    cutoff = _time_mod.time() - 48 * 3600
-    cache = {k: v for k, v in cache.items() if v.get("ts", 0) > cutoff}
-    _save_jc_cache(cache)
+    pg_jc_cache_set(container_num, data)
 
 SSL_LINKS_TAB="SSL Links"
 
@@ -178,22 +158,16 @@ def _load_credentials():
     return creds
 
 def load_state():
+    """Load export tracking state from Postgres."""
+    state = pg_load_all_export_state()
+    if state:
+        return state
+    # Fallback: try legacy JSON file if PG returned empty (first run after migration)
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE) as f: return json.load(f)
         except: pass
     return {}
-
-def save_state(data):
-    try:
-        import shutil
-        if os.path.exists(STATE_FILE):
-            shutil.copy2(STATE_FILE, STATE_FILE + '.bak')
-        tmp = STATE_FILE + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, STATE_FILE)
-    except Exception as e: print(f'  WARNING: {e}')
 
 def load_account_lookup(creds):
     try:
@@ -432,6 +406,9 @@ def run_once():
     now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
     print(f"\n[{now_str}] Export poll cycle (Postgres mode)...")
 
+    # Ensure tracking state tables exist
+    pg_ensure_tracking_tables()
+
     # ── Read active dray export loads from Postgres ──────────────────────────
     try:
         conn = _pg_connect()
@@ -468,7 +445,6 @@ def run_once():
         return
 
     state = load_state()
-    new_state = dict(state)
 
     for tab_name in account_tabs:
         loads = by_account[tab_name]
@@ -498,7 +474,7 @@ def run_once():
             changed = [f.upper() for f in ("erd", "cutoff") if current[f] != prev.get(f, "")]
             if "CUTOFF" in changed:
                 current["cutoff_alerted"] = ""
-            new_state[key] = current
+            pg_set_export_state(key, **current)
 
             alert_reason = _cutoff_alert(cutoff) if cutoff else None
             if alert_reason and current["cutoff_alerted"] == cutoff:
@@ -508,7 +484,7 @@ def run_once():
             if changed or alert_reason:
                 if alert_reason:
                     current["cutoff_alerted"] = cutoff
-                    new_state[key] = current
+                    pg_set_export_state(key, **current)
                 tab_alerts.append({
                     "efj": efj, "container": container, "vessel": vessel,
                     "booking": booking, "erd": erd, "cutoff": cutoff,
@@ -558,7 +534,7 @@ def run_once():
                 }
                 ok = archive_export_row_pg(job, tab_name)
                 if ok:
-                    new_state.pop(key, None)
+                    pg_delete_export_state(key)
             else:
                 print(f"    No gate-in yet for {container}")
 
@@ -568,7 +544,7 @@ def run_once():
         else:
             print(f"  No alerts for {tab_name}")
 
-    save_state(new_state)
+    # State already persisted per-row to Postgres via pg_set_export_state()
     print("Export poll complete.")
 
 
