@@ -1,0 +1,47 @@
+name: Deploy Bot Scripts
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'dashboard/**'
+      - '*.md'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull latest code on VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          script: |
+            cd /root/csl-bot
+            git fetch origin main
+            git reset --hard origin/main
+
+      - name: Install any new dependencies
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          script: |
+            cd /root/csl-bot
+            pip install -r requirements.txt --quiet 2>/dev/null || true
+
+      - name: Restart services
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          script: |
+            systemctl restart csl-ftl csl-export csl-webhook csl-upload
+            sleep 2
+            systemctl is-active csl-ftl csl-export csl-webhook csl-upload
