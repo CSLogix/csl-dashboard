@@ -53,7 +53,7 @@ SENT_ALERTS_FILE    = "/root/csl-bot/ftl_sent_alerts.json"
 TRACKING_CACHE_FILE = "/root/csl-bot/ftl_tracking_cache.json"
 
 ALERT_CUTOFF_DATE   = "2026-03-01"
-POLL_INTERVAL       = 30 * 60  # seconds
+POLL_INTERVAL       = 10 * 60  # seconds
 
 # ── SMTP / email ─────────────────────────────────────────────────────────────────
 
@@ -396,6 +396,61 @@ def run_once():
 
     sent = load_sent_alerts()
     tracking_cache = load_tracking_cache()
+
+    # ── Stale tracking detection ─────────────────────────────────────
+    # Auto-flag loads with no ping or event in >2 hours as unresponsive.
+    STALE_THRESHOLD_SECS = 2 * 60 * 60  # 2 hours
+    _now_utc = datetime.now(ZoneInfo("America/New_York"))
+    for _sk, _se in list(tracking_cache.items()):
+        _se_status = (_se.get("status") or "").strip().lower()
+        # Skip loads already delivered/terminal or already unresponsive
+        if _se_status in ("delivered", "tracking completed successfully",
+                          "billed/closed", "driver phone unresponsive", ""):
+            continue
+        # Need at least one prior ping or event to detect staleness
+        _last_activity = _se.get("last_ping_at") or _se.get("last_event_at") or _se.get("last_scraped")
+        if not _last_activity:
+            continue
+        try:
+            # Parse "YYYY-MM-DD HH:MM:SS ET" format
+            _la_str = _last_activity.rstrip()
+            if _la_str.endswith(" ET"):
+                _la_str = _la_str[:-3]
+            _la_dt = datetime.strptime(_la_str, "%Y-%m-%d %H:%M:%S")
+            _la_dt = _la_dt.replace(tzinfo=ZoneInfo("America/New_York"))
+            _elapsed = (_now_utc - _la_dt).total_seconds()
+            if _elapsed > STALE_THRESHOLD_SECS:
+                _se_efj = _se.get("efj", _sk)
+                _se_load = _se.get("load_num", "")
+                log.warning("Stale tracking detected — no ping/event in %.0f min",
+                            _elapsed / 60,
+                            extra={"efj": _se_efj, "last_activity": _last_activity})
+                _se["status"] = "Driver Phone Unresponsive"
+                _se["stale_flagged_at"] = _now_utc.strftime("%Y-%m-%d %H:%M:%S ET")
+                tracking_cache[_sk] = _se
+                # Find account for this load from PG data
+                _stale_acct = ""
+                for _row in all_loads:
+                    if (_row["efj"] or "").strip() == _se_efj:
+                        _stale_acct = _row.get("account", "")
+                        break
+                if _stale_acct:
+                    _rep_info = ACCOUNT_REPS_PG.get(_stale_acct, {})
+                    _rep_email = _rep_info.get("email", EMAIL_FALLBACK)
+                    check_unresponsive(
+                        _se_efj, _se_load, "Driver Phone Unresponsive",
+                        _stale_acct, "", _se.get("driver_phone", ""),
+                        "", _rep_email, tracking_cache,
+                    )
+                # Update PG status
+                try:
+                    from csl_pg_writer import pg_update_shipment as _pg_stale_up
+                    _pg_stale_up(_se_efj, status="Driver Phone Unresponsive",
+                                 bot_notes=f"Stale tracking — no ping in {int(_elapsed/60)}min")
+                except Exception as _pg_exc:
+                    log.warning("Stale PG update failed", extra={"efj": _se_efj, "error": str(_pg_exc)})
+        except (ValueError, TypeError):
+            pass  # Unparseable timestamp — skip
 
     for tab_name in account_tabs:
         loads = by_account[tab_name]

@@ -153,6 +153,155 @@ def send_delivery_email(shipment: dict):
 
 TRACKING_CACHE_FILE = "/root/csl-bot/ftl_tracking_cache.json"
 
+
+class TrackingCache:
+    """In-memory tracking cache with debounced disk flush.
+
+    Eliminates synchronous file I/O from the webhook hot path.
+    The cache loads from disk on startup and flushes changes every 2 seconds
+    so that external processes (ftl_monitor.py) still see updates.
+    """
+
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+        self._lock = threading.Lock()
+        self._dirty = False
+        self._data: dict = {}
+        # Load from disk
+        try:
+            with open(TRACKING_CACHE_FILE) as f:
+                self._data = json.load(f)
+            log.info("TrackingCache loaded %d entries from disk", len(self._data))
+        except (FileNotFoundError, json.JSONDecodeError):
+            log.info("TrackingCache starting empty (file not found or invalid)")
+        # Start background flush thread
+        self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
+        self._flush_thread.start()
+
+    def get_all(self) -> dict:
+        """Return a shallow copy of the entire cache."""
+        with self._lock:
+            return dict(self._data)
+
+    def get(self, key: str) -> dict | None:
+        """Return a cache entry by key, or None."""
+        with self._lock:
+            entry = self._data.get(key)
+            return dict(entry) if entry else None
+
+    def set(self, key: str, entry: dict):
+        """Set a cache entry and mark dirty for flush."""
+        with self._lock:
+            self._data[key] = entry
+            self._dirty = True
+
+    def update_entry(self, key: str, updates: dict):
+        """Merge updates into an existing cache entry."""
+        with self._lock:
+            if key in self._data:
+                self._data[key].update(updates)
+                self._dirty = True
+
+    def find_entry(self, load_ref: str) -> tuple[str | None, dict | None]:
+        """Find a cache entry by EFJ, load_num, mp_load_id, or key.
+        Returns (matched_key, entry_copy) or (None, None).
+        """
+        with self._lock:
+            efj_clean = load_ref.replace("EFJ", "").strip()
+            for key, entry in self._data.items():
+                efj = entry.get("efj", "")
+                load_num = entry.get("load_num", "")
+                mp_load_id = entry.get("mp_load_id", "")
+                if (efj == load_ref or efj == efj_clean or
+                        load_num == load_ref or mp_load_id == load_ref or
+                        key == efj_clean):
+                    return key, dict(entry)
+            # Suffix-stripped fallback (LAX1260308015-1 -> LAX1260308015)
+            if "-" in load_ref:
+                base_ref = load_ref.rsplit("-", 1)[0]
+                for key, entry in self._data.items():
+                    if base_ref in (entry.get("efj", ""), entry.get("load_num", ""),
+                                    entry.get("mp_load_id", ""), key):
+                        return key, dict(entry)
+            return None, None
+
+    def set_dirty(self):
+        """Mark cache as needing a flush."""
+        with self._lock:
+            self._dirty = True
+
+    def flush_now(self):
+        """Force an immediate write to disk."""
+        self._do_flush()
+
+    def _flush_loop(self):
+        """Background thread: flush to disk every 2 seconds if dirty."""
+        while True:
+            _time.sleep(2)
+            if self._dirty:
+                self._do_flush()
+
+    def _do_flush(self):
+        with self._lock:
+            if not self._dirty:
+                return
+            data_copy = dict(self._data)
+            self._dirty = False
+        try:
+            tmp_path = TRACKING_CACHE_FILE + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(data_copy, f, indent=2)
+            os.replace(tmp_path, TRACKING_CACHE_FILE)
+        except Exception as e:
+            log.warning("TrackingCache flush failed: %s", e)
+
+
+# Global singleton — initialized on first import
+tracking_cache = TrackingCache()
+
+
+# ── SSE broadcast for real-time dashboard updates ──
+
+import asyncio as _asyncio
+
+_sse_clients: set[_asyncio.Queue] = set()
+_sse_lock = threading.Lock()
+
+
+def sse_add_client(queue: _asyncio.Queue):
+    with _sse_lock:
+        _sse_clients.add(queue)
+
+
+def sse_remove_client(queue: _asyncio.Queue):
+    with _sse_lock:
+        _sse_clients.discard(queue)
+
+
+def broadcast_tracking_update(efj: str, data: dict):
+    """Push a tracking update to all connected SSE clients."""
+    event_data = {"efj": efj, **data}
+    event_json = json.dumps(event_data)
+    with _sse_lock:
+        stale = []
+        for q in _sse_clients:
+            try:
+                q.put_nowait(event_json)
+            except Exception:
+                stale.append(q)
+        for q in stale:
+            _sse_clients.discard(q)
+
 _MP_PROGRESS_ORDER = [
     "Driver Assigned", "Ready To Track", "Arrived At Origin",
     "Departed Origin", "At Delivery", "Delivered",
@@ -172,11 +321,8 @@ _STATUS_TO_STEP = {
 
 
 def _read_tracking_cache() -> dict:
-    try:
-        with open(TRACKING_CACHE_FILE) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    """Return tracking cache data (now served from in-memory singleton)."""
+    return tracking_cache.get_all()
 
 
 def _find_tracking_entry(cache: dict, efj: str) -> dict:
