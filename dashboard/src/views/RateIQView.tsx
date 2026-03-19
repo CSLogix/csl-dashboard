@@ -39,6 +39,7 @@ export default function RateIQView() {
   // ── View state ──
   const [view, setView] = useState("browse"); // browse | detail | intake | build-quote | scorecard | directory | history | oog | ftl-quote
   const [selectedLane, setSelectedLane] = useState(null); // { origin, destination }
+  const [quotePrefillKey, setQuotePrefillKey] = useState(0); // increment to force QuoteBuilder remount with new prefill
 
   // ── Data state ──
   const [data, setData] = useState(null);
@@ -932,7 +933,6 @@ export default function RateIQView() {
           <div style={{ display: "flex", gap: 6 }}>
             {[
               { key: "ftl-quote", label: "FTL Quote", icon: "🚛" },
-              { key: "intake", label: "Rate Intake", icon: "📥" },
               { key: "oog", label: "OOG IQ", icon: "📦" },
               { key: "directory", label: `Directory (${dirCarriers.length})`, icon: "📖" },
               { key: "scorecard", label: "Scorecard", icon: "🏆" },
@@ -1758,11 +1758,45 @@ export default function RateIQView() {
   }
 
   // ═════════════════════════════════════════════════════════════
-  // BUILD QUOTE VIEW (from lane detail)
+  // BUILD QUOTE VIEW — Single-pane 65/35 grid (Quote Builder + Intake Sidebar)
   // ═════════════════════════════════════════════════════════════
   if (view === "build-quote") {
+    const handleApplyToQuote = () => {
+      if (!intakePreview) return;
+      // Build prefill from extracted intake data
+      const newPrefill = {
+        origin: intakePreview.origin || selectedLane?.origin || "",
+        destination: intakePreview.destination || selectedLane?.destination || "",
+        carrier: intakePreview.carrier_name || "",
+        linehaul: (intakePreview.linehaul_items || []).map(item => ({
+          description: item.description || "",
+          rate: item.rate || "",
+        })),
+        accessorials: {},
+      };
+      // Map accessorials from extracted data
+      if (intakePreview.accessorials?.length) {
+        for (const acc of intakePreview.accessorials) {
+          const key = (acc.charge || "").toLowerCase();
+          if (key.includes("storage")) newPrefill.accessorials.storage = acc.rate;
+          else if (key.includes("detention")) newPrefill.accessorials.detention = acc.rate;
+          else if (key.includes("chassis")) newPrefill.accessorials.chassis_split = acc.rate;
+          else if (key.includes("overweight")) newPrefill.accessorials.overweight = acc.rate;
+        }
+      }
+      // If no linehaul items but a rate_amount exists, create one
+      if (!newPrefill.linehaul.length && intakePreview.rate_amount) {
+        newPrefill.linehaul = [{ description: intakePreview.shipment_type || "Dray", rate: String(intakePreview.rate_amount) }];
+      }
+      setSelectedLane(newPrefill);
+      setQuotePrefillKey(k => k + 1); // Force QuoteBuilder remount
+      // Also save the rate to the database
+      handleIntakeSave();
+    };
+
     return (
       <div style={{ padding: "0 24px 24px" }}>
+        {/* Header */}
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
           <button onClick={() => setView(selectedLane ? "detail" : "browse")}
             style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 16, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }}>
@@ -1771,8 +1805,213 @@ export default function RateIQView() {
           <h2 style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", margin: 0 }}>Build Quote</h2>
           {selectedLane && <span style={{ fontSize: 12, color: "#5A6478" }}>{selectedLane.origin} → {selectedLane.destination}</span>}
         </div>
-        <div style={{ height: "calc(100vh - 180px)" }}>
-          <QuoteBuilder prefill={selectedLane || undefined} />
+
+        {/* 65 / 35 Grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 400px", gap: 20, height: "calc(100vh - 180px)" }}>
+
+          {/* ─── LEFT: Quote Builder (65%) ─── */}
+          <div style={{ overflow: "auto", minWidth: 0 }}>
+            <QuoteBuilder key={quotePrefillKey} prefill={selectedLane || undefined} />
+
+            {/* Lane Intelligence — show when origin/dest are set */}
+            {selectedLane?.origin && selectedLane?.destination && laneResults.length > 0 && (
+              <div style={{ marginTop: 20, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 10 }}>Lane Intelligence — {selectedLane.origin} → {selectedLane.destination}</div>
+                <CarrierRateTable
+                  laneResults={laneResults}
+                  laneSearching={laneSearching}
+                  searchOrigin={selectedLane.origin}
+                  searchDest={selectedLane.destination}
+                  onEdit={null}
+                  editingId={null}
+                  editingField={null}
+                  editingValue=""
+                  onEditChange={() => {}}
+                  onEditSave={() => {}}
+                  onEditCancel={() => {}}
+                />
+                {marketBenchmark && (
+                  <div style={{ marginTop: 12 }}>
+                    <MarketBenchmarkCard benchmark={marketBenchmark} />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ─── RIGHT: Intake Sidebar (35% fixed) ─── */}
+          <div style={{ overflow: "auto", borderLeft: "1px solid rgba(255,255,255,0.06)", paddingLeft: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#F0F2F5", marginBottom: 2, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Rate Intake</div>
+              <div style={{ fontSize: 10, color: "#5A6478" }}>Drop carrier emails, PDFs, or screenshots</div>
+            </div>
+
+            {/* Hidden file inputs */}
+            <input ref={intakeFileRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.msg,.eml,.html,.htm,.txt" style={{ display: "none" }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) { setIntakeFile(f); setIntakeResult(null); } e.target.value = ""; }} />
+
+            {/* Dropzone */}
+            <div style={{ borderRadius: 10, padding: 20,
+              border: `2px dashed ${intakeDragOver ? "rgba(0,212,170,0.5)" : "rgba(255,255,255,0.08)"}`,
+              background: intakeDragOver ? "rgba(0,212,170,0.04)" : "rgba(255,255,255,0.015)",
+              textAlign: "center", transition: "all 0.2s", cursor: "pointer", flexShrink: 0 }}
+              onClick={() => intakeFileRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); e.stopPropagation(); setIntakeDragOver(true); }}
+              onDragLeave={() => setIntakeDragOver(false)}
+              onDrop={e => {
+                e.preventDefault(); e.stopPropagation(); setIntakeDragOver(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) { setIntakeFile(file); setIntakeResult(null); setMarketRateResult(null); return; }
+                const text = e.dataTransfer.getData("text/plain");
+                if (text) { setIntakeText(text); }
+              }}>
+              <div style={{ fontSize: 24, marginBottom: 4, opacity: 0.3 }}>📎</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8" }}>Drop file here</div>
+              <div style={{ fontSize: 10, color: "#5A6478", marginTop: 2 }}>.msg / .eml / PDF / screenshot</div>
+            </div>
+
+            {/* File badge */}
+            {intakeFile && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderRadius: 8, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.15)", fontSize: 10 }}>
+                <span style={{ color: "#34d399", fontWeight: 700 }}>File:</span>
+                <span style={{ color: "#C8D0DC", fontFamily: "'JetBrains Mono', monospace", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{intakeFile.name}</span>
+                <button onClick={() => setIntakeFile(null)} style={{ fontSize: 9, color: "#f87171", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>×</button>
+              </div>
+            )}
+
+            {/* Text paste (if no file) */}
+            {!intakeFile && (
+              <textarea value={intakeText} onChange={e => setIntakeText(e.target.value)}
+                onPaste={e => {
+                  const items = e.clipboardData?.items;
+                  if (items) {
+                    for (const item of items) {
+                      if (item.type.startsWith("image/")) {
+                        e.preventDefault();
+                        const file = item.getAsFile();
+                        if (file) { setIntakeFile(file); setIntakeResult(null); }
+                        return;
+                      }
+                    }
+                  }
+                  const text = e.clipboardData.getData("text/plain");
+                  if (text && !intakeText) { e.preventDefault(); setIntakeText(text); }
+                }}
+                placeholder="Or paste carrier rate email text..."
+                style={{ width: "100%", minHeight: 80, maxHeight: 140, padding: 10, borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)", color: "#F0F2F5", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+            )}
+
+            {/* Move type + Extract button */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {["dray", "transload", "ftl"].map(mt => {
+                const active = intakeMoveType === mt;
+                const s = MOVE_TYPE_STYLES[mt];
+                return (
+                  <button key={mt} onClick={() => setIntakeMoveType(mt)}
+                    style={{ padding: "3px 10px", fontSize: 10, fontWeight: 700, borderRadius: 5, border: `1px solid ${active ? s.color + "55" : "rgba(255,255,255,0.06)"}`, background: active ? s.color + "18" : "transparent", color: active ? s.color : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
+                    {s.label}
+                  </button>
+                );
+              })}
+              {!intakePreview && (intakeText.trim() || intakeFile) && (
+                <button onClick={() => handleManualIntake()} disabled={intakeProcessing}
+                  style={{ marginLeft: "auto", padding: "5px 14px", borderRadius: 6, border: "none", background: grad, color: "#0A0F1C", fontSize: 10, fontWeight: 700, cursor: intakeProcessing ? "wait" : "pointer", fontFamily: "inherit", opacity: intakeProcessing ? 0.6 : 1 }}>
+                  {intakeProcessing ? "Extracting..." : "Extract"}
+                </button>
+              )}
+            </div>
+
+            {/* Extraction Preview */}
+            {intakePreview && (
+              <div style={{ borderRadius: 10, padding: 14, border: "1px solid rgba(0,212,170,0.2)", background: "rgba(0,212,170,0.03)", flex: 1, overflow: "auto" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#34d399", marginBottom: 10 }}>Extracted Data</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10, fontFamily: "'JetBrains Mono', monospace" }}>
+                  {[
+                    { label: "Carrier", key: "carrier_name" },
+                    { label: "Rate", key: "rate_amount" },
+                    { label: "Origin", key: "origin" },
+                    { label: "Destination", key: "destination" },
+                    { label: "MC#", key: "carrier_mc" },
+                    { label: "Type", key: "shipment_type" },
+                  ].map(f => (
+                    <label key={f.key} style={{ fontSize: 9, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>
+                      {f.label}
+                      <input value={intakePreview[f.key] || ""} onChange={e => setIntakePreview(p => ({ ...p, [f.key]: e.target.value }))}
+                        style={{ display: "block", width: "100%", marginTop: 2, padding: "4px 8px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#C8D0DC", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+                    </label>
+                  ))}
+                </div>
+
+                {/* Linehaul items */}
+                {(intakePreview.linehaul_items || []).length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Linehaul</span>
+                    {intakePreview.linehaul_items.map((item, i) => (
+                      <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 3 }}>
+                        <input value={item.description || ""} onChange={e => setIntakePreview(p => {
+                          const items = [...(p.linehaul_items || [])]; items[i] = { ...items[i], description: e.target.value }; return { ...p, linehaul_items: items };
+                        })} style={{ flex: 1, padding: "3px 6px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)", color: "#C8D0DC", fontSize: 10, fontFamily: "inherit", outline: "none" }} />
+                        <input value={item.rate || ""} onChange={e => setIntakePreview(p => {
+                          const items = [...(p.linehaul_items || [])]; items[i] = { ...items[i], rate: e.target.value }; return { ...p, linehaul_items: items };
+                        })} style={{ width: 70, padding: "3px 6px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)", color: "#C8D0DC", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", outline: "none", textAlign: "right" }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Accessorials */}
+                {(intakePreview.accessorials || []).length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Accessorials</span>
+                    {intakePreview.accessorials.map((acc, i) => (
+                      <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 3 }}>
+                        <input value={acc.charge || ""} onChange={e => setIntakePreview(p => {
+                          const accs = [...(p.accessorials || [])]; accs[i] = { ...accs[i], charge: e.target.value }; return { ...p, accessorials: accs };
+                        })} style={{ flex: 1, padding: "3px 6px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)", color: "#C8D0DC", fontSize: 10, fontFamily: "inherit", outline: "none" }} />
+                        <input value={acc.rate || ""} onChange={e => setIntakePreview(p => {
+                          const accs = [...(p.accessorials || [])]; accs[i] = { ...accs[i], rate: e.target.value }; return { ...p, accessorials: accs };
+                        })} style={{ width: 70, padding: "3px 6px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)", color: "#C8D0DC", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", outline: "none", textAlign: "right" }} />
+                        <span style={{ fontSize: 9, color: "#5A6478", minWidth: 30 }}>{acc.frequency || "flat"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 10 }}>
+                  <button onClick={() => setIntakePreview(null)}
+                    style={{ padding: "5px 12px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                    Discard
+                  </button>
+                  <button onClick={handleIntakeSave} disabled={intakeSaving}
+                    style={{ padding: "5px 14px", borderRadius: 5, border: "1px solid rgba(0,212,170,0.3)", background: "rgba(0,212,170,0.08)", color: "#34d399", fontSize: 10, fontWeight: 700, cursor: intakeSaving ? "wait" : "pointer", fontFamily: "inherit", opacity: intakeSaving ? 0.6 : 1 }}>
+                    {intakeSaving ? "Saving..." : "Save Rate"}
+                  </button>
+                  <button onClick={handleApplyToQuote} disabled={intakeSaving}
+                    style={{ padding: "5px 16px", borderRadius: 5, border: "none", background: grad, color: "#0A0F1C", fontSize: 10, fontWeight: 800, cursor: intakeSaving ? "wait" : "pointer", fontFamily: "inherit", opacity: intakeSaving ? 0.6 : 1 }}>
+                    Apply to Quote →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Result messages */}
+            {intakeResult?.ok && !intakeResult.duplicate_skipped && (
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#34d399", padding: "6px 10px", borderRadius: 6, background: "rgba(34,197,94,0.08)" }}>
+                ✓ {intakeResult.extracted ? `Added: ${intakeResult.extracted.carrier_name} — ${intakeResult.extracted.origin} → ${intakeResult.extracted.destination}` : `Saved rate`}
+              </div>
+            )}
+            {intakeResult?.ok && intakeResult.duplicate_skipped && (
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#FBBF24", padding: "6px 10px", borderRadius: 6, background: "rgba(245,158,11,0.08)" }}>
+                ⚠ Duplicate rate exists
+              </div>
+            )}
+            {intakeResult?.error && (
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#f87171", padding: "6px 10px", borderRadius: 6, background: "rgba(239,68,68,0.08)" }}>
+                ✗ {intakeResult.error}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
