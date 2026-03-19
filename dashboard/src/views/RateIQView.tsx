@@ -668,6 +668,41 @@ export default function RateIQView() {
 
   useEffect(() => { fetchData(); const iv = setInterval(fetchData, 60000); return () => clearInterval(iv); }, [fetchData]);
 
+  // ── Auto-fetch + persist miles for lanes missing distance data ──
+  const milesBackfillRef = useRef(new Set());
+  useEffect(() => {
+    if (!rateLaneSummaries.length) return;
+    const missing = rateLaneSummaries.filter(
+      ls => ls.avg_rate > 0 && !ls.miles && ls.port && ls.destination && !milesBackfillRef.current.has(`${ls.port}|${ls.destination}`)
+    ).slice(0, 20); // batch 20 at a time
+    if (!missing.length) return;
+    missing.forEach(ls => milesBackfillRef.current.add(`${ls.port}|${ls.destination}`));
+    const fetchAndPersist = async () => {
+      for (const ls of missing) {
+        try {
+          const o = encodeURIComponent(ls.rawPort || ls.port);
+          const d = encodeURIComponent(ls.rawDest || ls.destination);
+          const res = await apiFetch(`${API_BASE}/api/quotes/distance?origin=${o}&destination=${d}`).then(r => r.json());
+          if (res.one_way_miles > 0) {
+            const key = `${ls.port}|${ls.destination}`;
+            setLaneMiles(prev => ({ ...prev, [key]: { miles: res.one_way_miles, loading: false } }));
+            // Persist to DB: update the first rate in this lane that lacks miles
+            const rateToUpdate = ls.rawRates?.find(r => !r.miles);
+            if (rateToUpdate?.id) {
+              const rateId = rateToUpdate.id.toString().includes("-") ? rateToUpdate.id : `lr-${rateToUpdate.id}`;
+              apiFetch(`${API_BASE}/api/lane-rates/${rateId}`, {
+                method: "PUT", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ miles: res.one_way_miles }),
+              }).catch(() => {}); // fire and forget
+            }
+          }
+        } catch { /* skip lane */ }
+        await new Promise(r => setTimeout(r, 200)); // throttle
+      }
+    };
+    fetchAndPersist();
+  }, [rateLaneSummaries]);
+
   // ── Fetch market benchmark for current lane search ──
   const fetchMarketBenchmark = useCallback(async (o, d) => {
     if (!o && !d) { setMarketBenchmark(null); return; }

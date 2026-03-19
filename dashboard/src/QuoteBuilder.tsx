@@ -665,7 +665,7 @@ export default function QuoteBuilder({ prefill } = {}) {
   const [rateIntelLoading, setRateIntelLoading] = useState(false);
   const [rateIntelOpen, setRateIntelOpen] = useState(false);
   const [rateIntelGroups, setRateIntelGroups] = useState(new Set([0]));
-  const [marketData, setMarketData] = useState(null); // { floor, average, ceiling, data_points } from extraction
+  const [marketData, setMarketData] = useState(null); // { floor, average, ceiling, data_points, rates[] } from extraction
   const rateIntelTimer = useRef(null);
   useEffect(() => {
     if (!route.pod && !route.finalDelivery) { setRateIntel(null); return; }
@@ -783,11 +783,32 @@ export default function QuoteBuilder({ prefill } = {}) {
           return [...merged, ...extras];
         });
       }
-      if (data.market_floor || data.market_average || data.market_ceiling) {
-        setMarketData({ floor: data.market_floor || null, average: data.market_average || null, ceiling: data.market_ceiling || null, data_points: data.data_points || null });
+      // LoadMatch market data: per-carrier rate rows with FSC, equipment, age
+      if (data.is_market_data && data.market_rates?.length) {
+        setCarrierName("Market Data - LoadMatch");
+        setMarketData({
+          floor: data.market_floor || null, average: data.market_average || null,
+          ceiling: data.market_ceiling || null, data_points: data.data_points || data.market_rates.length,
+          rates: data.market_rates.map(r => ({
+            carrier: r.carrier_name || r.terminal || "—",
+            mc: r.mc_number || null,
+            date: r.date || null, age: r.age || null, equipment: r.equipment || null,
+            base: r.base_rate || r.base || null, fsc_pct: r.fsc_pct || null,
+            fsc_amount: r.fsc_amount || null, total: r.total || r.rate || null,
+          })),
+        });
+        if (!data.linehaul_items?.length) {
+          setLinehaul([{ description: "Market Average", rate: String(data.market_average || data.market_rates[0]?.total || ""), section: defaultSection(route.shipmentType) }]);
+        }
         setRateIntelOpen(true);
+        setSaveMsg({ type: "success", text: `Imported ${data.market_rates.length} market rates from LoadMatch` });
+      } else if (data.market_floor || data.market_average || data.market_ceiling) {
+        setMarketData({ floor: data.market_floor || null, average: data.market_average || null, ceiling: data.market_ceiling || null, data_points: data.data_points || null, rates: [] });
+        setRateIntelOpen(true);
+        setSaveMsg({ type: "success", text: "Extracted! Review and adjust rates." });
+      } else {
+        setSaveMsg({ type: "success", text: "Extracted! Review and adjust rates." });
       }
-      setSaveMsg({ type: "success", text: "Extracted! Review and adjust rates." });
     } catch (err) {
       setSaveMsg({ type: "error", text: `Extraction failed: ${err.message}` });
     } finally {
@@ -841,11 +862,30 @@ export default function QuoteBuilder({ prefill } = {}) {
           return [...merged, ...extras];
         });
       }
-      if (data.market_floor || data.market_average || data.market_ceiling) {
-        setMarketData({ floor: data.market_floor || null, average: data.market_average || null, ceiling: data.market_ceiling || null, data_points: data.data_points || null });
+      if (data.is_market_data && data.market_rates?.length) {
+        setCarrierName("Market Data - LoadMatch");
+        setMarketData({
+          floor: data.market_floor || null, average: data.market_average || null,
+          ceiling: data.market_ceiling || null, data_points: data.market_rates.length,
+          rates: data.market_rates.map(r => ({
+            carrier: r.carrier_name || r.terminal || "—", mc: r.mc_number || null,
+            date: r.date || null, age: r.age || null, equipment: r.equipment || null,
+            base: r.base_rate || r.base || null, fsc_pct: r.fsc_pct || null,
+            fsc_amount: r.fsc_amount || null, total: r.total || r.rate || null,
+          })),
+        });
+        if (!data.linehaul_items?.length) {
+          setLinehaul([{ description: "Market Average", rate: String(data.market_average || ""), section: defaultSection(route.shipmentType) }]);
+        }
         setRateIntelOpen(true);
+        setSaveMsg({ type: "success", text: `Imported ${data.market_rates.length} market rates from LoadMatch` });
+      } else if (data.market_floor || data.market_average || data.market_ceiling) {
+        setMarketData({ floor: data.market_floor || null, average: data.market_average || null, ceiling: data.market_ceiling || null, data_points: data.data_points || null, rates: [] });
+        setRateIntelOpen(true);
+        setSaveMsg({ type: "success", text: "Extracted! Review and adjust rates." });
+      } else {
+        setSaveMsg({ type: "success", text: "Extracted! Review and adjust rates." });
       }
-      setSaveMsg({ type: "success", text: "Extracted! Review and adjust rates." });
     } catch (err) {
       setSaveMsg({ type: "error", text: `Extraction failed: ${err.message}` });
     } finally {
@@ -1453,7 +1493,34 @@ export default function QuoteBuilder({ prefill } = {}) {
                             </div>
                           );
                         })()}
-                        <div style={{ fontSize: 11, color: "#3D4557" }}>Market data from uploaded screenshot · not saved to history</div>
+                        {/* LoadMatch per-carrier rate rows */}
+                        {marketData.rates?.length > 0 && (
+                          <div style={{ marginTop: 6, maxHeight: 200, overflowY: "auto" }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "0 8px", fontSize: 10, padding: "3px 4px", borderBottom: "1px solid rgba(255,255,255,0.06)", color: "#5A6478", fontWeight: 700 }}>
+                              <span>CARRIER</span><span>BASE</span><span>FSC%</span><span>TOTAL</span>
+                            </div>
+                            {marketData.rates.map((r, ri) => (
+                              <div key={ri} onClick={() => {
+                                setCarrierName(r.carrier);
+                                if (r.total) setLinehaul(prev => [{ ...prev[0], rate: String(r.total) }]);
+                              }}
+                                style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "0 8px", padding: "4px 4px", cursor: "pointer", fontSize: 10.5, transition: "background 0.1s", borderBottom: "1px solid rgba(255,255,255,0.03)" }}
+                                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}
+                                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0 }}>
+                                  <span style={{ color: "#F0F2F5", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 120 }}>{r.carrier}</span>
+                                  {r.age && <span style={{ fontSize: 9, color: "#5A6478" }}>{r.age}</span>}
+                                  {r.equipment && <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 3, background: "rgba(0,212,170,0.1)", color: "#00D4AA" }}>{r.equipment}</span>}
+                                </div>
+                                <span style={{ color: "#8B95A8", fontFamily: "'JetBrains Mono', monospace" }}>{r.base ? `$${Number(r.base).toLocaleString()}` : "—"}</span>
+                                <span style={{ color: "#5A6478", fontFamily: "'JetBrains Mono', monospace" }}>{r.fsc_pct ? `${r.fsc_pct}%` : "—"}</span>
+                                <span style={{ color: "#00D4AA", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{r.total ? `$${Number(r.total).toLocaleString()}` : "—"}</span>
+                              </div>
+                            ))}
+                            <div style={{ fontSize: 10, color: "#3D4557", marginTop: 4 }}>Market data from LoadMatch · click a row to apply</div>
+                          </div>
+                        )}
+                        {!marketData.rates?.length && <div style={{ fontSize: 11, color: "#3D4557" }}>Market data from uploaded screenshot · not saved to history</div>}
                       </div>
                     ) : (
                       <div style={{ fontSize: 11, color: "#5A6478", padding: "4px 0" }}>No rate history for this lane</div>
