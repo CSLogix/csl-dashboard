@@ -54,7 +54,7 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   const [repColumnFilters, setRepColumnFilters] = useState({});
   const [repOpenFilterCol, setRepOpenFilterCol] = useState(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
-  const [sortOldestFirst, setSortOldestFirst] = useState(false);
+  const [sortOldestFirst, setSortOldestFirst] = useState(true);
   const [needsReplyOpen, setNeedsReplyOpen] = useState(false);
   const [puDateFilter, setPuDateFilter] = useState("");
   const [delDateFilter, setDelDateFilter] = useState("");
@@ -147,6 +147,9 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
     if (masterTableFilter === "del_tomorrow") return isDateTomorrow(s.deliveryDate) && !isPostDelivery(s.status);
     if (masterTableFilter === "needs_driver") return s.rawStatus?.toLowerCase() === "unassigned" && !isPostDelivery(s.status);
     if (masterTableFilter === "awaiting_pod") { if (s.status !== "delivered") return false; const eb = (s.efj || "").replace(/^EFJ\s*/i, ""); const ebNS = (s.efj || "").replace(/\s/g, ""); return !(docSummary?.[eb] || docSummary?.[s.efj] || docSummary?.[ebNS])?.pod; }
+    if (masterTableFilter === "ftl_only") return s.moveType === "FTL";
+    if (masterTableFilter === "ready_billing") { if (!isPostDelivery(s.status)) return false; const eb = (s.efj || "").replace(/^EFJ\s*/i, ""); const ebNS = (s.efj || "").replace(/\s/g, ""); return !!(docSummary?.[eb] || docSummary?.[s.efj] || docSummary?.[ebNS])?.pod; }
+    if (masterTableFilter === "driver_paid_pending") return s.status === "driver_paid";
     // Status key filter (from dropdown)
     if ([...STATUSES, ...FTL_STATUSES].some(st => st.key === masterTableFilter && st.key !== "all")) return s.status === masterTableFilter;
     return true;
@@ -181,6 +184,9 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   const actionBehind = actionBase.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !isPostDelivery(s.status));
   const actionNoPod = actionBase.filter(s => { if (!["delivered", "need_pod"].includes(s.status)) return false; const eb = (s.efj || "").replace(/^EFJ\s*/i, ""); const ebNS = (s.efj || "").replace(/\s/g, ""); return !(docSummary?.[eb] || docSummary?.[s.efj] || docSummary?.[ebNS])?.pod; });
   const actionActive = actionBase.filter(s => !isPostDelivery(s.status));
+  const actionFtlOnly = actionBase.filter(s => s.moveType === "FTL");
+  const actionReadyBilling = actionBase.filter(s => { if (!isPostDelivery(s.status)) return false; const eb = (s.efj || "").replace(/^EFJ\s*/i, ""); const ebNS = (s.efj || "").replace(/\s/g, ""); return !!(docSummary?.[eb] || docSummary?.[s.efj] || docSummary?.[ebNS])?.pod; });
+  const actionDriverPaidPending = actionBase.filter(s => s.status === "driver_paid");
 
   // Inbox-derived pill data for this rep
   const repAccts = (REP_ACCOUNTS[repName] || []).map(a => a.toLowerCase());
@@ -232,6 +238,9 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
     opsTableFilter === "del_tomorrow" ? opsDeliveriesTomorrow :
     opsTableFilter === "needs_driver" ? needsDriver :
     opsTableFilter === "awaiting_pod" ? awaitingPod :
+    opsTableFilter === "ftl_only" ? opsBase.filter(s => s.moveType === "FTL") :
+    opsTableFilter === "ready_billing" ? opsBase.filter(s => { if (!isPostDelivery(s.status)) return false; const eb = (s.efj || "").replace(/^EFJ\s*/i, ""); const ebNS = (s.efj || "").replace(/\s/g, ""); return !!(docSummary?.[eb] || docSummary?.[s.efj] || docSummary?.[ebNS])?.pod; }) :
+    opsTableFilter === "driver_paid_pending" ? opsBase.filter(s => s.status === "driver_paid") :
     [...STATUSES, ...FTL_STATUSES].some(st => st.key === opsTableFilter && st.key !== "all") ? opsBase.filter(s => s.status === opsTableFilter) :
     opsBase;
   // Apply date picker filters to ops table
@@ -691,6 +700,9 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
           { label: "No Driver", value: actionNoDriver.length, c: "#EF4444", filter: "needs_driver" },
           { label: "Behind", value: actionBehind.length, c: "#F97316", filter: "behind" },
           { label: "No POD", value: actionNoPod.length, c: "#A855F7", filter: "awaiting_pod" },
+          { label: "FTL Only", value: actionFtlOnly.length, c: "#60A5FA", filter: "ftl_only" },
+          { label: "Ready to Bill", value: actionReadyBilling.length, c: "#F59E0B", filter: "ready_billing" },
+          { label: "Paid Pending CX", value: actionDriverPaidPending.length, c: "#06B6D4", filter: "driver_paid_pending" },
           { label: "Rate Responses", value: inboxRateResponses, c: "#00D4AA", filter: null, action: () => onNavigateInbox("rates", "carrier_rate_response") },
         ];
         const repNeedsReplyThreads = repInboxThreads.filter(t => t.needs_reply && t.email_type !== "rate_outreach");

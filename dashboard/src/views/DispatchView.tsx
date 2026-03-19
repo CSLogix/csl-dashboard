@@ -46,6 +46,14 @@ export default function DispatchView({
   const [inlineEditField, setInlineEditField] = useState(null);
   const [inlineEditValue, setInlineEditValue] = useState("");
 
+  // Default FTL view to sort by earliest pickup date
+  useEffect(() => {
+    if (moveTypeFilter === "ftl" && sortCol === null) {
+      setSortCol("pickup");
+      setSortDir("asc");
+    }
+  }, [moveTypeFilter]);
+
   // Close inline status dropdown on click outside
   useEffect(() => {
     if (!inlineEditId || inlineEditField !== "status") return;
