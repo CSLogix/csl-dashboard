@@ -1818,17 +1818,16 @@ export default function RateIQView() {
               <div style={{ marginTop: 20, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 16 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 10 }}>Lane Intelligence — {selectedLane.origin} → {selectedLane.destination}</div>
                 <CarrierRateTable
-                  laneResults={laneResults}
-                  laneSearching={laneSearching}
-                  searchOrigin={selectedLane.origin}
-                  searchDest={selectedLane.destination}
-                  onEdit={null}
-                  editingId={null}
-                  editingField={null}
-                  editingValue=""
-                  onEditChange={() => {}}
-                  onEditSave={() => {}}
-                  onEditCancel={() => {}}
+                  carriers={laneResults}
+                  carrierCapMap={carrierCapMap}
+                  editingLaneRateId={editingLaneRateId} editingLaneField={editingLaneField} editingLaneValue={editingLaneValue}
+                  setEditingLaneRateId={setEditingLaneRateId} setEditingLaneField={setEditingLaneField} setEditingLaneValue={setEditingLaneValue}
+                  handleLaneRateUpdate={handleLaneRateUpdate}
+                  laneOrigin={selectedLane.origin} laneDestination={selectedLane.destination}
+                  miles={laneMiles[`${selectedLane.origin}|${selectedLane.destination}`]?.miles}
+                  moveType={moveTypeFilter || "dray"}
+                  onUpdateCarrierInfo={handleUpdateCarrierInfo}
+                  onDeleteRate={handleDeleteLaneRate}
                 />
                 {marketBenchmark && (
                   <div style={{ marginTop: 12 }}>
