@@ -80,6 +80,9 @@ MAILBOX_ORIGIN_MAP = {
 # --- Anthropic (Claude Vision for Rate IQ) ---
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
+# --- EIA (Energy Information Administration — diesel prices) ---
+EIA_API_KEY = os.getenv("EIA_API_KEY", "")
+
 # --- Logging ---
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FORMAT = os.getenv("LOG_FORMAT", "json")
