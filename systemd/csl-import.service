@@ -1,0 +1,13 @@
+[Unit]
+Description=CSL Dray Import Bot (runs on timer)
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/csl-bot
+ExecStart=/usr/bin/python3 csl_bot.py
+EnvironmentFile=/root/csl-bot/.env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=csl-import
+TimeoutStartSec=1800

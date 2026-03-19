@@ -1,0 +1,17 @@
+[Unit]
+Description=CSL Google Sheets Sync
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/csl-bot/csl-doc-tracker
+ExecStart=/usr/bin/python3 sheets_sync.py
+EnvironmentFile=/root/csl-bot/csl-doc-tracker/.env
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=csl-sheets-sync
+
+[Install]
+WantedBy=multi-user.target

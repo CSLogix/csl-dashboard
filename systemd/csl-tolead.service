@@ -1,0 +1,17 @@
+[Unit]
+Description=CSL Tolead Hub Monitor
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/csl-bot
+ExecStart=/usr/bin/python3 tolead_monitor.py
+EnvironmentFile=/root/csl-bot/.env
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=csl-tolead
+
+[Install]
+WantedBy=multi-user.target

@@ -49,39 +49,17 @@ csl-doc-tracker/
 **Effort**: 2-3 hours (mechanical refactor)
 **Risk**: Low — FastAPI APIRouter is a drop-in replacement
 
-### 2. Patch Script Accumulation (142 files)
+### 2. ~~Patch Script Accumulation~~ ✅ DONE (2026-03-19)
 
-**Problem**: `patches/` contains 142 Python scripts that modify production files via string replacement. They've already been applied but remain in the repo, creating confusion about what's current code vs. historical modifications.
+Removed 10 dead patch/backup scripts: `cmi_patch*.py`, `patch_*.py`, `csl_bot_backup.py`, `mk_export.py`, `safe_cleanup.sh`, `csl-doc-tracker/patch_webhook_gaps.py`. All had been applied and were not imported anywhere.
 
-**Solution**:
-- Archive patches/ to a separate branch or tag for historical reference
-- Delete from main branch
-- Use git for all future changes (no more text-replacement patching)
+### 3. ~~No Reverse Proxy~~ ✅ DONE (2026-03-19)
 
-**Effort**: 10 minutes
-**Risk**: None — patches are already applied
+Nginx config added at `nginx/csl-dashboard.conf`. Includes gzip, rate limiting, security headers, SSE support, and proxy rules for dashboard (8080), webhook (5000), and upload server (5001). TLS via certbot after deploy.
 
-### 3. No Reverse Proxy
+### 4. ~~Missing Root-Level Dependency Management~~ ✅ DONE (2026-03-19)
 
-**Problem**: FastAPI/Uvicorn runs directly on port 8080. No TLS termination, no gzip, no connection buffering.
-
-**Solution**: Add nginx as reverse proxy:
-- TLS via Let's Encrypt (certbot)
-- Gzip for static assets
-- Proxy pass to uvicorn on localhost:8080
-- Rate limiting for API endpoints
-
-**Effort**: 30 minutes
-**Risk**: Low
-
-### 4. Missing Root-Level Dependency Management
-
-**Problem**: Only `csl-doc-tracker/requirements.txt` exists. The main bot scripts have no pinned dependencies.
-
-**Solution**: Add `requirements.txt` to root with all monitor dependencies pinned.
-
-**Effort**: 15 minutes
-**Risk**: None
+Root `requirements.txt` now covers all dependencies for both dashboard and monitors, including `httplib2` used by `csl_inbox_scanner.py`.
 
 ---
 
@@ -99,11 +77,9 @@ csl-doc-tracker/
 **Status**: Already solved. `npm run build` outputs to `static/dist/`, and FastAPI serves it.
 **Gap**: Ensure dev mode (`npm run dev`) is never used in production.
 
-### 7. Process Management Consolidation
+### 7. ~~Process Management Consolidation~~ ✅ DONE (2026-03-19)
 
-**Current**: Mix of systemd, bash PID scripts, and cron.
-**Ideal**: All services managed by systemd with proper unit files.
-**Effort**: 1 hour
+All services now have systemd unit files in `systemd/`. Long-running services (9 .service files) and scheduled jobs (5 .timer files) replace the old mix of cron + bash PID scripts. Deploy with `sudo ./deploy-services.sh`.
 
 ---
 

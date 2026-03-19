@@ -665,8 +665,33 @@ def run_once():
     log.info("Export poll complete")
 
 
+def _check_jsoncargo_api():
+    """Verify JsonCargo API key is valid at startup. Logs warning if not."""
+    try:
+        resp = requests.get(
+            f"{JSONCARGO_BASE}/containers/MAEU0000000/",
+            headers={"Authorization": f"Bearer {JSONCARGO_API_KEY}"},
+            timeout=10,
+        )
+        if resp.status_code in (401, 403):
+            log.error("JsonCargo API key rejected (HTTP %d) — export tracking will fail", resp.status_code)
+            return False
+        log.info("JsonCargo API: OK (HTTP %d)", resp.status_code)
+        return True
+    except requests.Timeout:
+        log.warning("JsonCargo API timeout on startup check — will retry during normal operation")
+        return True  # Don't block startup for timeout
+    except requests.ConnectionError:
+        log.warning("JsonCargo API unreachable on startup check — will retry during normal operation")
+        return True
+    except Exception as e:
+        log.warning("JsonCargo API startup check failed: %s", e)
+        return True
+
+
 def main():
     log.info("Export Monitor v3 started", extra={"mode": "Postgres"})
+    _check_jsoncargo_api()
     while True:
         run_once()
         log.info("Sleeping 60 min")
