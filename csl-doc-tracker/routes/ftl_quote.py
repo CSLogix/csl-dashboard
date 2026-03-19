@@ -143,6 +143,69 @@ class FTLQuoteRequest(BaseModel):
     margin_pct: float = 15.0         # Used when margin_source == "pct"
 
 
+# ── Dynamic margin matrix (OTRI × mileage) ───────────────────
+#
+# OTRI (Outbound Tender Rejection Index) measures market tightness:
+#   <5%   = loose (carriers accepting most freight, price-competitive)
+#   5-8%  = balanced (normal operating conditions)
+#   8-12% = tight (carriers rejecting loads, rates climbing)
+#   >12%  = very tight (capacity crunch, premium pricing)
+#
+# Mileage brackets reflect fixed-cost dilution:
+#   Short haul (<300 mi):   Fixed costs dominate → higher margin %
+#   Medium (300-800 mi):    Standard operating range
+#   Long haul (800-1500 mi): Fixed costs spread → slightly lower %
+#   Very long (>1500 mi):   Competitive long-haul → lowest %
+#
+# Matrix values are margin % of avg_all (carrier target).
+_MARGIN_MATRIX = {
+    # (otri_band, mileage_band) → margin_pct
+    ("loose",      "short"):  12.0,
+    ("loose",      "medium"): 10.0,
+    ("loose",      "long"):    8.0,
+    ("loose",      "xlong"):   7.0,
+    ("balanced",   "short"):  15.0,
+    ("balanced",   "medium"): 13.0,
+    ("balanced",   "long"):   11.0,
+    ("balanced",   "xlong"):   9.0,
+    ("tight",      "short"):  18.0,
+    ("tight",      "medium"): 16.0,
+    ("tight",      "long"):   14.0,
+    ("tight",      "xlong"):  12.0,
+    ("very_tight", "short"):  22.0,
+    ("very_tight", "medium"): 20.0,
+    ("very_tight", "long"):   17.0,
+    ("very_tight", "xlong"):  15.0,
+}
+
+
+def _otri_band(otri: float) -> str:
+    if otri < 5:
+        return "loose"
+    elif otri < 8:
+        return "balanced"
+    elif otri < 12:
+        return "tight"
+    return "very_tight"
+
+
+def _mileage_band(miles: float) -> str:
+    if miles < 300:
+        return "short"
+    elif miles < 800:
+        return "medium"
+    elif miles < 1500:
+        return "long"
+    return "xlong"
+
+
+def _auto_margin_pct(otri: float, mileage: float) -> float:
+    """Compute dynamic margin % from OTRI × mileage matrix."""
+    ob = _otri_band(otri)
+    mb = _mileage_band(mileage)
+    return _MARGIN_MATRIX.get((ob, mb), 13.0)  # 13% fallback
+
+
 # ── Calculation endpoint ───────────────────────────────────────
 
 @router.post("/api/ftl-quote/calculate")
@@ -192,7 +255,10 @@ async def ftl_quote_calculate(data: FTLQuoteRequest):
     avg_vs_spot = round(avg_all - data.dat_spot_high, 2) if data.dat_spot_high > 0 else 0
 
     # ── Margin ──
-    if data.margin_source == "pct" and data.margin_pct > 0:
+    if data.margin_source == "auto":
+        auto_pct = _auto_margin_pct(data.otri, data.mileage)
+        margin_usd = round(avg_all * (auto_pct / 100), 2)
+    elif data.margin_source == "pct" and data.margin_pct > 0:
         margin_usd = round(avg_all * (data.margin_pct / 100), 2)
     else:
         margin_usd = data.margin_usd
@@ -235,6 +301,13 @@ async def ftl_quote_calculate(data: FTLQuoteRequest):
         # Market context
         "capacity_conditions": data.capacity_conditions,
         "otri": data.otri,
+        # Auto margin metadata (always included so frontend can show recommendation)
+        "auto_margin": {
+            "pct": _auto_margin_pct(data.otri, data.mileage),
+            "otri_band": _otri_band(data.otri),
+            "mileage_band": _mileage_band(data.mileage),
+            "active": data.margin_source == "auto",
+        },
     })
 
 
@@ -252,31 +325,33 @@ async def ftl_quote_lane_comps(
     Also includes Boviet + Tolead lane data if matching.
     """
     comps = []
-    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    cutoff = datetime.utcnow() - timedelta(days=days)
 
     try:
         with db.get_cursor() as cur:
-            # Completed FTL shipments with carrier_pay set
-            conditions = [
+            # ── Completed FTL shipments (parameterized) ──
+            ship_where = [
                 "LOWER(move_type) IN ('ftl', 'otr', 'full truckload')",
                 "carrier_pay IS NOT NULL",
                 "carrier_pay > 0",
-                f"created_at >= '{cutoff}'",
+                "created_at >= %s",
             ]
+            ship_params = [cutoff]
             if origin:
-                conditions.append(f"LOWER(origin) LIKE '%{origin.lower().replace(chr(39), '')}%'")
+                ship_where.append("LOWER(origin) LIKE %s")
+                ship_params.append(f"%{origin.lower()}%")
             if destination:
-                conditions.append(f"LOWER(destination) LIKE '%{destination.lower().replace(chr(39), '')}%'")
+                ship_where.append("LOWER(destination) LIKE %s")
+                ship_params.append(f"%{destination.lower()}%")
 
-            where = " AND ".join(conditions)
             cur.execute(f"""
                 SELECT efj, origin, destination, carrier, carrier_pay, customer_rate,
-                       pickup_date, delivery_date, account, equipment_type
+                       pickup_date, delivery_date, account, equipment_type, mileage
                 FROM shipments
-                WHERE {where}
+                WHERE {" AND ".join(ship_where)}
                 ORDER BY created_at DESC
                 LIMIT 50
-            """)
+            """, ship_params)
             for row in cur.fetchall():
                 cp = float(row["carrier_pay"]) if row.get("carrier_pay") else 0
                 cr = float(row["customer_rate"]) if row.get("customer_rate") else 0
@@ -288,30 +363,33 @@ async def ftl_quote_lane_comps(
                     "carrier_pay": cp,
                     "customer_rate": cr,
                     "margin": round(cr - cp, 2) if cr and cp else None,
-                    "pickup_date": row.get("pickup_date", ""),
-                    "delivery_date": row.get("delivery_date", ""),
+                    "pickup_date": str(row["pickup_date"]) if row.get("pickup_date") else "",
+                    "delivery_date": str(row["delivery_date"]) if row.get("delivery_date") else "",
                     "account": row.get("account", ""),
                     "equipment": row.get("equipment_type", ""),
+                    "mileage": float(row["mileage"]) if row.get("mileage") else None,
                     "source": "shipment",
                 })
 
-            # Also pull from lane_rates table (FTL entries)
-            lr_conditions = ["LOWER(move_type) IN ('ftl', 'otr')"]
+            # ── Lane rates table (FTL entries, parameterized) ──
+            lr_where = ["LOWER(move_type) IN ('ftl', 'otr')"]
+            lr_params = []
             if origin:
-                lr_conditions.append(f"LOWER(port) LIKE '%{origin.lower().replace(chr(39), '')}%'")
+                lr_where.append("LOWER(port) LIKE %s")
+                lr_params.append(f"%{origin.lower()}%")
             if destination:
-                lr_conditions.append(f"LOWER(destination) LIKE '%{destination.lower().replace(chr(39), '')}%'")
+                lr_where.append("LOWER(destination) LIKE %s")
+                lr_params.append(f"%{destination.lower()}%")
 
-            lr_where = " AND ".join(lr_conditions)
             cur.execute(f"""
                 SELECT port as origin, destination, carrier_name as carrier,
                        total as carrier_pay, equipment_type as equipment,
                        notes, source, created_at
                 FROM lane_rates
-                WHERE {lr_where}
+                WHERE {" AND ".join(lr_where)}
                 ORDER BY created_at DESC
                 LIMIT 30
-            """)
+            """, lr_params)
             for row in cur.fetchall():
                 cp = float(row["carrier_pay"]) if row.get("carrier_pay") else 0
                 comps.append({
@@ -423,17 +501,21 @@ async def ftl_quote_history(
     try:
         with db.get_cursor() as cur:
             conditions = ["shipment_type = 'FTL'"]
+            params = []
             if origin:
                 conditions.append(
-                    f"(LOWER(pod) LIKE '%{origin.lower().replace(chr(39), '')}%'"
-                    f" OR LOWER(COALESCE(route_json->>'origin','')) LIKE '%{origin.lower().replace(chr(39), '')}%')"
+                    "(LOWER(pod) LIKE %s"
+                    " OR LOWER(COALESCE(route_json->>'origin','')) LIKE %s)"
                 )
+                params.extend([f"%{origin.lower()}%", f"%{origin.lower()}%"])
             if destination:
                 conditions.append(
-                    f"(LOWER(final_delivery) LIKE '%{destination.lower().replace(chr(39), '')}%'"
-                    f" OR LOWER(COALESCE(route_json->>'destination','')) LIKE '%{destination.lower().replace(chr(39), '')}%')"
+                    "(LOWER(final_delivery) LIKE %s"
+                    " OR LOWER(COALESCE(route_json->>'destination','')) LIKE %s)"
                 )
+                params.extend([f"%{destination.lower()}%", f"%{destination.lower()}%"])
             where = " AND ".join(conditions)
+            params.append(limit)
             cur.execute(f"""
                 SELECT id, quote_number, pod, final_delivery, one_way_miles,
                        carrier_total, estimated_total, margin_pct,
@@ -442,7 +524,7 @@ async def ftl_quote_history(
                 WHERE {where}
                 ORDER BY created_at DESC
                 LIMIT %s
-            """, (limit,))
+            """, params)
             for row in cur.fetchall():
                 route = row.get("route_json") or {}
                 if isinstance(route, str):
