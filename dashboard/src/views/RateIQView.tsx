@@ -933,6 +933,7 @@ export default function RateIQView() {
           <div style={{ display: "flex", gap: 6 }}>
             {[
               { key: "ftl-quote", label: "FTL Quote", icon: "🚛" },
+              { key: "intake", label: "Rate Intake", icon: "📥" },
               { key: "oog", label: "OOG IQ", icon: "📦" },
               { key: "directory", label: `Directory (${dirCarriers.length})`, icon: "📖" },
               { key: "scorecard", label: "Scorecard", icon: "🏆" },

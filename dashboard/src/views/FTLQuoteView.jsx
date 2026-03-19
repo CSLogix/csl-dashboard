@@ -280,7 +280,7 @@ export default function FTLQuoteView() {
       console.error("FTL quote calc error:", e);
     }
     setCalculating(false);
-  }, [origin, destination, mileage, tracCurrent, tracLow, tracHigh, tracContract, datLow, datHigh, dat7d, dat15d, dat90d, dhOriginRate, dhDestRate, marginUsd, marginSource, marginPct]);
+  }, [origin, destination, mileage, tracCurrent, tracLow, tracHigh, contractCurrent, contractLow, contractHigh, datLow, datHigh, datContractLow, datContractHigh, capacityConditions, otri, dhOriginRate, dhDestRate, marginUsd, marginSource, marginPct]);
 
   // ── Auto-calculate on input change (debounced) ──
   useEffect(() => {
