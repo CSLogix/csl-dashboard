@@ -1064,10 +1064,10 @@ export default function DispatchDashboard() {
       </div>
 
       {showAddForm && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal, animation: "fade-in 0.2s ease" }}
-          onClick={() => setShowAddForm(false)}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal, animation: "fade-in 0.2s ease" }}>
           <div role="dialog" aria-modal="true" aria-labelledby="add-form-title"
-            onClick={e => e.stopPropagation()} className="glass-strong" style={{ borderRadius: 20, padding: 28, width: "min(90vw, 680px)", maxHeight: "85vh", overflow: "auto", animation: "slide-up 0.3s ease", border: "1px solid rgba(255,255,255,0.08)" }}>
+            className="glass-strong" style={{ borderRadius: 20, padding: 28, width: "min(90vw, 680px)", maxHeight: "85vh", overflow: "auto", animation: "slide-up 0.3s ease", border: "1px solid rgba(255,255,255,0.08)", position: "relative" }}>
+            <button onClick={() => setShowAddForm(false)} aria-label="Close" style={{ position: "absolute", top: 12, right: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#8B95A8", fontSize: 16, lineHeight: 1 }}>&times;</button>
             <div id="add-form-title" style={{ fontSize: 18, fontWeight: 800, color: "#F0F2F5", marginBottom: 4 }}>New Load</div>
             <div style={{ fontSize: 11, color: "#8B95A8", marginBottom: 20 }}>Create a new shipment — or use Bulk Create for multiple loads</div>
             <AddForm onSubmit={handleAddShipment} onCancel={() => setShowAddForm(false)} accounts={accounts} />

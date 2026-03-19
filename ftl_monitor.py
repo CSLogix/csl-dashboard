@@ -7,22 +7,6 @@ dates to the sheet.
 """
 import json
 
-# ── Unresponsive driver state tracking ──
-UNRESPONSIVE_STATE_FILE = "/root/csl-bot/unresponsive_state.json"
-
-def load_unresponsive_state():
-    try:
-        with open(UNRESPONSIVE_STATE_FILE) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-def save_unresponsive_state(state):
-    tmp = UNRESPONSIVE_STATE_FILE + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(state, f)
-    os.replace(tmp, UNRESPONSIVE_STATE_FILE)
-
 import os
 import re
 import time
@@ -39,9 +23,7 @@ from csl_pg_writer import pg_update_shipment, pg_archive_shipment
 from csl_sheet_writer import sheet_update_ftl, sheet_archive_row
 from csl_ftl_alerts import (
     ACCOUNT_REPS_PG, STATUS_TO_DROPDOWN,
-    load_sent_alerts, save_sent_alerts, already_sent, mark_sent,
-    _send_email, send_ftl_email, _send_pod_reminder_ftl,
-    EMAIL_CC, EMAIL_FALLBACK,
+    _send_pod_reminder_ftl,
 )
 
 
@@ -49,11 +31,8 @@ log = get_logger("ftl_monitor")
 
 
 # ── Config ──────────────────────────────────────────────────────────────────────
-SENT_ALERTS_FILE    = "/root/csl-bot/ftl_sent_alerts.json"
 TRACKING_CACHE_FILE = "/root/csl-bot/ftl_tracking_cache.json"
-
-ALERT_CUTOFF_DATE   = "2026-03-01"
-POLL_INTERVAL       = 10 * 60  # seconds
+POLL_INTERVAL       = 30 * 60  # seconds
 
 # ── SMTP / email ─────────────────────────────────────────────────────────────────
 
@@ -163,155 +142,6 @@ def update_tracking_cache(efj: str, load_num: str, status, mp_load_id,
     }
 
 
-# ── EFJ Pro alert ───────────────────────────────────────────────────────────────
-
-# ── Unresponsive driver alert ────────────────────────────────────────────
-
-def send_unresponsive_alert(efj, load_num, account, carrier, driver_phone,
-                            carrier_email, rep_email, escalation=False):
-    """Send email alert when driver phone is unresponsive."""
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-
-    smtp_user = os.environ.get("SMTP_USER", "")
-    smtp_pass = os.getenv("SMTP_PASSWORD", "")
-    cc_addr = os.getenv("EMAIL_CC", "efj-operations@evansdelivery.com")
-
-    if not rep_email:
-        rep_email = cc_addr
-
-    prefix = "ESCALATION: " if escalation else ""
-    subject = f"{prefix}Driver Phone Unresponsive — {efj} {load_num}"
-
-    bg_color = "#c62828" if escalation else "#e65100"
-    body = f"""<html><body style="font-family:Arial,sans-serif;font-size:14px;">
-<div style="background:{bg_color};color:white;padding:12px 20px;border-radius:8px 8px 0 0;">
-<h3 style="margin:0;">{'ESCALATION: ' if escalation else ''}Driver Phone Unresponsive</h3>
-</div>
-<div style="padding:16px 20px;background:#fafafa;border:1px solid #ddd;border-top:none;border-radius:0 0 8px 8px;">
-<table style="border-collapse:collapse;width:100%;">
-<tr><td style="padding:6px 12px;font-weight:bold;color:#666;">EFJ #</td><td style="padding:6px 12px;">{efj}</td></tr>
-<tr><td style="padding:6px 12px;font-weight:bold;color:#666;">Load #</td><td style="padding:6px 12px;">{load_num}</td></tr>
-<tr><td style="padding:6px 12px;font-weight:bold;color:#666;">Account</td><td style="padding:6px 12px;">{account}</td></tr>
-<tr><td style="padding:6px 12px;font-weight:bold;color:#666;">Carrier</td><td style="padding:6px 12px;">{carrier}</td></tr>
-<tr><td style="padding:6px 12px;font-weight:bold;color:#666;">Driver Phone</td><td style="padding:6px 12px;">{driver_phone or 'N/A'}</td></tr>
-<tr><td style="padding:6px 12px;font-weight:bold;color:#666;">Carrier Email</td><td style="padding:6px 12px;">{carrier_email or 'N/A'}</td></tr>
-</table>
-{'<p style="color:#c62828;font-weight:bold;margin-top:12px;">This load has been unresponsive for over 1.5 hours. Please contact carrier directly.</p>' if escalation else '<p style="color:#e65100;margin-top:12px;">Macropoint cannot reach the driver phone. The system will retry automatically.</p>'}
-</div>
-</body></html>"""
-
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = smtp_user
-        msg["To"] = rep_email
-        msg["Cc"] = cc_addr
-        msg.attach(MIMEText(body, "html"))
-
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(smtp_user, smtp_pass)
-            recipients = [rep_email]
-            if cc_addr and cc_addr != rep_email:
-                recipients.append(cc_addr)
-            smtp.sendmail(smtp_user, recipients, msg.as_string())
-        log.info("Sent %sunresponsive alert for %s to %s",
-                 "ESCALATION " if escalation else "", efj, rep_email)
-    except Exception as e:
-        log.warning("Failed to send unresponsive alert for %s: %s", efj, e)
-
-
-def check_unresponsive(efj, load_num, mp_load_status, account, carrier,
-                       driver_phone, carrier_email, rep_email, tracking_cache):
-    """Check and handle unresponsive driver status with escalation."""
-    state = load_unresponsive_state()
-    key = efj
-
-    if mp_load_status and "unresponsive" in mp_load_status.lower():
-        entry = state.get(key, {"count": 0, "last_alert": None})
-        entry["count"] = entry.get("count", 0) + 1
-        count = entry["count"]
-
-        # First detection or every 4 polls (2 hours) — send alert
-        from datetime import datetime, timezone
-        now_str = datetime.now(timezone.utc).isoformat()
-        last_alert = entry.get("last_alert")
-
-        should_alert = False
-        if count == 1:
-            should_alert = True
-        elif last_alert:
-            try:
-                last_dt = datetime.fromisoformat(last_alert)
-                elapsed = (datetime.now(timezone.utc) - last_dt).total_seconds()
-                if elapsed >= 7200:  # 2 hours
-                    should_alert = True
-            except (ValueError, TypeError):
-                should_alert = True
-
-        if should_alert:
-            escalation = count >= 3  # 3+ consecutive = 1.5+ hours
-            send_unresponsive_alert(efj, load_num, account, carrier,
-                                   driver_phone, carrier_email, rep_email,
-                                   escalation=escalation)
-            entry["last_alert"] = now_str
-
-        # After 6 consecutive (3 hours) — flag cantMakeIt
-        if count >= 6:
-            if efj in tracking_cache:
-                tracking_cache[efj]["cant_make_it"] = "Driver Phone Unresponsive (3+ hrs)"
-                log.warning("Flagged %s as cantMakeIt (6+ unresponsive polls)", efj)
-
-        state[key] = entry
-        save_unresponsive_state(state)
-        log.info("Unresponsive count for %s: %d", efj, count)
-
-    else:
-        # Status is NOT unresponsive — reset counter
-        if key in state:
-            if state[key].get("count", 0) > 0:
-                log.info("Unresponsive cleared for %s (was %d polls)", efj, state[key]["count"])
-            del state[key]
-            save_unresponsive_state(state)
-
-
-def send_pro_alert(row: list, tab_name: str, account_lookup: dict):
-    """Email rep daily when a row has no EFJ# pro number."""
-    info      = account_lookup.get(tab_name, {})
-    rep_email = info.get("email", "")
-    rep_name  = info.get("rep", "")
-    to_email  = rep_email if rep_email else EMAIL_FALLBACK
-    cc_email  = EMAIL_CC if rep_email else None
-    headers   = ["EFJ#","Move Type","Container/Load#","BOL/Booking#","SSL/Vessel",
-                 "Carrier","Origin","Destination","ETA/ERD","LFD/Cutoff",
-                 "Pickup Date","Delivery Date","Status","Driver/Truck","Notes"]
-    detail_rows = ""
-    for i, val in enumerate(row):
-        if val and val.strip():
-            label = headers[i] if i < len(headers) else f"Col {i+1}"
-            detail_rows += f"<tr><td style=\"padding:3px 8px;color:#555;\">{label}</td><td style=\"padding:3px 8px;\">{val.strip()}</td></tr>"
-    container = row[2].strip() if len(row) > 2 and row[2].strip() else "Unknown"
-    vessel    = row[4].strip() if len(row) > 4 and row[4].strip() else "Unknown"
-    origin    = row[6].strip() if len(row) > 6 and row[6].strip() else ""
-    dest      = row[7].strip() if len(row) > 7 and row[7].strip() else ""
-    extra = " | ".join(filter(None, [container, vessel, origin, dest]))
-    subject = f"Please Pro Load ASAP: Load Needs EFJ Pro - {extra}"
-    body = (
-        f"<div style=\"font-family:Arial,sans-serif;max-width:600px;\">"
-        f"<div style=\"background:#e65100;color:white;padding:10px 14px;border-radius:6px 6px 0 0;font-size:16px;\">"
-        f"<b>Please Pro Load ASAP</b></div>"
-        f"<div style=\"border:1px solid #ddd;border-top:none;border-radius:0 0 6px 6px;padding:10px;\">"
-        f"<table style=\"border-collapse:collapse;\">"
-        f"<tr><td style=\"padding:4px 8px;color:#555;\">Account</td><td style=\"padding:4px 8px;\">{tab_name}</td></tr>"
-        + (f"<tr><td style=\"padding:4px 8px;color:#555;\">Rep</td><td style=\"padding:4px 8px;\">{rep_name}</td></tr>" if rep_name else "")
-        + f"</table>"
-        f"<div style=\"margin-top:8px;border-top:1px solid #eee;padding-top:8px;\">"
-        f"<b>Load Details</b></div>"
-        f"<table style=\"border-collapse:collapse;\">{detail_rows}</table>"
-        f"</div></div>"
-    )
-    _send_email(to_email, cc_email, subject, body)
 
 
 
@@ -321,28 +151,11 @@ def archive_ftl_row_pg(efj, load_num, dest, tab_name, pickup_val, delivery_val,
                        account_lookup, mp_load_id=None, stop_times=None):
     """Archive FTL row — Postgres only (no sheet writes)."""
     rep_info = account_lookup.get(tab_name, {})
-    rep_email = rep_info.get("email", "")
     rep_name = rep_info.get("rep", "")
     try:
         pg_archive_shipment(efj)
         sheet_archive_row(efj, tab_name, rep=rep_name)
         log.info("Archived load (Delivered)", extra={"efj": efj})
-
-        # Send archive email
-        if rep_email:
-            timestamp = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
-            subject = f"CSL Archived | {load_num} | {efj} | Delivered"
-            body = (
-                f"FTL load {efj} ({load_num}) has been archived.\n\n"
-                f"Account:  {tab_name}\n"
-                f"Rep:      {rep_name}\n\n"
-                f"Pickup:   {pickup_val or chr(8212)}\n"
-                f"Delivery: {delivery_val or chr(8212)}\n"
-                f"Status:   Delivered\n"
-                f"Archived: {timestamp}\n"
-            )
-            cc = None if tab_name.lower() == "boviet" else EMAIL_CC
-            _send_email(rep_email, cc, subject, body)
 
         # Send POD reminder
         _send_pod_reminder_ftl(efj, load_num, dest, tab_name, account_lookup, mp_load_id=mp_load_id)
@@ -394,63 +207,7 @@ def run_once():
         log.info("No active FTL loads found")
         return
 
-    sent = load_sent_alerts()
     tracking_cache = load_tracking_cache()
-
-    # ── Stale tracking detection ─────────────────────────────────────
-    # Auto-flag loads with no ping or event in >2 hours as unresponsive.
-    STALE_THRESHOLD_SECS = 2 * 60 * 60  # 2 hours
-    _now_utc = datetime.now(ZoneInfo("America/New_York"))
-    for _sk, _se in list(tracking_cache.items()):
-        _se_status = (_se.get("status") or "").strip().lower()
-        # Skip loads already delivered/terminal or already unresponsive
-        if _se_status in ("delivered", "tracking completed successfully",
-                          "billed/closed", "driver phone unresponsive", ""):
-            continue
-        # Need at least one prior ping or event to detect staleness
-        _last_activity = _se.get("last_ping_at") or _se.get("last_event_at") or _se.get("last_scraped")
-        if not _last_activity:
-            continue
-        try:
-            # Parse "YYYY-MM-DD HH:MM:SS ET" format
-            _la_str = _last_activity.rstrip()
-            if _la_str.endswith(" ET"):
-                _la_str = _la_str[:-3]
-            _la_dt = datetime.strptime(_la_str, "%Y-%m-%d %H:%M:%S")
-            _la_dt = _la_dt.replace(tzinfo=ZoneInfo("America/New_York"))
-            _elapsed = (_now_utc - _la_dt).total_seconds()
-            if _elapsed > STALE_THRESHOLD_SECS:
-                _se_efj = _se.get("efj", _sk)
-                _se_load = _se.get("load_num", "")
-                log.warning("Stale tracking detected — no ping/event in %.0f min",
-                            _elapsed / 60,
-                            extra={"efj": _se_efj, "last_activity": _last_activity})
-                _se["status"] = "Driver Phone Unresponsive"
-                _se["stale_flagged_at"] = _now_utc.strftime("%Y-%m-%d %H:%M:%S ET")
-                tracking_cache[_sk] = _se
-                # Find account for this load from PG data
-                _stale_acct = ""
-                for _row in all_loads:
-                    if (_row["efj"] or "").strip() == _se_efj:
-                        _stale_acct = _row.get("account", "")
-                        break
-                if _stale_acct:
-                    _rep_info = ACCOUNT_REPS_PG.get(_stale_acct, {})
-                    _rep_email = _rep_info.get("email", EMAIL_FALLBACK)
-                    check_unresponsive(
-                        _se_efj, _se_load, "Driver Phone Unresponsive",
-                        _stale_acct, "", _se.get("driver_phone", ""),
-                        "", _rep_email, tracking_cache,
-                    )
-                # Update PG status
-                try:
-                    from csl_pg_writer import pg_update_shipment as _pg_stale_up
-                    _pg_stale_up(_se_efj, status="Driver Phone Unresponsive",
-                                 bot_notes=f"Stale tracking — no ping in {int(_elapsed/60)}min")
-                except Exception as _pg_exc:
-                    log.warning("Stale PG update failed", extra={"efj": _se_efj, "error": str(_pg_exc)})
-        except (ValueError, TypeError):
-            pass  # Unparseable timestamp — skip
 
     for tab_name in account_tabs:
         loads = by_account[tab_name]
@@ -554,56 +311,6 @@ def run_once():
                 )
                 log.info("PG updated", extra={"efj": efj, "load_num": load_num})
 
-            # ── Check for unresponsive driver ─────────────────────────────
-            rep_info = ACCOUNT_REPS_PG.get(tab_name, {})
-            rep_email = rep_info.get("email", EMAIL_FALLBACK)
-            if cached_status and "unresponsive" in cached_status.lower():
-                check_unresponsive(
-                    efj, load_num, cached_status, tab_name,
-                    row.get("carrier", ""), driver_phone, "",
-                    rep_email, tracking_cache
-                )
-
-            # ── Skip alerts for loads with pickup before cutoff ───────────
-            _skip_old = False
-            _date_src = existing_pickup or final_pickup
-            if ALERT_CUTOFF_DATE and _date_src:
-                try:
-                    _m = re.search(r"(\d{2})[-/](\d{2})", _date_src)
-                    if _m:
-                        _pickup_dt = datetime.strptime(
-                            f"{datetime.now().year}-{_m.group(1)}-{_m.group(2)}", "%Y-%m-%d"
-                        )
-                        _cutoff_dt = datetime.strptime(ALERT_CUTOFF_DATE, "%Y-%m-%d")
-                        if _pickup_dt < _cutoff_dt:
-                            _skip_old = True
-                except (ValueError, IndexError):
-                    pass
-            if _skip_old:
-                log.info("Pickup before cutoff — skipping email", extra={"efj": efj, "load_num": load_num, "pickup": _date_src, "cutoff": ALERT_CUTOFF_DATE})
-                continue
-
-            # ── Only alert on actual status CHANGES ──────────────────────
-            if existing_status.strip().lower() == cached_status.strip().lower():
-                mark_sent(sent, key, cached_status)
-                continue
-
-            if already_sent(sent, key, cached_status):
-                log.info("Already alerted — skipping", extra={"efj": efj, "load_num": load_num, "status": cached_status})
-            else:
-                send_ftl_email(efj, load_num, cached_status, tab_name, ACCOUNT_REPS_PG,
-                               mp_load_id=mp_load_id, stop_times=stop_times)
-                mark_sent(sent, key, cached_status)
-
-            # ── CAN'T MAKE IT alert ──────────────────────────────────────
-            if cant_make_it:
-                cmi_status = "Can't Make It"
-                if not already_sent(sent, key, cmi_status):
-                    log.warning("CAN'T MAKE IT detected", extra={"efj": efj, "load_num": load_num, "reason": cant_make_it})
-                    send_ftl_email(efj, load_num, cmi_status, tab_name, ACCOUNT_REPS_PG,
-                                   mp_load_id=mp_load_id, stop_times=stop_times)
-                    mark_sent(sent, key, cmi_status)
-
             # ── Archive if Delivered ──────────────────────────────────────
             if "delivered" in cached_status.lower():
                 # Guard: don't archive if truck is still > 15 miles from destination.
@@ -623,7 +330,6 @@ def run_once():
                                         mp_load_id=mp_load_id, stop_times=stop_times)
 
     save_tracking_cache(tracking_cache)
-    save_sent_alerts(sent)
     log.info("FTL poll complete")
 
 
