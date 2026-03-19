@@ -178,7 +178,7 @@ export default function FTLQuoteView() {
 
   // ── Margin ──
   const [marginUsd, setMarginUsd] = useState(300);
-  const [marginSource, setMarginSource] = useState("fixed"); // fixed | pct
+  const [marginSource, setMarginSource] = useState("auto"); // auto | fixed | pct
   const [marginPct, setMarginPct] = useState(15);
 
   // ── Results ──
@@ -505,25 +505,49 @@ export default function FTLQuoteView() {
           </div>
 
           {/* Margin Control */}
-          <div className="glass" style={{ borderRadius: 12, padding: 20, border: "1px solid rgba(255,255,255,0.06)" }}>
+          <div className="glass" style={{ borderRadius: 12, padding: 20, border: marginSource === "auto" ? "1px solid rgba(251,191,36,0.2)" : "1px solid rgba(255,255,255,0.06)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", textTransform: "uppercase" }}>Margin</span>
               <div style={{ display: "flex", gap: 4, background: "#14181d", borderRadius: 6, padding: 2 }}>
-                {["fixed", "pct"].map(m => (
+                {["auto", "fixed", "pct"].map(m => (
                   <button key={m} onClick={() => setMarginSource(m)}
-                    style={{ padding: "4px 12px", fontSize: 10, fontWeight: 700, borderRadius: 4, border: "none", background: marginSource === m ? "rgba(0,212,170,0.15)" : "transparent", color: marginSource === m ? "#00D4AA" : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
-                    {m === "fixed" ? "$ Fixed" : "% of Avg"}
+                    style={{ padding: "4px 12px", fontSize: 10, fontWeight: 700, borderRadius: 4, border: "none", background: marginSource === m ? (m === "auto" ? "rgba(251,191,36,0.18)" : "rgba(0,212,170,0.15)") : "transparent", color: marginSource === m ? (m === "auto" ? "#FBBF24" : "#00D4AA") : "#5A6478", cursor: "pointer", fontFamily: "inherit" }}>
+                    {m === "auto" ? "Auto" : m === "fixed" ? "$ Fixed" : "% of Avg"}
                   </button>
                 ))}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 12, maxWidth: 300 }}>
-              {marginSource === "fixed" ? (
+            {marginSource === "auto" ? (
+              <div>
+                {result?.auto_margin ? (
+                  <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                    <div style={{ fontSize: 28, fontWeight: 800, fontFamily: mono, color: "#FBBF24" }}>{result.auto_margin.pct}%</div>
+                    <div>
+                      <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                          background: { loose: "rgba(52,211,153,0.12)", balanced: "rgba(96,165,250,0.12)", tight: "rgba(251,191,36,0.12)", very_tight: "rgba(248,113,113,0.12)" }[result.auto_margin.otri_band] || "rgba(255,255,255,0.06)",
+                          color: { loose: "#34d399", balanced: "#60a5fa", tight: "#FBBF24", very_tight: "#f87171" }[result.auto_margin.otri_band] || "#8B95A8",
+                        }}>OTRI: {result.auto_margin.otri_band.replace("_", " ")}</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(167,139,250,0.12)", color: "#a78bfa" }}>
+                          {({ short: "<300 mi", medium: "300-800 mi", long: "800-1500 mi", xlong: ">1500 mi" })[result.auto_margin.mileage_band] || result.auto_margin.mileage_band}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 10, color: "#5A6478" }}>OTRI × mileage → dynamic margin</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 11, color: "#5A6478" }}>Enter OTRI + mileage to compute auto margin</div>
+                )}
+              </div>
+            ) : marginSource === "fixed" ? (
+              <div style={{ display: "flex", gap: 12, maxWidth: 300 }}>
                 <RateInput label="Margin $" value={marginUsd} onChange={setMarginUsd} placeholder="300" />
-              ) : (
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: 12, maxWidth: 300 }}>
                 <RateInput label="Margin %" value={marginPct} onChange={setMarginPct} placeholder="15" prefix="%" />
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* Fuel Cost Calculator */}
@@ -793,7 +817,7 @@ export default function FTLQuoteView() {
                   {/* Pricing Breakdown */}
                   <div style={{ marginBottom: 16 }}>
                     <ResultRow label="Carrier Target (Avg All)" value={fmtDec(result.carrier_target)} rpm={mileage > 0 ? fmtRpm(result.carrier_rpm) : null} />
-                    <ResultRow label="Margin" value={`+${fmtDec(result.margin_usd)}`} sub={`${result.margin_pct}%`} accent="#FBBF24" />
+                    <ResultRow label={result.auto_margin?.active ? "Margin (Auto)" : "Margin"} value={`+${fmtDec(result.margin_usd)}`} sub={`${result.margin_pct}%${result.auto_margin?.active ? ` · ${result.auto_margin.otri_band.replace("_"," ")} / ${result.auto_margin.mileage_band}` : ""}`} accent="#FBBF24" />
                     <div style={{ height: 1, background: "linear-gradient(90deg, transparent, rgba(0,212,170,0.3), transparent)", margin: "4px 0" }} />
                     <ResultRow label="Quote Customer" value={fmtDec(result.quote_customer)} rpm={mileage > 0 ? fmtRpm(result.quoted_rpm) : null} large accent="#00c853" />
                   </div>

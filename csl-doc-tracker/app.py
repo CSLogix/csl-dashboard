@@ -319,6 +319,39 @@ def startup():
     except Exception as e:
         log.warning("Could not create lane_rates table: %s", e)
 
+    # Create shipments table (completed FTL loads for lane comp queries)
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS shipments (
+                        id              SERIAL PRIMARY KEY,
+                        efj             VARCHAR(32),
+                        account         VARCHAR(100),
+                        move_type       VARCHAR(32),
+                        origin          VARCHAR(256),
+                        destination     VARCHAR(256),
+                        carrier         VARCHAR(256),
+                        carrier_pay     DECIMAL(10,2),
+                        customer_rate   DECIMAL(10,2),
+                        equipment_type  VARCHAR(64),
+                        pickup_date     DATE,
+                        delivery_date   DATE,
+                        mileage         DECIMAL(10,2),
+                        notes           TEXT,
+                        source          VARCHAR(32) DEFAULT 'sheet_archive',
+                        created_at      TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_shipments_origin ON shipments(LOWER(origin))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_shipments_dest ON shipments(LOWER(destination))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_shipments_move ON shipments(LOWER(move_type))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_shipments_efj ON shipments(efj)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_shipments_created ON shipments(created_at)")
+        log.info("shipments table ready")
+    except Exception as e:
+        log.warning("Could not create shipments table: %s", e)
+
     # Create market_rates table (LoadMatch / benchmark data — no carrier)
     try:
         with db.get_conn() as conn:
