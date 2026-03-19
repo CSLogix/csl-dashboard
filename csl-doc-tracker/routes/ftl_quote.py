@@ -8,17 +8,101 @@ Replicates the Excel-based quoting workflow:
 """
 
 import logging
+import threading
 from datetime import datetime, timedelta
 from typing import Optional
 
+import requests as _req
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+import config
 import database as db
 from shared import log
 
 router = APIRouter()
+
+# ── EIA Diesel Price Cache ────────────────────────────────────
+# Cache the weekly diesel price so we don't hit EIA on every page load.
+# Refreshes at most once per 6 hours.
+_diesel_cache = {"price": None, "date": None, "fetched_at": None}
+_diesel_lock = threading.Lock()
+_DIESEL_CACHE_TTL = timedelta(hours=6)
+
+# EIA API v2 — Weekly U.S. No 2 Diesel Retail Prices
+_EIA_DIESEL_URL = "https://api.eia.gov/v2/petroleum/pri/gnd/data"
+
+
+def _fetch_eia_diesel() -> dict:
+    """Fetch latest weekly US diesel price from EIA API."""
+    api_key = config.EIA_API_KEY
+    if not api_key:
+        return {"price": None, "date": None, "error": "EIA_API_KEY not configured"}
+
+    try:
+        resp = _req.get(_EIA_DIESEL_URL, params={
+            "api_key": api_key,
+            "frequency": "weekly",
+            "data[0]": "value",
+            "facets[product][]": "EPD2D",   # No 2 Diesel
+            "facets[duoarea][]": "NUS",      # U.S. National
+            "sort[0][column]": "period",
+            "sort[0][direction]": "desc",
+            "length": 1,
+        }, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        records = data.get("response", {}).get("data", [])
+        if records:
+            rec = records[0]
+            return {
+                "price": float(rec["value"]),
+                "date": rec.get("period", ""),
+                "error": None,
+            }
+        return {"price": None, "date": None, "error": "No data returned from EIA"}
+    except Exception as e:
+        log.warning("EIA diesel fetch error: %s", e)
+        return {"price": None, "date": None, "error": str(e)}
+
+
+def _get_diesel_price() -> dict:
+    """Get diesel price from cache or fetch if stale."""
+    with _diesel_lock:
+        now = datetime.utcnow()
+        if (
+            _diesel_cache["price"] is not None
+            and _diesel_cache["fetched_at"]
+            and (now - _diesel_cache["fetched_at"]) < _DIESEL_CACHE_TTL
+        ):
+            return {
+                "price": _diesel_cache["price"],
+                "date": _diesel_cache["date"],
+                "cached": True,
+            }
+
+    # Fetch fresh (outside lock to avoid blocking)
+    result = _fetch_eia_diesel()
+    if result["price"] is not None:
+        with _diesel_lock:
+            _diesel_cache["price"] = result["price"]
+            _diesel_cache["date"] = result["date"]
+            _diesel_cache["fetched_at"] = datetime.utcnow()
+    return result
+
+
+@router.get("/api/ftl-quote/diesel-price")
+async def ftl_diesel_price():
+    """Return current US national average diesel price from EIA."""
+    result = _get_diesel_price()
+    return JSONResponse({
+        "price": result.get("price"),
+        "date": result.get("date", ""),
+        "cached": result.get("cached", False),
+        "error": result.get("error"),
+        "source": "EIA Weekly U.S. No 2 Diesel Retail Prices",
+    })
 
 # ── Pydantic models ────────────────────────────────────────────
 

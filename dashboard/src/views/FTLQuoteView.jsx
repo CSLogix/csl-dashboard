@@ -153,7 +153,23 @@ export default function FTLQuoteView() {
 
   // ── Fuel calculator ──
   const [truckMpg, setTruckMpg] = useState(8);
-  const [dieselPrice, setDieselPrice] = useState(6.43);
+  const [dieselPrice, setDieselPrice] = useState(0);
+  const [dieselDate, setDieselDate] = useState("");
+  const [dieselLoading, setDieselLoading] = useState(true);
+
+  // Auto-fetch EIA diesel price on mount
+  useEffect(() => {
+    apiFetch(`${API_BASE}/api/ftl-quote/diesel-price`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.price) {
+          setDieselPrice(d.price);
+          setDieselDate(d.date || "");
+        }
+      })
+      .catch(() => {})
+      .finally(() => setDieselLoading(false));
+  }, []);
 
   // Fuel computed values (client-side, no API needed)
   const fuelGallons = mileage > 0 && truckMpg > 0 ? Math.round((mileage / truckMpg) * 10) / 10 : 0;
@@ -532,8 +548,10 @@ export default function FTLQuoteView() {
                   </div>
                   <RateInput label="Truck MPG" value={truckMpg} onChange={setTruckMpg} placeholder="8.00" prefix="" />
                   <div style={{ fontSize: 9, color: "#5A6478", marginTop: -4 }}>avg Class 8: 5.5-7.0</div>
-                  <RateInput label="Diesel Price ($/gal)" value={dieselPrice} onChange={setDieselPrice} placeholder="6.430" />
-                  <div style={{ fontSize: 9, color: "#5A6478", marginTop: -4 }}>update from EIA weekly</div>
+                  <RateInput label="Diesel Price ($/gal)" value={dieselPrice} onChange={setDieselPrice} placeholder={dieselLoading ? "loading..." : "6.430"} />
+                  <div style={{ fontSize: 9, color: dieselDate ? "#34d399" : "#5A6478", marginTop: -4 }}>
+                    {dieselDate ? `EIA ${dieselDate}` : dieselLoading ? "Fetching EIA..." : "EIA auto-fetch (set EIA_API_KEY)"}
+                  </div>
                 </div>
               </div>
               {/* Results */}
