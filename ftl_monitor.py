@@ -53,7 +53,7 @@ SENT_ALERTS_FILE    = "/root/csl-bot/ftl_sent_alerts.json"
 TRACKING_CACHE_FILE = "/root/csl-bot/ftl_tracking_cache.json"
 
 ALERT_CUTOFF_DATE   = "2026-03-01"
-POLL_INTERVAL       = 10 * 60  # seconds
+POLL_INTERVAL       = 30 * 60  # seconds
 
 # ── SMTP / email ─────────────────────────────────────────────────────────────────
 

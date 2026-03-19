@@ -160,6 +160,10 @@ class TrackingCache:
     Eliminates synchronous file I/O from the webhook hot path.
     The cache loads from disk on startup and flushes changes every 2 seconds
     so that external processes (ftl_monitor.py) still see updates.
+
+    External-write awareness: tracks which keys we've modified (_dirty_keys).
+    Before flushing, checks if the file was modified externally (by ftl_monitor.py)
+    and merges external changes for non-dirty keys so they aren't clobbered.
     """
 
     _instance = None
@@ -176,11 +180,14 @@ class TrackingCache:
         self._initialized = True
         self._lock = threading.Lock()
         self._dirty = False
+        self._dirty_keys: set = set()
         self._data: dict = {}
+        self._last_file_mtime: float = 0
         # Load from disk
         try:
             with open(TRACKING_CACHE_FILE) as f:
                 self._data = json.load(f)
+            self._last_file_mtime = os.path.getmtime(TRACKING_CACHE_FILE)
             log.info("TrackingCache loaded %d entries from disk", len(self._data))
         except (FileNotFoundError, json.JSONDecodeError):
             log.info("TrackingCache starting empty (file not found or invalid)")
@@ -204,6 +211,7 @@ class TrackingCache:
         with self._lock:
             self._data[key] = entry
             self._dirty = True
+            self._dirty_keys.add(key)
 
     def update_entry(self, key: str, updates: dict):
         """Merge updates into an existing cache entry."""
@@ -211,6 +219,7 @@ class TrackingCache:
             if key in self._data:
                 self._data[key].update(updates)
                 self._dirty = True
+                self._dirty_keys.add(key)
 
     def find_entry(self, load_ref: str) -> tuple[str | None, dict | None]:
         """Find a cache entry by EFJ, load_num, mp_load_id, or key.
@@ -245,11 +254,37 @@ class TrackingCache:
         self._do_flush()
 
     def _flush_loop(self):
-        """Background thread: flush to disk every 2 seconds if dirty."""
+        """Background thread: sync external changes + flush every 2 seconds."""
         while True:
             _time.sleep(2)
+            self._sync_external_changes()
             if self._dirty:
                 self._do_flush()
+
+    def _sync_external_changes(self):
+        """Reload from disk if an external process (ftl_monitor) modified the file."""
+        try:
+            current_mtime = os.path.getmtime(TRACKING_CACHE_FILE)
+        except OSError:
+            return
+        with self._lock:
+            if current_mtime <= self._last_file_mtime:
+                return
+            try:
+                with open(TRACKING_CACHE_FILE) as f:
+                    disk_data = json.load(f)
+                # Merge: for non-dirty keys, take the disk version
+                for key, value in disk_data.items():
+                    if key not in self._dirty_keys:
+                        self._data[key] = value
+                # Add any keys from disk that we don't have at all
+                for key in disk_data:
+                    if key not in self._data:
+                        self._data[key] = disk_data[key]
+                self._last_file_mtime = current_mtime
+                log.debug("TrackingCache synced external changes from disk")
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass
 
     def _do_flush(self):
         with self._lock:
@@ -257,11 +292,14 @@ class TrackingCache:
                 return
             data_copy = dict(self._data)
             self._dirty = False
+            self._dirty_keys.clear()
         try:
             tmp_path = TRACKING_CACHE_FILE + ".tmp"
             with open(tmp_path, "w") as f:
                 json.dump(data_copy, f, indent=2)
             os.replace(tmp_path, TRACKING_CACHE_FILE)
+            with self._lock:
+                self._last_file_mtime = os.path.getmtime(TRACKING_CACHE_FILE)
         except Exception as e:
             log.warning("TrackingCache flush failed: %s", e)
 
