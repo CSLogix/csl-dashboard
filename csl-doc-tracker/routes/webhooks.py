@@ -469,7 +469,88 @@ async def macropoint_webhook_get(request: Request, background_tasks: BackgroundT
             if not (entry.get("status") or "").strip():
                 entry["status"] = "Tracking Started"
                 log.info(f"Webhook: auto-set Tracking Started for {matched_key} (ping received)")
+
+            # ── Infer In Transit from pings ──────────────────────────
+            # If truck has arrived at pickup but no X2 departure event yet,
+            # detect movement away from pickup via consecutive pings and
+            # auto-set status to "Departed Pickup - En Route".
+            _stop_times = entry.get("stop_times", {})
+            _cur_status = (entry.get("status") or "").strip()
+            _pickup_rank = _STATUS_RANK.get(_cur_status, 0)
+            if (_stop_times.get("stop1_arrived")
+                    and not _stop_times.get("stop1_departed")
+                    and _pickup_rank < _STATUS_RANK.get("Departed Pickup - En Route", 4)):
+                try:
+                    _prev_loc = entry.get("_prev_ping_loc")
+                    _cur_lat, _cur_lon = float(lat), float(lon)
+                    if _prev_loc:
+                        from math import radians, sin, cos, sqrt, atan2
+                        _R = 3959  # Earth radius in miles
+                        _la1, _lo1 = radians(_prev_loc["lat"]), radians(_prev_loc["lon"])
+                        _la2, _lo2 = radians(_cur_lat), radians(_cur_lon)
+                        _dlat, _dlon = _la2 - _la1, _lo2 - _lo1
+                        _a = sin(_dlat/2)**2 + cos(_la1)*cos(_la2)*sin(_dlon/2)**2
+                        _dist = _R * 2 * atan2(sqrt(_a), sqrt(1-_a))
+                        # Count consecutive pings showing movement (> 0.5 mi apart)
+                        _move_count = entry.get("_ping_move_count", 0)
+                        if _dist > 0.5:
+                            _move_count += 1
+                        else:
+                            _move_count = 0
+                        entry["_ping_move_count"] = _move_count
+                        # 3+ consecutive moving pings = truck has departed pickup
+                        if _move_count >= 3:
+                            _inferred = "Departed Pickup - En Route"
+                            entry["status"] = _inferred
+                            _stop_times["stop1_departed"] = now
+                            entry["stop_times"] = _stop_times
+                            entry["_ping_move_count"] = 0
+                            log.info(f"Webhook INFERRED In Transit from pings: {load_ref} "
+                                     f"({_move_count} consecutive moving pings)")
+                            # Persist inferred event
+                            _persist_efj = entry.get("efj")
+                            if _persist_efj:
+                                _persist_tracking_event(
+                                    efj=_persist_efj, load_ref=load_ref,
+                                    event_code="X2", stop_name="Pickup (inferred)",
+                                    stop_type="Pickup", status_mapped=_inferred,
+                                    lat=lat, lon=lon, city=city, state=state,
+                                    event_time=now, mp_order_id=mp_order_id,
+                                    raw_params={"inferred_from": "consecutive_pings",
+                                                "move_count": _move_count},
+                                )
+                            # SSE broadcast + background alert
+                            broadcast_tracking_update(matched_key, {
+                                "status": _inferred,
+                                "stop1Departed": now,
+                                "lastScraped": now,
+                                "lastLocation": {"city": city, "state": state},
+                            })
+                            # Fire background PG write + email alert
+                            _inf_efj = entry.get("efj", "")
+                            if _inf_efj:
+                                background_tasks.add_task(
+                                    _webhook_send_alert_background,
+                                    efj=_inf_efj,
+                                    load_num=entry.get("load_num", load_ref),
+                                    status=_inferred,
+                                    stop_times=_stop_times,
+                                    mp_load_id=entry.get("mp_load_id", ""),
+                                    matched_key=matched_key,
+                                )
+                    entry["_prev_ping_loc"] = {"lat": _cur_lat, "lon": _cur_lon}
+                except (ValueError, TypeError):
+                    pass  # Bad lat/lon — skip inference
+
             tracking_cache.set(matched_key, entry)
+
+            # ── SSE: broadcast location ping to dashboard ────────────
+            broadcast_tracking_update(matched_key, {
+                "lastLocation": {"lat": lat, "lon": lon, "city": city,
+                                 "state": state, "street": street,
+                                 "timestamp": timestamp},
+                "lastScraped": now,
+            })
 
         log.debug(f"Webhook ping: {load_ref} @ {city}, {state}")
         return {"status": "ok", "type": "location_ping", "load": load_ref}
