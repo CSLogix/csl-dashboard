@@ -22,9 +22,9 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-MODEL = "claude-sonnet-4-20250514"
-MAX_TOOL_ITERATIONS = 5
-MAX_RESPONSE_TOKENS = 2048
+MODEL = os.getenv("AI_MODEL", "claude-sonnet-4-6")
+MAX_TOOL_ITERATIONS = 8
+MAX_RESPONSE_TOKENS = 4096
 
 client = None
 
@@ -72,7 +72,7 @@ Key context:
 - Carrier tiers: 1 = preferred, 2 = standard, 3 = backup. DNU = Do Not Use
 - customer_rate = what we charge the customer, carrier_pay = what we pay the carrier, margin = customer_rate - carrier_pay
 
-Use the provided tools to look up real data before answering. You have 24 tools covering:
+Use the provided tools to look up real data before answering. Your tools cover:
 - Lane rates, margins, accessorial estimates, and smart dispatch suggestions
 - Carrier search, compliance, and what-if comparisons
 - Shipment status, full summaries, side-by-side load comparisons
@@ -81,11 +81,19 @@ Use the provided tools to look up real data before answering. You have 24 tools 
 - Detention/demurrage cost calculations
 - Transit time estimates from historical delivery data
 - Daily briefings, customer-friendly explanations, and carrier emails
+- Knowledge base: persistent operational memory with rules, preferences, and carrier notes
 
 When you receive document content (PDF, spreadsheet, email), extract all shipment/load details you can find.
 - If the user asks you to ADD or CREATE a load (single or multiple), use bulk_create_loads to INSERT them into the database. Always present the data first, then call bulk_create_loads.
 - Only use draft_new_load if the user explicitly asks to PREVIEW or DRAFT without saving.
 - Common document types: rate confirmations, load tenders, booking sheets, dispatch lists, customer POs.
+
+## Knowledge Base
+You have a persistent knowledge base of operational rules, preferences, and institutional knowledge.
+- When answering about specific accounts, carriers, or lanes, check query_knowledge_base for saved rules
+- When the user teaches you something ("remember that...", "from now on...", "note that..."), save it with save_memory
+- Relevant knowledge entries are automatically injected into your context when scopes are detected in the question
+- Categories: account_rule, carrier_note, lane_tip, rate_rule, sop, preference
 
 Be concise, direct, and data-driven. Format monetary values with $ signs. When showing rates, include accessorials if non-zero. If a query returns no results, say so clearly."""
 
@@ -650,6 +658,52 @@ TOOLS = [
                             "origin",
                             "destination"
                     ]
+            }
+    },
+
+    {
+            "name": "save_memory",
+            "description": "Save operational knowledge for future reference. Use when user says 'remember that...', 'from now on...', 'note that...', or shares a rule, preference, or tip about an account, carrier, lane, or process.",
+            "input_schema": {
+                    "type": "object",
+                    "properties": {
+                            "category": {
+                                    "type": "string",
+                                    "enum": ["account_rule", "carrier_note", "lane_tip", "rate_rule", "sop", "preference"],
+                                    "description": "Type of knowledge: account_rule (account-specific), carrier_note (about a carrier), lane_tip (route-specific), rate_rule (pricing/margin), sop (process/procedure), preference (general preference)"
+                            },
+                            "scope": {
+                                    "type": "string",
+                                    "description": "What this applies to: account name, carrier name, lane (e.g. 'PNCT→Edison'), or null for global rules"
+                            },
+                            "content": {
+                                    "type": "string",
+                                    "description": "The knowledge to remember — be specific and actionable"
+                            }
+                    },
+                    "required": ["category", "content"]
+            }
+    },
+    {
+            "name": "query_knowledge_base",
+            "description": "Search stored operational knowledge, rules, and preferences. Use before answering questions about accounts, carriers, lanes, or processes to check for saved rules and institutional knowledge.",
+            "input_schema": {
+                    "type": "object",
+                    "properties": {
+                            "category": {
+                                    "type": "string",
+                                    "enum": ["account_rule", "carrier_note", "lane_tip", "rate_rule", "sop", "preference"],
+                                    "description": "Filter by knowledge type"
+                            },
+                            "scope": {
+                                    "type": "string",
+                                    "description": "Filter by account, carrier, or lane name"
+                            },
+                            "query": {
+                                    "type": "string",
+                                    "description": "Free-text search across knowledge entries"
+                            }
+                    }
             }
     },
 
@@ -2224,6 +2278,47 @@ def _exec_smart_dispatch_suggest(origin: str, destination: str,
         return {"error": str(e)}
 
 
+def _exec_save_memory(category: str, content: str, scope: str = None) -> dict:
+    """Save a piece of operational knowledge to the knowledge base."""
+    try:
+        row = db.kb_insert(
+            category=category,
+            content=content,
+            scope=scope,
+            source="ai_learned",
+        )
+        return {
+            "saved": True,
+            "id": row["id"],
+            "message": f"Saved to knowledge base: [{category}] {scope or 'global'} — {content[:80]}..."
+        }
+    except Exception as e:
+        log.exception("save_memory failed")
+        return {"error": str(e)}
+
+
+def _exec_query_knowledge_base(category: str = None, scope: str = None, query: str = None) -> dict:
+    """Search the knowledge base for saved rules and preferences."""
+    try:
+        rows = db.kb_search(category=category, scope=scope, query=query, limit=20)
+        if not rows:
+            return {"results": [], "message": "No knowledge base entries found matching criteria"}
+        # Format for readability
+        results = []
+        for r in rows:
+            results.append({
+                "id": r["id"],
+                "category": r["category"],
+                "scope": r.get("scope"),
+                "content": r["content"],
+                "source": r.get("source"),
+            })
+        return {"results": results, "count": len(results)}
+    except Exception as e:
+        log.exception("query_knowledge_base failed")
+        return {"error": str(e)}
+
+
 TOOL_DISPATCH = {
     "query_lane_history": lambda args: _exec_query_lane_history(**args),
     "query_carrier_db": lambda args: _exec_query_carrier_db(**args),
@@ -2249,6 +2344,8 @@ TOOL_DISPATCH = {
     "what_if_scenario": lambda args: _exec_what_if_scenario(**args),
     "daily_briefing": lambda args: _exec_daily_briefing(**args),
     "smart_dispatch_suggest": lambda args: _exec_smart_dispatch_suggest(**args),
+    "save_memory": lambda args: _exec_save_memory(**args),
+    "query_knowledge_base": lambda args: _exec_query_knowledge_base(**args),
 }
 
 
@@ -2263,6 +2360,60 @@ def _run_tool(name: str, input_args: dict) -> str:
     except Exception as e:
         log.exception("Tool %s execution error", name)
         return json.dumps({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Knowledge base scope detection
+# ---------------------------------------------------------------------------
+
+# Known account names for auto-detection
+_KNOWN_ACCOUNTS = {
+    "allround", "boviet", "cadi", "dhl", "dsv", "eshipping",
+    "iws", "kripke", "mao", "mgf", "rose", "usha", "tolead",
+    "prolog", "talatrans", "ls cargo", "gw-world",
+}
+
+# Common port/terminal names
+_KNOWN_PORTS = {
+    "pnct", "apm", "maher", "bayonne", "newark", "elizabeth",
+    "la/lb", "long beach", "los angeles", "savannah", "houston",
+    "charleston", "norfolk", "oakland", "garden city",
+}
+
+
+def _detect_scopes(question: str, context: dict = None) -> list:
+    """Extract account, carrier, and lane references from question + context for KB lookup."""
+    scopes = set()
+    q_lower = question.lower()
+
+    # Detect accounts
+    for acct in _KNOWN_ACCOUNTS:
+        if acct in q_lower:
+            scopes.add(acct.title() if len(acct) > 3 else acct.upper())
+
+    # Detect ports/terminals
+    for port in _KNOWN_PORTS:
+        if port in q_lower:
+            scopes.add(port.upper() if len(port) <= 4 else port.title())
+
+    # Add context-based scopes
+    if context:
+        if context.get("account"):
+            scopes.add(context["account"])
+        if context.get("current_efj"):
+            scopes.add(context["current_efj"])
+
+    # Detect EFJ references
+    efj_matches = re.findall(r'EFJ[-\s]?\d+', question, re.I)
+    for m in efj_matches:
+        scopes.add(m.upper().replace(" ", "-"))
+
+    # Always include global entries by returning at least one scope
+    # (kb_get_relevant always includes scope IS NULL)
+    if not scopes:
+        scopes.add("__global__")  # dummy to trigger global-only fetch
+
+    return list(scopes)
 
 
 # ---------------------------------------------------------------------------
@@ -2295,6 +2446,21 @@ async def ask_ai(question: str, context: dict = None) -> dict:
             ctx_parts.append(f"Current account filter: {context['account']}.")
         if ctx_parts:
             system += "\n\nCurrent context: " + " ".join(ctx_parts)
+
+    # Auto-inject relevant knowledge base entries
+    try:
+        # Extract potential scopes from question + context
+        scopes = _detect_scopes(question, context)
+        if scopes:
+            kb_entries = db.kb_get_relevant(scopes, limit=15)
+            if kb_entries:
+                kb_lines = []
+                for entry in kb_entries:
+                    scope_label = f"[{entry['scope']}] " if entry.get('scope') else "[Global] "
+                    kb_lines.append(f"- {scope_label}({entry['category']}) {entry['content']}")
+                system += "\n\n## Operational Knowledge (auto-loaded from your knowledge base)\n" + "\n".join(kb_lines)
+    except Exception as e:
+        log.debug("Knowledge base auto-injection failed: %s", e)
 
     tool_calls_log = []
     sources = []

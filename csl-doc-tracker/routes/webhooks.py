@@ -1034,6 +1034,143 @@ async def api_ask_ai(request: Request):
     return JSONResponse(result)
 
 
+# ── Knowledge Base CRUD ─────────────────────────────────────────────────
+@router.get("/api/knowledge")
+async def api_knowledge_list(
+    category: str = None,
+    scope: str = None,
+    q: str = None,
+    limit: int = 50,
+):
+    """List / search knowledge base entries."""
+    rows = db.kb_search(category=category, scope=scope, query=q, limit=limit)
+    return JSONResponse({"entries": rows, "count": len(rows)})
+
+
+@router.post("/api/knowledge")
+async def api_knowledge_create(request: Request):
+    """Create a new knowledge base entry."""
+    body = await request.json()
+    category = (body.get("category") or "").strip()
+    content = (body.get("content") or "").strip()
+    if not category or not content:
+        return JSONResponse({"error": "category and content are required"}, status_code=400)
+    scope = (body.get("scope") or "").strip() or None
+    source = (body.get("source") or "admin_entry").strip()
+    row = db.kb_insert(category=category, content=content, scope=scope, source=source)
+    return JSONResponse({"entry": row})
+
+
+@router.patch("/api/knowledge/{entry_id}")
+async def api_knowledge_update(entry_id: int, request: Request):
+    """Update a knowledge base entry."""
+    body = await request.json()
+    row = db.kb_update(entry_id, **body)
+    if not row:
+        return JSONResponse({"error": "Not found or no valid fields"}, status_code=404)
+    return JSONResponse({"entry": row})
+
+
+@router.delete("/api/knowledge/{entry_id}")
+async def api_knowledge_delete(entry_id: int):
+    """Soft-delete a knowledge base entry."""
+    ok = db.kb_delete(entry_id)
+    if not ok:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/knowledge/bulk-import")
+async def api_knowledge_bulk_import(request: Request):
+    """
+    Parse a Claude memory dump (raw text) and import as knowledge base entries.
+    Accepts { "text": "..." } — each line or paragraph becomes an entry.
+    Uses Claude to classify each entry into category + scope.
+    """
+    body = await request.json()
+    raw_text = (body.get("text") or "").strip()
+    if not raw_text:
+        return JSONResponse({"error": "text field is required"}, status_code=400)
+
+    # Split into individual memory entries
+    # Claude memory typically uses line breaks or bullet points
+    entries_raw = []
+    for line in raw_text.split("\n"):
+        line = line.strip().lstrip("•-*→ ")
+        if len(line) > 10:  # skip empty/trivial lines
+            entries_raw.append(line)
+
+    if not entries_raw:
+        return JSONResponse({"error": "No entries found in text"}, status_code=400)
+
+    # Use Claude to classify each entry
+    import anthropic
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        # Fallback: import as unclassified
+        created = []
+        for entry_text in entries_raw:
+            row = db.kb_insert(
+                category="preference",
+                content=entry_text,
+                scope=None,
+                source="memory_import",
+            )
+            created.append(row)
+        return JSONResponse({"imported": len(created), "entries": created})
+
+    # Batch classify with Claude
+    classify_prompt = """Classify each knowledge entry below into category and scope.
+
+Categories: account_rule, carrier_note, lane_tip, rate_rule, sop, preference
+Scope: the account name, carrier name, or lane this applies to (null if global)
+
+Return ONLY valid JSON array (no markdown):
+[{"category": "...", "scope": "..." or null, "content": "original text"}]
+
+Entries:
+"""
+    for i, entry_text in enumerate(entries_raw[:100], 1):  # cap at 100
+        classify_prompt += f"{i}. {entry_text}\n"
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": classify_prompt}],
+        )
+        response_text = response.content[0].text.strip()
+        # Parse JSON from response
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if json_match:
+            classified = json.loads(json_match.group())
+        else:
+            classified = json.loads(response_text)
+    except Exception as e:
+        log.warning("Claude classification failed: %s — importing as unclassified", e)
+        classified = [{"category": "preference", "scope": None, "content": t} for t in entries_raw]
+
+    created = []
+    for entry in classified:
+        try:
+            row = db.kb_insert(
+                category=entry.get("category", "preference"),
+                content=entry.get("content", ""),
+                scope=entry.get("scope"),
+                source="memory_import",
+            )
+            created.append(row)
+        except Exception as e:
+            log.warning("Failed to import KB entry: %s", e)
+
+    return JSONResponse({
+        "imported": len(created),
+        "total_parsed": len(entries_raw),
+        "entries": created,
+    })
+
+
 @router.post("/api/ask-ai/upload")
 async def api_ask_ai_upload(
     file: UploadFile = File(...),

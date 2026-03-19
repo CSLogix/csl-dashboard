@@ -405,6 +405,29 @@ def startup():
     except Exception as e:
         log.warning("Could not create rep_tasks table: %s", e)
 
+    # Create ai_knowledge_base table (persistent AI memory)
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_knowledge_base (
+                        id SERIAL PRIMARY KEY,
+                        category TEXT NOT NULL,
+                        scope TEXT,
+                        content TEXT NOT NULL,
+                        source TEXT DEFAULT 'admin_entry',
+                        active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_kb_category ON ai_knowledge_base(category)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_kb_scope ON ai_knowledge_base(scope)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_kb_active ON ai_knowledge_base(active)")
+        log.info("ai_knowledge_base table ready")
+    except Exception as e:
+        log.warning("Could not create ai_knowledge_base table: %s", e)
+
     # Pre-populate sheet cache in background
     threading.Thread(target=sheet_cache.refresh_if_needed, daemon=True).start()
     log.info("Dashboard started")
