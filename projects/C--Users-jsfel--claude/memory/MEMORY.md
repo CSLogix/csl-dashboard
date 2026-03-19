@@ -12,3 +12,4 @@
 - [project_dashboard_prs_deployed.md](project_dashboard_prs_deployed.md) — All PRs deployed + Rate IQ RPM fix + CSLogix_Bot PRs #8-#12 merged (2026-03-19)
 - [project_tolead_dualwrite.md](project_tolead_dualwrite.md) — Tolead dual-write is LAX-only; ORD/JFK/DFW skip (separate sheets)
 - [project_ask_ai_memory_bol.md](project_ask_ai_memory_bol.md) — Ask AI: memory tool fix + BOL auto-parse → load creation (2026-03-19)
+- [project_oxylabs_proxy_status.md](project_oxylabs_proxy_status.md) — Oxylabs proxy DNS failure 2026-03-19: transient, quota healthy (39%), self-resolved
