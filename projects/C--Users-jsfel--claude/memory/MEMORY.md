@@ -9,5 +9,6 @@
 - [project_jsoncargo_quota.md](project_jsoncargo_quota.md) — JsonCargo API quota optimization: cache TTL, BOL caching, business hours gate (2026-03-18)
 - [project_google_maps_key_rotation.md](project_google_maps_key_rotation.md) — Distance Matrix API key rotated 2026-03-18, IP+API restricted, CSL Doc Tracker GCP project
 - [feedback_coderabbit_docstrings.md](feedback_coderabbit_docstrings.md) — CodeRabbit auto-docstrings break builds: missing comment closers + indentation errors
-- [project_dashboard_prs_deployed.md](project_dashboard_prs_deployed.md) — All PRs #1-#23 deployed (2026-03-18), PR #23 = exception handling + atomic writes
+- [project_dashboard_prs_deployed.md](project_dashboard_prs_deployed.md) — All PRs deployed + Rate IQ RPM fix + CSLogix_Bot PRs #8-#12 merged (2026-03-19)
 - [project_tolead_dualwrite.md](project_tolead_dualwrite.md) — Tolead dual-write is LAX-only; ORD/JFK/DFW skip (separate sheets)
+- [project_ask_ai_memory_bol.md](project_ask_ai_memory_bol.md) — Ask AI: memory tool fix + BOL auto-parse → load creation (2026-03-19)

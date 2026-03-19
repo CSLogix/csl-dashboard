@@ -14,4 +14,6 @@ Google Maps Distance Matrix API key was rotated on 2026-03-18 after GitHub secre
 - API restriction: Distance Matrix API only
 - Key stored in: `/root/csl-bot/.env` (`GOOGLE_MAPS_API_KEY`) and `/etc/systemd/system/csl-dashboard.service` (`Environment=`)
 
+**IPv6 gap (2026-03-19):** Server uses IPv6 (`2a02:4780:4:2fa2::1`) for outbound requests by default, but API key only allows IPv4 `187.77.217.61`. Workaround: force IPv4 via `urllib3.util.connection.allowed_gai_family = lambda: socket.AF_INET` in Python. Proper fix: add the IPv6 to GCP API key IP restrictions.
+
 **How to apply:** Never hardcode API keys in patch files or committed code. Always use env vars. If key needs rotation again, create new key in CSL Doc Tracker GCP project Credentials page.
