@@ -29,10 +29,6 @@ router = APIRouter()
 if "/root/csl-bot" not in sys.path:
     sys.path.insert(0, "/root/csl-bot")
 from csl_ftl_alerts import send_webhook_alert, STATUS_TO_DROPDOWN as _ALERT_STATUS_MAP
-try:
-    from csl_sheet_writer import sheet_update_ftl as _sheet_update_ftl
-except ImportError:
-    _sheet_update_ftl = None
 
 # ── Status hierarchy: higher number = further along in lifecycle ──
 _STATUS_RANK = {
@@ -410,19 +406,6 @@ def _webhook_send_alert_background(efj: str, load_num: str, status: str,
             mp_load_id=mp_load_id,
         )
         log.info(f"Webhook bg: alert {'sent' if sent else 'skipped (dedup)'} for {efj} [{status}]")
-
-        # ── Sheet dual-write (fire-and-forget) ──
-        if _sheet_update_ftl and dropdown:
-            try:
-                _sheet_update_ftl(
-                    efj, account,
-                    pickup=stop_times.get("stop1_arrived"),
-                    delivery=stop_times.get("stop2_departed") or stop_times.get("stop2_arrived"),
-                    status=dropdown,
-                )
-                log.info(f"Webhook bg: sheet dual-write for {efj} -> {dropdown}")
-            except Exception as _sh_exc:
-                log.debug(f"Webhook bg: sheet dual-write failed for {efj}: {_sh_exc}")
 
     except Exception as exc:
         log.error(f"Webhook bg: unhandled error for {efj}: {exc}")
