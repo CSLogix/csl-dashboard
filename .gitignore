@@ -1,41 +1,9 @@
-# Python
-__pycache__/
-*.pyc
-
-# Logs
-*.log
-
-# Backup files (all variations)
-*.backup
-*.save
-*.save.*
-*.bak*
-*.pre-*
-*_backup_*.py
-
-# State files (runtime)
-*.json
-!dashboard/package.json
-!dashboard/package-lock.json
-!dashboard/tsconfig.json
-!dashboard/tsconfig.app.json
-
-# Build output + old deploys
-dist/
-csl-doc-tracker/static/dist-backup/
-csl-doc-tracker/static/react/
-
-# Uploads + runtime
-csl-doc-tracker/uploads/
-csl-doc-tracker/.pids/
-csl-doc-tracker/.session_secret
-
-# Environment + credentials
-.env
-.env.local
-node_modules/
-csl_gmail_token.json
-csl-credentials.json
-credentials.json
-token.json
-*.db
+*
+!projects/
+!projects/C--Users-jsfel/
+!projects/C--Users-jsfel/memory/
+!projects/C--Users-jsfel/memory/**
+!projects/C--Users-jsfel--claude/
+!projects/C--Users-jsfel--claude/memory/
+!projects/C--Users-jsfel--claude/memory/**
+!.gitignore

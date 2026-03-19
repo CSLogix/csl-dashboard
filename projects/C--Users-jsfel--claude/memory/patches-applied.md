@@ -1,0 +1,110 @@
+# Patches Applied This Sprint
+
+| Patch | What |
+|-------|------|
+| `patch_add_load.py` | POST /api/load/add — routes to Master/Tolead/Boviet sheets |
+| `patch_fix_driver_insert.py` | Fix driver_contacts INSERT to use actual schema columns |
+| `patch_fix_cache_invalidate.py` | Fix `sheet_cache._last = 0` (was wrong attribute) |
+| `patch_lane_search.py` | GET /api/rate-iq/search-lane — fuzzy lane+carrier search |
+| `patch_notes_log.py` | `load_notes` table + GET/POST `/api/load/{efj}/notes` |
+| `patch_ai_email_triage.py` | AI email classification via Claude Haiku + priority/type/summary columns |
+| `patch_carrier_scorecard.py` | GET /api/carriers/scorecard — aggregated delivery metrics |
+| `patch_replace_jsoncargo.py` | Multi-provider tracking: SeaRates primary + JSONCargo fallback |
+| `patch_postgres_migration.py` | `shipments` table + import all active sheet data into Postgres |
+| `patch_v2_endpoints.py` | `/api/v2/*` endpoints reading/writing from Postgres |
+| `csl_sheet_sync.py` | Two-way sync: Tolead+Boviet sheets ↔ Postgres |
+| `csl_pg_writer.py` | Shared PG writer module for bot dual-write (UPSERT + archive) |
+| `patch_bot_pg_import.py` | Dray Import PG dual-write + archive |
+| `patch_bot_pg_ftl.py` | FTL PG dual-write + archive |
+| `patch_bot_pg_export.py` | Dray Export PG dual-write + archive |
+| `patch_import_pg.py` | Dray Import full PG migration (drop sheets entirely) |
+| `patch_export_pg.py` | Dray Export full PG migration (drop sheets entirely) |
+| `patch_ftl_pg_migrate.py` | FTL full PG migration (drop sheets + Playwright scraping) |
+| `patch_inbox_command_center_db.py` | `sent_messages` table + feedback columns on email tables |
+| `patch_sent_mail_scanner.py` | Sent mail tracking in `csl_inbox_scanner.py` |
+| `patch_inbox_api.py` | `/api/inbox` + feedback + reply-alerts endpoints |
+| `patch_v2_email_stats.py` | Email count/priority enrichment in `/api/v2/shipments` |
+| `patch_attachment_filter.py` | Junk attachment filter (signatures, icons, pixels, <15KB) |
+| `patch_macropoint_pg.py` | Nginx webhook access + upload_server PG write + cache cleanup |
+| `patch_driver_fallback.py` | Driver API PG fallback from shipments table |
+| `fix_all_cursor_indent.py` | Fix 19 damaged `with db.get_cursor()` blocks from global sed |
+| `fix_driver_dictcursor.py` | Fix RealDictCursor tuple→dict indexing |
+| `patch_webhook_get.py` | GET handler for Macropoint native protocol (query params) |
+| `patch_webhook_event_codes.py` | Macropoint event code mapping (X1/X2/X6/AG/AF) |
+| `patch_webhook_container_match.py` | Container→EFJ PG lookup for Tolead order IDs |
+| `patch_macropoint_api_pg.py` | `/api/macropoint/{efj}` PG fallback + lastLocation GPS |
+| `patch_ftl_alerts_module.py` | Shared email+dedup module `csl_ftl_alerts.py` + refactor ftl_monitor.py |
+| `patch_webhook_realtime_alerts.py` | Webhook BackgroundTasks for real-time email alerts |
+| `patch_health_endpoint.py` | `/api/health` — PG, sheets, services, cron, disk checks |
+| `csl_sheet_writer.py` | Shared sheet dual-write module (fire-and-forget) |
+| `patch_dual_write_import.py` | Dray Import sheet dual-write (sheet_update_import + sheet_archive_row) |
+| `patch_dual_write_export_v2.py` | Dray Export sheet dual-write (sheet_update_export + sheet_archive_row) |
+| `patch_dual_write_ftl_v2.py` | FTL sheet dual-write (sheet_update_ftl + sheet_archive_row) |
+| `fix_health_endpoint.py` | Fix broken `\n` escapes in health endpoint (heredoc issue) |
+| `fix_completed_cache.py` | Enrich account from PG, sort newest-first, fix db.get_cursor() context manager |
+| `patch_unbilled_reconcile.py` | Unbilled↔Shipments: LEFT JOIN, auto-archive on close, bulk-close-delivered, PG merge into history |
+| `patch_macropoint_sync.py` | Fix 5 Macropoint bugs: stop_times (structured eventType), Tracking Completed→Delivered, MP URL from MPOrderID, container_url PG write, v2 mp_status enrichment |
+| `backfill_mp_urls.py` | Backfill macropoint_url from webhook_events.log MPOrderIDs (45 cache + 22 PG entries) |
+| `fix_timeline_stops.py` | tracking_events PG table + `_build_timeline_from_pg()` + `_persist_tracking_event()` |
+| `fix_infer_stop_arrival.py` | GPS proximity inference in schedule alert handler (0.5mi arrival / 2.0mi departure) |
+| `backfill_pickup_events.py` | One-time retroactive pickup event backfill from webhook_events.log (60 events) |
+| `patch_tracking_events_fix.py` | Fix 3 bugs: ET→offset in `_persist_tracking_event()`, cache→PG timeline merge, log.warning |
+| `patch_mp_classifier.py` | `_classify_mp_display_status()` function + webhook schedule alert storage + 3 API endpoints enriched with mpDisplayStatus/mpDisplayDetail |
+| `patch_inbox_classification.py` | Scanner classification overhaul: fix INSERT bugs, carrierpay escalation, POD body-detect, rate_outreach, carrier_rate_response thread detection, RC detection, immediate payment alerts, digest queue |
+| `patch_inbox_reply_detection.py` | Reply detection fix: sender-pattern matching (replace empty sent_messages), rates tab filter, `/api/rate-response-alerts` endpoint |
+| `patch_customer_rate_detection.py` | Expanded KNOWN_CUSTOMER_SENDERS (maoinc, manitoulin, tcr, texas.?int, md.?metal, usha) + CUSTOMER_QUOTE_LANGUAGE (OOG, dims, unicode×, hazmat, 53ft, inland rate, service combos) + AI classifier prompt improvements |
+| `patch_scanner_remaining.py` | Fix KNOWN_CUSTOMER_SENDERS + CUSTOMER_QUOTE_LANGUAGE in scanner (exact match with block boundaries) + dimension pattern (optional units before final) |
+| `patch_quotes_dray_filter.py` | list_quotes() move_types param + GET /api/quotes move_types filter + POST/PUT /api/quotes → _index_quote_to_rate_iq() + _index_quote_to_rate_iq helper + source_quote_id/status columns in rate_quotes |
+| `patch_lane_grouping.py` | search-lane UNION ALL (rate_quotes+lane_rates+won_quotes) + lane_groups accordion response with floor/avg/ceiling/sources per normalized lane |
+| `patch_ai_rate_extraction.py` | AI rate extraction for csl_email_classifier.py: extract_rate_from_email → _ai_extract_rate (Claude Haiku) + regex fallback |
+| `patch_scanner_extract_fix.py` | AI rate extraction for csl_inbox_scanner.py: same AI+fallback pattern (boundary-detection replace, not exact-match) |
+| `patch_tolead_sync_fix.py` | csl_sheet_sync.py: Add `_get_sheet_hyperlinks()`, fix `sync_tolead()` ghost cleanup (NameError→proper db context + FK migration), trailer→driver_contacts, container_url in upsert ON CONFLICT |
+| `fix_app_tolead_container_url.py` | app.py: Tolead legacy reader MP URL extraction from hyperlinks + clear driver field |
+| `fix_ghost_and_driver.py` | One-off: Migrate DFW1260308010→EFJ107432 (tracking_events + container_url), clean 4 additional ghosts, clear 47 trailer-data driver fields |
+| `patch_daily_summary_datefilter.py` | daily_summary.py: `_is_this_week()` date filter — only scrape loads picking up/delivering this week |
+| `date_normalizer.py` | Shared date normalizer: `clean_date()` → MM-DD / MM-DD HH:MM. Handles Excel serials, all date formats, midnight stripping |
+| `patch_date_normalizer.py` | Gate normalization in csl_pg_writer + LFD/pickup separation in csl_bot + sheet sync normalization |
+| `backfill_clean_dates.py` | One-time PG backfill: 114 shipments, 177 fields normalized (Excel serials, format soup, midnight) |
+| `patch_sync_guard.py` | csl_sheet_sync.py: TOLEAD_BOVIET_SYNCABLE_FIELDS + sheet_synced_at stamp + syncable_fields param + Tolead/Boviet use _merge not _upsert + PG trigger trg_shipments_updated_at + cron bumped */10→*/3 |
+| `patch_writeback.py` | csl_sheet_sync.py: _a1() + _batch_writeback() helpers + Tolead LAX + all Boviet tabs write PG edits back to sheet when updated_at > sheet_synced_at |
+| `boviet_invoice_writer.py` | New script: Fills Boviet Piedra Invoice tab — MP stop times→G/I/L/N + detention calc→J/O. PM heuristic for bare time strings. Cron: every 2 hrs 6AM-8PM Mon-Fri |
+| `patch_status_writeback.py` | app.py: Add BackgroundTasks + _write_fields_to_master_sheet() to v2 status endpoint for non-shared accounts (fixes status revert bug) |
+| `patch_daily_report_html.py` | dray_daily_summary.py: Fix Outlook email HTML — rgba→solid borders, div→table wrapper, cellpadding/cellspacing, font-family |
+| `patch_ai_tools_v2.py` | ai_assistant.py: 12 new Ask AI tools (Tier 2-4), MAX_TOOL_ITERATIONS 4→5, MAX_RESPONSE_TOKENS 1024→2048, _clean_efj() helper |
+| `patch_margin_bridge.py` | app.py: customer_rate/carrier_pay serialization + rate-quotes/apply-rate endpoints + auto-reject competing quotes |
+| `patch_ai_extraction_v2.py` | csl_inbox_scanner.py: Expanded body window, improved prompts, linehaul/accessorials/confidence fields |
+| `patch_noreply_fix.py` | csl_inbox_scanner.py: Fix unreplied email alerts — self-filter, EFJ dedup, 4hr cap, lane fallback |
+| `patch_alert_subject.py` | csl_ftl_alerts.py: "FTL Alert"→"CSL Tracking" email subject rename |
+| `patch_archive_distance_guard.py` | ftl_monitor.py + app.py: Block false D1 archive when distance_to_stop > 15mi |
+| `patch_rep_scoreboard.py` | app.py: GET /api/rep-scoreboard — unreplied threads, avg response time, stale quotes, neglected loads |
+| `patch_rep_scoreboard_v2.py` | app.py: Added loads_7d, revenue_7d, docs_needed to scoreboard + migration batch guard |
+| `fix_scoreboard_db.py` | app.py: Fix DB access pattern (get_db→database._pool) in rep-scoreboard endpoint |
+| `patch_revenue_backfill.py` | One-time XLS→PG backfill of customer_rate from commission report (596 shipments, $12M) |
+| `patch_inbox_rep_filter.py` | app.py: Enrich /api/inbox threads with rep from shipments JOIN, fix rep_filter |
+| `patch_port_groups.py` | app.py: /api/port-groups + /api/rate-history + search-lane port group expansion + apply-rate→lane_rates |
+| `port_groups.py` | New module: 18 port/rail group dictionary + normalize_to_port_group() + reverse lookup |
+| `patch_rev_window.py` | app.py: Expand REV scoreboard to all active loads (remove 7d filter) + total_margin in response |
+| `patch_inbox_actions.py` | app.py: manual_rep + actioned columns on email_threads + PATCH assign-rep + mark-actioned endpoints |
+| `patch_customer_rate_extraction.py` | csl_inbox_scanner.py: extract_rate_from_email handles customer_rate + rate_type field + rate_quotes column |
+| `patch_ai_doc_classifier.py` | csl_inbox_scanner.py: Sonnet 4.6 vision for ambiguous docs (CamScanner/photos→POD, RC→carrier_rate, container PDFs→BOL) + auto-status advancement (POD+invoice→delivered→ready_to_close) |
+| `fix_inbox_cursor.py` | app.py: Fix inbox 500 — enrichment query used closed cursor. New `cur2` context manager |
+| `fix_inbox_cursor2.py` | app.py: Fix dict key access for RealDictCursor rows in inbox enrichment |
+| `backfill_reclassify_other_docs.py` | One-time: Sonnet 4.6 vision reclassified 192/284 "other" docs + auto-advanced 9 loads to ready_to_close |
+| `patch_account_health.py` | app.py: GET /api/account-health — 5 SQL queries GROUP BY account (loads, revenue, margin, unreplied, docs_needed, neglected, rep mapping via DISTINCT ON) |
+| `patch_async_cache.py` | app.py: Async cache warming — `refresh_if_needed()` returns stale data instantly, background thread refreshes Google Sheets cache. Eliminated 20s blocking on cache expiry |
+| `patch_scanner_matching.py` | csl_inbox_scanner.py: 5-tier email→EFJ matching (EFJ pattern, hub ID, container#, bare 6-digit, BOL/Booking) + rescue 123 unmatched |
+| `analytics_route.py` | routes/analytics.py: 6 missing endpoints from monolith split — rep-scoreboard, account-health, port-groups, rate-history, assign-rep, mark-actioned |
+| `patch_carrier_suggest.py` | routes/directory.py: GET /api/directory/suggest (ranked carrier suggestions with port matching + capability filter + lane rates) + POST /api/directory/feedback (quote save → directory update, auto-create unknown carriers with needs_review) + carriers.needs_review column |
+| `email_drafts.py` | routes/email_drafts.py: Auto-Status Email Drafter — milestone status changes → HTML email draft. 5 endpoints (list/get/patch/send/dismiss) + generate_milestone_draft() + SMTP send. email_drafts PG table. v2.py milestone hook. Ask AI bulk_create_loads prompt fix |
+| `fix_status_archive.py` | v2.py + csl_sheet_sync.py: Status label→key normalization. `_STATUS_LABEL_TO_KEY` dict + `_normalize_status()` in v2.py. `_SHEET_STATUS_MAP` + `_normalize_sheet_status()` in sheet sync. Archive check expanded to include "billed & closed". Fixed EFJ107285 reappearing after Billed & Closed. Normalized 370+ PG rows from labels to keys |
+| `fix_v2_syntax.py` | v2.py: Fix syntax error — normalize code was inserted inside import statement. Moved to after `router = APIRouter()` |
+| `patch_body_text_and_vision.py` | Phase 1+2: `body_text` TEXT column on email_threads + unmatched_inbox_emails. `get_full_body_text()` + `_extract_text_part()` in scanner (full plain text or HTML→text extraction). `read_load_document` Ask AI tool (PDF→image via pdftoppm + Claude Sonnet vision). COALESCE(body_text, body_preview) in AI queries. body_text in inbox API responses |
+| `patch_inbox_auto_actions.py` | routes/emails.py: POST /api/inbox/{thread_id}/auto-action — 3 actions (save_attachment, mark_delivered, mark_actioned). Gmail API attachment download → load_documents INSERT with SHA-256 dedup. Auto-advance billing (POD+carrier_invoice → ready_to_close). Frontend: Actions column in inbox table with contextual buttons (Save [type], Delivered, Draft, Done) |
+| `fix_shorten_address.py` | csl_sheet_sync.py: Fix `_shorten_address()` — regex body was orphaned after `_get_sheet_hyperlinks()` insertion. Function returned `None` for all non-empty addresses, causing Tolead origin/destination to sync as NULL. Backfilled 25 active loads |
+| `patch_lane_playbooks.py` | Lane Playbooks: PG table (`lane_playbooks` JSONB + GIN index), `routes/playbooks.py` (6 CRUD endpoints), 3 AI tools (`get_lane_playbook`, `save_lane_playbook`, `list_lane_playbooks`), system prompt update, DSV-RICH-WANDO seed |
+| `fix_tolead_dfw.py` | Fix 12 Tolead DFW rows with raw ZIP codes → City, ST format. psycopg2 `%%` escaping for ILIKE |
+| `patch_guest_code.py` | Guest access: `/guest?code=XXXX` endpoint in routes/auth.py + `guest_tokens` PG table. Short 6-char codes, mobile-friendly one-click links |
+| `patch_playbook_auto_match.py` | Auto-Match Playbook Engine: `playbook_lane_code` column on shipments (indexed). `_try_playbook_match()` in ai_assistant.py — queries active playbooks by account+origin+destination, auto-populates carrier/rates/equipment on exact single match. Hooked into `_exec_bulk_create_loads` + `POST /api/v2/load/add`. `GET /api/playbooks/shipment/{efj}` endpoint. Added to `_shipment_row_to_dict` serializer |
+| `patch_process_booking.py` | Process Booking (Two-Click Load Creation): `POST /api/inbox/process-booking` endpoint. Sender domain→account lookup (17 domains). Claude Sonnet AI extraction (account, origin/dest, move type, equipment, container, booking#, vessel, dates, rates, commodity). Confidence scoring (high/medium/low). Fuzzy playbook match with full defaults (carrier, rates, contacts, workflow, multi-load, escalation). Source tracking per field (ai/domain/playbook) |
+| `patch_rc_rate_extraction.py` | RC Rate Extraction: `_extract_rate_from_doc()` in routes/emails.py — Haiku vision extraction from carrier_rate/customer_rate docs (pdftoppm→PNG→Claude). Auto-inserts `rate_quotes` row with source='document' + doc_id. Hooked into save_attachment auto-action. `doc_id` + `source` columns added to rate_quotes table |
+| `extract_msg_rates.py` | Outlook .msg rate backfill: 322 .msg files → extract-msg + pdftoppm + Sonnet vision → 190 rates inserted (140 dray, 47 transload, 3 FTL). Post-extraction DRAY/TRANSLOAD/FTL reclassification. source='outlook_export'. DB total ~355 rates |
