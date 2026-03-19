@@ -36,6 +36,7 @@ from routes import (
     spa,
     users,
     email_drafts,
+    ftl_quote,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -146,6 +147,7 @@ app.include_router(v2.router)
 app.include_router(webhooks.router)
 app.include_router(users.router)
 app.include_router(email_drafts.router)
+app.include_router(ftl_quote.router)
 
 # ---------------------------------------------------------------------------
 # Startup / Shutdown

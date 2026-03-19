@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { apiFetch, API_BASE } from '../helpers/api';
 import QuoteBuilder from '../QuoteBuilder';
 import OOGQuoteBuilder from '../OOGQuoteBuilder';
+import FTLQuoteView from './FTLQuoteView';
 
 // ═══════════════════════════════════════════════════════════════
 // RATE IQ VIEW — Lane-centric redesign (DrayRates.ai-inspired)
@@ -589,7 +590,7 @@ function LaneCard({ lane, onClick, onQuickQuote, onReclassify, rateIds }) {
 // ═══════════════════════════════════════════════════════════════
 export default function RateIQView() {
   // ── View state ──
-  const [view, setView] = useState("browse"); // browse | detail | intake | build-quote | scorecard | directory | history | oog
+  const [view, setView] = useState("browse"); // browse | detail | intake | build-quote | scorecard | directory | history | oog | ftl-quote
   const [selectedLane, setSelectedLane] = useState(null); // { origin, destination }
 
   // ── Data state ──
@@ -1275,6 +1276,7 @@ export default function RateIQView() {
           {/* Secondary nav */}
           <div style={{ display: "flex", gap: 6 }}>
             {[
+              { key: "ftl-quote", label: "FTL Quote", icon: "🚛" },
               { key: "intake", label: "Rate Intake", icon: "📥" },
               { key: "oog", label: "OOG IQ", icon: "📦" },
               { key: "directory", label: `Directory (${dirCarriers.length})`, icon: "📖" },
@@ -1787,6 +1789,23 @@ export default function RateIQView() {
             <div style={{ fontSize: 12, marginTop: 6 }}>Try a different origin or destination</div>
           </div>
         )}
+      </div>
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════
+  // FTL QUOTE VIEW
+  // ═════════════════════════════════════════════════════════════
+  if (view === "ftl-quote") {
+    return (
+      <div style={{ padding: "0 24px 24px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
+          <button onClick={() => setView("browse")}
+            style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 16, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }}>
+            &larr;
+          </button>
+        </div>
+        <FTLQuoteView />
       </div>
     );
   }
