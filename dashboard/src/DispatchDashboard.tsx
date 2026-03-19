@@ -38,6 +38,7 @@ import BOLGeneratorView from "./views/BOLGeneratorView";
 import PlaybooksView from "./views/PlaybooksView";
 import UserManagementView from "./views/UserManagementView";
 import AddForm from "./views/AddForm";
+import BulkLoadView from "./views/BulkLoadView";
 
 /**
  * Render the main dispatch dashboard UI that displays and manages shipments, alerts, inbox drafts, analytics, billing, and related workflows.
@@ -964,7 +965,10 @@ export default function DispatchDashboard() {
               <button onClick={() => setApiError(null)} aria-label="Dismiss error" style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 12, padding: "2px 6px" }}>✕</button>
             </div>
           )}
-          {!loaded ? (
+          {activeView === "bulk" && (
+            <BulkLoadView accounts={accounts} onCreated={fetchData} />
+          )}
+          {!loaded && activeView !== "bulk" ? (
             <div style={{ padding: "60px 0", display: "flex", flexDirection: "column", alignItems: "center", gap: 16, animation: "fade-in 0.3s ease" }}>
               <div style={{ width: 32, height: 32, border: "3px solid #1A2236", borderTop: "3px solid #00D4AA", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
               <div style={{ fontSize: 12, color: "#8B95A8", fontWeight: 500 }}>Loading loadboard data...</div>

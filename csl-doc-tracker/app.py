@@ -42,6 +42,7 @@ from routes import (
     email_drafts,
     ftl_quote,
     rep_management,
+    bulk_loads,
 )
 
 log = get_logger(__name__)
@@ -153,6 +154,7 @@ app.include_router(users.router)
 app.include_router(email_drafts.router)
 app.include_router(ftl_quote.router)
 app.include_router(rep_management.router)
+app.include_router(bulk_loads.router)
 
 # ---------------------------------------------------------------------------
 # Startup / Shutdown
