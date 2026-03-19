@@ -28,7 +28,8 @@ def load_sent_email_alerts():
         try:
             with open(EMAIL_ALERTS_FILE, 'r') as f:
                 return json.load(f)
-        except:
+        except (OSError, ValueError) as e:
+            print(f"Warning: Could not load {EMAIL_ALERTS_FILE}: {e}")
             return {}
     return {}
 
@@ -42,8 +43,10 @@ def save_sent_email_alert(load_id, pro_number, status):
         'timestamp': datetime.now().isoformat()
     }
     try:
-        with open(EMAIL_ALERTS_FILE, 'w') as f:
+        tmp = str(EMAIL_ALERTS_FILE) + ".tmp"
+        with open(tmp, 'w') as f:
             json.dump(alerts, f, indent=2)
+        os.replace(tmp, EMAIL_ALERTS_FILE)
     except Exception as e:
         print(f"Warning: Could not save: {e}")
 

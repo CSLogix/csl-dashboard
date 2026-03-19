@@ -7,7 +7,6 @@ Runs at 7:00 AM ET Mon-Fri via cron with --once flag.
 
 import os
 import sys
-import logging
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -31,7 +30,7 @@ if "--once" not in sys.argv:
 load_dotenv("/root/csl-bot/csl-doc-tracker/.env")
 load_dotenv("/root/csl-bot/.env", override=False)
 
-SMTP_USER = os.getenv("SMTP_USER", "jfeltzjr@gmail.com")
+SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
@@ -49,11 +48,11 @@ DASHBOARD_URL = "https://cslogixdispatch.com/app"
 # Rep / Account mapping
 # ---------------------------------------------------------------------------
 ACCOUNT_REP_MAP = {
-    "DSV": "Eli",
-    "EShipping": "Eli",
-    "Kishco": "Eli",
-    "MAO": "Eli",
-    "Rose": "Eli",
+    "DSV": "John F",
+    "EShipping": "John F",
+    "Kishco": "John F",
+    "MAO": "John F",
+    "Rose": "John F",
     "Allround": "Radka",
     "Cadi": "Radka",
     "IWS": "Radka",
@@ -72,9 +71,8 @@ ACCOUNT_REP_MAP = {
 }
 
 REP_EMAILS = {
-    "Eli": "eli@evansdelivery.com",
-    "Radka": "radka@evansdelivery.com",
     "John F": "john.feltz@commonsenselogistics.com",
+    "Radka": "radka@evansdelivery.com",
     "Janice": "janice@evansdelivery.com",
 }
 
@@ -84,11 +82,9 @@ ACCOUNT_REP_LOWER = {k.lower(): v for k, v in ACCOUNT_REP_MAP.items()}
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [DIGEST] %(levelname)s %(message)s",
-)
-log = logging.getLogger("inbox_digest")
+from csl_logging import get_logger
+
+log = get_logger("inbox_digest")
 
 # ---------------------------------------------------------------------------
 # DB helpers

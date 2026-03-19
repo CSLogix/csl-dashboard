@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, 
 from fastapi.responses import JSONResponse, FileResponse
 from google.oauth2.service_account import Credentials
 
+from psycopg2 import sql as psql
 import database as db
 from shared import (
     sheet_cache, log,
@@ -672,10 +673,10 @@ async def api_macropoint(efj: str):
             pass
     if not shipment:
         raise HTTPException(404, f"Load {efj} not found")
-    # Also check tracking cache
+    # Read tracking cache once (in-memory, no file I/O)
     _tracking_cache = _read_tracking_cache()
-    _cached_entry = _find_tracking_entry(_tracking_cache, efj)
-    _cached_url = _cached_entry.get("macropoint_url", "")
+    cached = _find_tracking_entry(_tracking_cache, efj)
+    _cached_url = cached.get("macropoint_url", "")
 
     status = shipment.get("status", "")
     progress = _build_macropoint_progress(status)
@@ -686,10 +687,6 @@ async def api_macropoint(efj: str):
         phone_fmt = f"({phone_raw[:3]}) {phone_raw[3:6]}-{phone_raw[6:]}"
     else:
         phone_fmt = phone_raw
-
-    # ── Tracking cache (stop timeline from ftl_monitor) ──
-    tracking_cache = _read_tracking_cache()
-    cached = _find_tracking_entry(tracking_cache, efj)
 
     # ── Driver contact info (from DB, with cache fallback) ──
     contact = _get_driver_contact(efj)
@@ -952,7 +949,7 @@ async def api_port_codes():
 @router.get("/api/reps")
 async def api_reps():
     """Return list of account reps."""
-    return {"reps": ["Eli", "Radka", "John F", "Janice"]}
+    return {"reps": ["Radka", "John F", "Janice", "Allie", "John N", "Amanda"]}
 
 
 @router.post("/api/accounts/add")
@@ -1191,7 +1188,8 @@ async def apply_rate_to_shipment(efj: str, request: Request):
 
             # Write to shipments
             cur.execute(
-                f"UPDATE shipments SET {field} = %s, updated_at = NOW() WHERE efj = %s RETURNING *",
+                psql.SQL("UPDATE shipments SET {} = %s, updated_at = NOW() WHERE efj = %s RETURNING *").format(
+                    psql.Identifier(field)),
                 (quote["rate_amount"], efj),
             )
             row = cur.fetchone()

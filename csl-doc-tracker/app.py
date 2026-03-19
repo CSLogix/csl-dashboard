@@ -3,8 +3,8 @@ FastAPI dashboard for CSL AI Dispatch — Operations Dashboard.
 Thin orchestrator: imports routers, adds middleware, handles startup/shutdown.
 """
 
-import logging
 import os
+import sys
 import threading
 from pathlib import Path
 
@@ -13,6 +13,10 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
+
+# Make csl_logging importable from the parent directory
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from csl_logging import get_logger
 
 import auth
 import database as db
@@ -37,10 +41,10 @@ from routes import (
     users,
     email_drafts,
     ftl_quote,
+    rep_management,
 )
 
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 app = FastAPI(title="CSL AI Dispatch")
 
@@ -148,6 +152,7 @@ app.include_router(webhooks.router)
 app.include_router(users.router)
 app.include_router(email_drafts.router)
 app.include_router(ftl_quote.router)
+app.include_router(rep_management.router)
 
 # ---------------------------------------------------------------------------
 # Startup / Shutdown
@@ -364,6 +369,74 @@ def startup():
         log.info("email_drafts table ready")
     except Exception as e:
         log.warning("Could not create email_drafts table: %s", e)
+
+    # Create rep_accounts table (rep -> accounts assignment)
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS rep_accounts (
+                        rep_name VARCHAR(64) PRIMARY KEY,
+                        accounts TEXT[] DEFAULT '{}',
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+        log.info("rep_accounts table ready")
+    except Exception as e:
+        log.warning("Could not create rep_accounts table: %s", e)
+
+    # Create rep_tasks table (manual action items)
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS rep_tasks (
+                        id SERIAL PRIMARY KEY,
+                        rep VARCHAR(64) NOT NULL,
+                        text TEXT NOT NULL,
+                        efj VARCHAR(32),
+                        auto_type VARCHAR(32),
+                        assigned_by VARCHAR(64),
+                        status VARCHAR(20) DEFAULT 'open',
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        completed_at TIMESTAMPTZ
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_rep_tasks_rep ON rep_tasks(rep)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_rep_tasks_status ON rep_tasks(status)")
+                # Add assigned_by column if missing (existing tables)
+                cur.execute("""
+                    DO $$ BEGIN
+                        ALTER TABLE rep_tasks ADD COLUMN assigned_by VARCHAR(64);
+                    EXCEPTION WHEN duplicate_column THEN NULL;
+                    END $$;
+                """)
+        log.info("rep_tasks table ready")
+    except Exception as e:
+        log.warning("Could not create rep_tasks table: %s", e)
+
+    # Create ai_knowledge_base table (persistent AI memory)
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_knowledge_base (
+                        id SERIAL PRIMARY KEY,
+                        category TEXT NOT NULL,
+                        scope TEXT,
+                        content TEXT NOT NULL,
+                        source TEXT DEFAULT 'admin_entry',
+                        active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_kb_category ON ai_knowledge_base(category)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_kb_scope ON ai_knowledge_base(scope)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_kb_active ON ai_knowledge_base(active)")
+        log.info("ai_knowledge_base table ready")
+    except Exception as e:
+        log.warning("Could not create ai_knowledge_base table: %s", e)
 
     # Pre-populate sheet cache in background
     threading.Thread(target=sheet_cache.refresh_if_needed, daemon=True).start()

@@ -826,6 +826,154 @@ def api_cron_status():
         return {"cron_jobs": {}, "error": str(exc)}
 
 
+@router.get("/api/system-health")
+def api_system_health():
+    """Deep system health check — MP cookies, API keys, proxy, state files, disk.
+    Powers the dashboard Operations Health panel."""
+    import time as _t
+    import requests as _req
+
+    checks = {}
+
+    # 1. Macropoint cookies
+    mp_cookies_path = "/root/csl-bot/mp_cookies.json"
+    try:
+        if not os.path.exists(mp_cookies_path):
+            checks["mp_cookies"] = {"status": "error", "detail": "File not found"}
+        else:
+            with open(mp_cookies_path) as f:
+                cookies = json.load(f)
+            mtime = os.path.getmtime(mp_cookies_path)
+            age_days = (_t.time() - mtime) / 86400
+            now_ts = _t.time()
+            expired = sum(
+                1 for c in cookies
+                if isinstance(c.get("expires", -1), (int, float))
+                and 0 < (c["expires"] / 1e6 if c["expires"] > 1e12 else c["expires"]) < now_ts
+            )
+            if age_days > 7:
+                checks["mp_cookies"] = {
+                    "status": "warning",
+                    "detail": f"{age_days:.0f} days old — session likely expired",
+                    "age_days": round(age_days, 1),
+                    "cookie_count": len(cookies),
+                }
+            elif expired == len([c for c in cookies if isinstance(c.get("expires", -1), (int, float)) and c["expires"] > 0]):
+                checks["mp_cookies"] = {
+                    "status": "warning",
+                    "detail": f"All {expired} dated cookies expired",
+                    "age_days": round(age_days, 1),
+                }
+            else:
+                checks["mp_cookies"] = {
+                    "status": "ok",
+                    "detail": f"{len(cookies)} cookies, {age_days:.1f} days old",
+                    "age_days": round(age_days, 1),
+                    "cookie_count": len(cookies),
+                }
+    except Exception as e:
+        checks["mp_cookies"] = {"status": "error", "detail": str(e)}
+
+    # 2. JsonCargo API
+    jc_key = os.environ.get("JSONCARGO_API_KEY", "")
+    if not jc_key:
+        checks["jsoncargo_api"] = {"status": "error", "detail": "API key not set"}
+    else:
+        try:
+            resp = _req.get(
+                "https://api.jsoncargo.com/api/v1/containers/MAEU0000000/",
+                headers={"Authorization": f"Bearer {jc_key}"},
+                timeout=10,
+            )
+            if resp.status_code in (401, 403):
+                checks["jsoncargo_api"] = {"status": "error", "detail": f"Key rejected (HTTP {resp.status_code})"}
+            else:
+                checks["jsoncargo_api"] = {"status": "ok", "detail": f"HTTP {resp.status_code}"}
+        except _req.Timeout:
+            checks["jsoncargo_api"] = {"status": "warning", "detail": "Timeout (10s)"}
+        except Exception as e:
+            checks["jsoncargo_api"] = {"status": "warning", "detail": str(e)}
+
+    # 3. State files
+    state_files = {
+        "last_check.json": "/root/csl-bot/last_check.json",
+        "export_state.json": "/root/csl-bot/export_state.json",
+        "ftl_sent_alerts.json": "/root/csl-bot/ftl_sent_alerts.json",
+        "ftl_tracking_cache.json": "/root/csl-bot/ftl_tracking_cache.json",
+    }
+    state_status = {}
+    for name, path in state_files.items():
+        if not os.path.exists(path):
+            state_status[name] = {"status": "missing", "entries": 0}
+            continue
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            mtime = os.path.getmtime(path)
+            age_hours = (_t.time() - mtime) / 3600
+            state_status[name] = {
+                "status": "ok" if age_hours < 48 else "stale",
+                "entries": len(data) if isinstance(data, (dict, list)) else 0,
+                "age_hours": round(age_hours, 1),
+                "size_bytes": os.path.getsize(path),
+            }
+        except json.JSONDecodeError:
+            state_status[name] = {"status": "corrupt", "entries": 0}
+        except Exception as e:
+            state_status[name] = {"status": "error", "detail": str(e)}
+    checks["state_files"] = state_status
+
+    # 4. Backups
+    backup_dir = Path("/root/csl-bot/backups")
+    if backup_dir.exists():
+        backups = sorted([d.name for d in backup_dir.iterdir() if d.is_dir()], reverse=True)
+        checks["backups"] = {
+            "status": "ok" if backups else "warning",
+            "count": len(backups),
+            "latest": backups[0] if backups else None,
+        }
+    else:
+        checks["backups"] = {"status": "warning", "detail": "No backup directory yet"}
+
+    # 5. Disk
+    try:
+        r = subprocess.run(["df", "-h", "/"], capture_output=True, text=True, timeout=5)
+        lines = r.stdout.strip().split("\n")
+        if len(lines) >= 2:
+            parts = lines[1].split()
+            pct = int(parts[4].replace("%", ""))
+            checks["disk"] = {
+                "status": "ok" if pct < 80 else ("warning" if pct < 90 else "critical"),
+                "used_pct": pct,
+                "available": parts[3],
+            }
+    except Exception:
+        checks["disk"] = {"status": "unknown"}
+
+    # Overall status
+    statuses = []
+    for k, v in checks.items():
+        if isinstance(v, dict) and "status" in v:
+            statuses.append(v["status"])
+        elif isinstance(v, dict):
+            for sv in v.values():
+                if isinstance(sv, dict) and "status" in sv:
+                    statuses.append(sv["status"])
+
+    if "error" in statuses or "critical" in statuses:
+        overall = "degraded"
+    elif "warning" in statuses or "stale" in statuses or "corrupt" in statuses:
+        overall = "warning"
+    else:
+        overall = "healthy"
+
+    return {
+        "overall": overall,
+        "checks": checks,
+        "timestamp": __import__("datetime").datetime.now().isoformat(),
+    }
+
+
 @router.get("/health")
 def health():
     return {"status": "ok"}

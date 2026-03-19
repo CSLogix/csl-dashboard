@@ -657,3 +657,100 @@ def list_quotes(status: str = None, search: str = None, move_types: list = None,
             params + [limit, offset],
         )
         return [dict(r) for r in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# AI Knowledge Base
+# ---------------------------------------------------------------------------
+
+def kb_search(category: str = None, scope: str = None, query: str = None, limit: int = 50) -> list:
+    """Search knowledge base entries with optional filters and text search."""
+    with get_cursor() as cur:
+        conditions = ["active = TRUE"]
+        params = []
+        if category:
+            conditions.append("category = %s")
+            params.append(category)
+        if scope:
+            conditions.append("(scope ILIKE %s OR scope IS NULL)")
+            params.append(f"%{scope}%")
+        if query:
+            conditions.append("content ILIKE %s")
+            params.append(f"%{query}%")
+        where = " AND ".join(conditions)
+        cur.execute(
+            f"SELECT * FROM ai_knowledge_base WHERE {where} ORDER BY updated_at DESC LIMIT %s",
+            params + [limit],
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def kb_insert(category: str, content: str, scope: str = None, source: str = "admin_entry") -> dict:
+    """Insert a new knowledge base entry. Returns the created row."""
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                """
+                INSERT INTO ai_knowledge_base (category, scope, content, source)
+                VALUES (%s, %s, %s, %s)
+                RETURNING *
+                """,
+                (category, scope, content, source),
+            )
+            return dict(cur.fetchone())
+
+
+def kb_update(entry_id: int, **fields) -> Optional[dict]:
+    """Update a knowledge base entry. Accepts category, scope, content, active."""
+    allowed = {"category", "scope", "content", "active"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return None
+    set_clause = ", ".join(f"{k} = %s" for k in updates)
+    params = list(updates.values()) + [entry_id]
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                f"UPDATE ai_knowledge_base SET {set_clause}, updated_at = NOW() WHERE id = %s RETURNING *",
+                params,
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+def kb_delete(entry_id: int) -> bool:
+    """Soft-delete a knowledge base entry (set active=False)."""
+    with get_conn() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                "UPDATE ai_knowledge_base SET active = FALSE, updated_at = NOW() WHERE id = %s",
+                (entry_id,),
+            )
+            return cur.rowcount > 0
+
+
+def kb_get_relevant(scopes: list, limit: int = 20) -> list:
+    """Get active knowledge entries matching any of the given scopes, plus global entries."""
+    if not scopes:
+        scopes = []
+    with get_cursor() as cur:
+        # Build scope conditions: match any scope OR global (scope IS NULL)
+        scope_conditions = ["scope IS NULL"]
+        params = []
+        for s in scopes:
+            scope_conditions.append("scope ILIKE %s")
+            params.append(f"%{s}%")
+        scope_where = " OR ".join(scope_conditions)
+        cur.execute(
+            f"""
+            SELECT id, category, scope, content
+            FROM ai_knowledge_base
+            WHERE active = TRUE AND ({scope_where})
+            ORDER BY
+                CASE WHEN scope IS NOT NULL THEN 0 ELSE 1 END,
+                updated_at DESC
+            LIMIT %s
+            """,
+            params + [limit],
+        )
+        return [dict(r) for r in cur.fetchall()]

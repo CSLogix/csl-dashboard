@@ -1,0 +1,12 @@
+[Unit]
+Description=CSL LFD Watchdog (Last Free Day alerts)
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/csl-bot
+ExecStart=/usr/bin/python3 lfd_watchdog.py
+EnvironmentFile=/root/csl-bot/.env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=csl-lfd-watchdog

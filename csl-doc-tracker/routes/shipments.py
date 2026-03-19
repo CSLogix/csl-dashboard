@@ -1,9 +1,10 @@
+import asyncio
 import os
 import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import database as db
 import config
@@ -13,6 +14,7 @@ from shared import (
     _get_bot_status_detailed, _generate_alerts,
     _read_tracking_cache, _classify_mp_display_status,
     ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, _sanitize_filename,
+    sse_add_client, sse_remove_client,
 )
 
 router = APIRouter()
@@ -272,6 +274,43 @@ async def api_tracking_summary():
             "carrierEmail": _dc_map.get(efj, {}).get("carrierEmail", ""),
         }
     return {"tracking": result}
+
+
+@router.get("/api/shipments/tracking-stream")
+async def api_tracking_stream(request: Request):
+    """Server-Sent Events stream for real-time tracking updates.
+
+    Pushes individual tracking updates as they arrive from Macropoint webhooks,
+    eliminating the 30s polling delay on the dashboard.
+    """
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    sse_add_client(queue)
+
+    async def event_generator():
+        try:
+            # Send initial keepalive
+            yield ": connected\n\n"
+            while True:
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {data}\n\n"
+                except asyncio.TimeoutError:
+                    # Send keepalive comment every 30s to prevent proxy timeouts
+                    yield ": keepalive\n\n"
+        finally:
+            sse_remove_client(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        },
+    )
 
 
 @router.get("/api/shipments/document-summary")

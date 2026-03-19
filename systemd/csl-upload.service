@@ -1,0 +1,17 @@
+[Unit]
+Description=CSL Upload Server (port 5001)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/csl-bot
+ExecStart=/usr/bin/python3 upload_server.py
+EnvironmentFile=/root/csl-bot/.env
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=csl-upload
+
+[Install]
+WantedBy=multi-user.target

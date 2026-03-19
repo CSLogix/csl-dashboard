@@ -85,4 +85,5 @@ EIA_API_KEY = os.getenv("EIA_API_KEY", "")
 
 # --- Logging ---
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_FORMAT = os.getenv("LOG_FORMAT", "json")
 LOG_FILE = os.getenv("LOG_FILE", "csl_doc_tracker.log")

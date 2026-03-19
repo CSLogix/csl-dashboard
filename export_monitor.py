@@ -10,7 +10,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from csl_pg_writer import pg_update_shipment, pg_archive_shipment
+from csl_logging import get_logger
+log = get_logger("export_monitor")
+
+from csl_pg_writer import (pg_update_shipment, pg_archive_shipment,
+                          pg_load_all_export_state, pg_set_export_state,
+                          pg_delete_export_state, pg_jc_cache_get,
+                          pg_jc_cache_set, pg_ensure_tracking_tables)
 from csl_sheet_writer import sheet_update_export, sheet_archive_row
 
 SHEET_ID=os.environ["SHEET_ID"]
@@ -33,11 +39,10 @@ GATE_IN_STATUSES=["full load on rail for export","gate in full","full in","recei
 JSONCARGO_API_KEY=os.environ["JSONCARGO_API_KEY"]
 JSONCARGO_BASE="https://api.jsoncargo.com/api/v1"
 
-# -- JsonCargo API response cache (reduces monthly API calls by ~70%%) --
+# -- JsonCargo API response cache (Postgres-backed) --
 import json as _json
 import time as _time_mod
 
-_JSONCARGO_CACHE_FILE = "/root/csl-bot/jsoncargo_cache.json"
 _JSONCARGO_CACHE_TTL = 6 * 3600
 
 # ── Postgres migration: hardcoded lookups ────────────────────────────────
@@ -59,7 +64,8 @@ SSL_LINKS_PG = {
     "maersk":      "MAERSK",
     "hapag":       "HAPAG_LLOYD",
     "hapag-lloyd": "HAPAG_LLOYD",
-    "one":         "ONE",
+    "one line":    "ONE",
+    "ocean network": "ONE",
     "evergreen":   "EVERGREEN",
     "hmm":         "HMM",
     "cma cgm":     "CMA_CGM",
@@ -81,32 +87,80 @@ ACCOUNT_REPS_PG = {
     "Cadi":            {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "CNL":             {"rep": "Janice","email": "Janice.Cortes@evansdelivery.com"},
     "DHL":             {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
-    "DSV":             {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
-    "EShipping":       {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "DSV":             {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
+    "EShipping":       {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "GW-World":        {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "IWS":             {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "Kischo":          {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "Kischo":          {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "Kripke":          {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "LS Cargo":        {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "MAO":             {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "MAO":             {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "Mamata":          {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "MD Metal":        {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "Meiko":           {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "MGF":             {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "Mitchells Trans": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "Rose":            {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "Rose":            {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "SEI Acquistion":  {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "Sutton":          {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "Talatrans":       {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "Tanera":          {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "TCR":             {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "Texas":           {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "Texas":           {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "USHA":            {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
 }
 
 
-def _resolve_ssl_export(vessel, carrier):
-    """Resolve SSL code from vessel/carrier text."""
+# BOL/booking prefix (first 4 chars) -> SSL code
+BOL_PREFIX_TO_SSL = {
+    "MAEU": "MAERSK", "SEAU": "MAERSK", "SGLU": "MAERSK",
+    "SUDU": "MAERSK", "MCPU": "MAERSK", "ALIU": "MAERSK", "CNIU": "MAERSK",
+    "CMDU": "CMA_CGM", "APLU": "CMA_CGM", "ACLU": "CMA_CGM",
+    "ANLC": "CMA_CGM", "CSFU": "CMA_CGM", "MCAW": "CMA_CGM",
+    "HLCU": "HAPAG_LLOYD", "UACU": "HAPAG_LLOYD",
+    "MOLU": "ONE", "KLNE": "ONE",
+    "EVRG": "EVERGREEN",
+    "HDMU": "HMM",
+    "MSCU": "MSC",
+    "COSU": "COSCO", "CHNJ": "COSCO",
+    "ZIMU": "ZIM",
+    "YMLU": "YANG_MING",
+    "SMLM": "SM_LINE",
+    "MATS": "MATSON",
+    "MWHL": "WAN_HAI", "WHLC": "WAN_HAI", "CNCX": "WAN_HAI",
+}
+
+
+def _ssl_from_bol_prefix(bol):
+    """
+    Determine an SSL code from a bill-of-lading or booking identifier by inspecting its first four characters.
+    
+    Parameters:
+        bol (str): Bill-of-lading or booking identifier; may include surrounding whitespace.
+    
+    Returns:
+        str or None: SSL code corresponding to the identifier's 4-character prefix, or None if the identifier is missing, too short, or has no matching SSL.
+    """
+    if not bol or len(bol.strip()) < 5:
+        return None
+    prefix = bol.strip()[:4].upper()
+    return BOL_PREFIX_TO_SSL.get(prefix)
+
+
+def _resolve_ssl_export(vessel, carrier, bol=""):
+    """
+    Determine the shipping line (SSL) code from vessel or carrier text, falling back to a BOL prefix when provided.
+    
+    Checks vessel and carrier strings against the SSL_LINKS_PG mappings (exact match, substring, and word-start heuristics). If no match is found and a BOL/booking string is supplied, attempts to derive the SSL from the BOL prefix.
+    
+    Parameters:
+        vessel (str): Vessel name or description to inspect.
+        carrier (str): Carrier name or description to inspect.
+        bol (str): Bill-of-lading or booking identifier used as a fallback source for SSL detection.
+    
+    Returns:
+        ssl_code (str | None): The detected SSL code from SSL_LINKS_PG, or `None` if no match is found.
+    """
     for text in (vessel or "", carrier or ""):
         val = text.strip().lower()
         if not val:
@@ -119,36 +173,36 @@ def _resolve_ssl_export(vessel, carrier):
         for key, code in SSL_LINKS_PG.items():
             if any(w.startswith(key) for w in val.split()):
                 return code
+    # Fallback: detect from BOL prefix (e.g. MAEU2814354 -> MAERSK)
+    if bol:
+        detected = _ssl_from_bol_prefix(bol)
+        if detected:
+            log.info("Auto-detected SSL from BOL prefix", extra={"bol_prefix": bol[:4], "ssl_line": detected})
+            return detected
     return None
 
-
-def _load_jc_cache():
-    try:
-        with open(_JSONCARGO_CACHE_FILE, "r") as f:
-            return _json.load(f)
-    except Exception:
-        return {}
-
-def _save_jc_cache(cache):
-    try:
-        with open(_JSONCARGO_CACHE_FILE, "w") as f:
-            _json.dump(cache, f)
-    except Exception as e:
-        print(f"    Cache save error: {e}")
 
 def _jc_cache_get(container_num):
-    cache = _load_jc_cache()
-    entry = cache.get(container_num)
-    if entry and (_time_mod.time() - entry.get("ts", 0)) < _JSONCARGO_CACHE_TTL:
-        return entry.get("data")
-    return None
+    """
+    Get JsonCargo cache entry for a container from the Postgres-backed cache using the module's TTL.
+    
+    Parameters:
+        container_num (str): Container number to look up.
+    
+    Returns:
+        The cached JsonCargo response for `container_num` if present and not expired, otherwise `None`.
+    """
+    return pg_jc_cache_get(container_num, _JSONCARGO_CACHE_TTL)
 
 def _jc_cache_set(container_num, data):
-    cache = _load_jc_cache()
-    cache[container_num] = {"ts": _time_mod.time(), "data": data}
-    cutoff = _time_mod.time() - 48 * 3600
-    cache = {k: v for k, v in cache.items() if v.get("ts", 0) > cutoff}
-    _save_jc_cache(cache)
+    """
+    Store JsonCargo lookup results in the Postgres-backed JsonCargo cache for a container.
+    
+    Parameters:
+        container_num (str): Container number used as the cache key.
+        data (Any): JSON-serializable lookup result or tracking payload to persist.
+    """
+    pg_jc_cache_set(container_num, data)
 
 SSL_LINKS_TAB="SSL Links"
 
@@ -166,36 +220,50 @@ def load_ssl_links(creds):
                 ssl_code=row[2].strip()
                 if ssl_name and (url or ssl_code):
                     lookup[ssl_name.lower()]={"url":url,"code":ssl_code}
-        print(f"  Loaded {len(lookup)} SSL link(s) from '{SSL_LINKS_TAB}'")
+        log.info("Loaded SSL links", extra={"count": len(lookup), "tab": SSL_LINKS_TAB})
         return lookup
     except Exception as e:
-        print(f"  WARNING: Could not load SSL Links: {e}")
+        log.warning("Could not load SSL Links", extra={"error": str(e)})
         return {}
 
 def _load_credentials():
+    """
+    Load Google service account credentials from the configured service account file and ensure the access token is fresh.
+    
+    Returns:
+        creds (google.oauth2.service_account.Credentials): Service account credentials initialized with SCOPES and refreshed for immediate use.
+    """
     creds=Credentials.from_service_account_file(CREDENTIALS_FILE,scopes=SCOPES)
     creds.refresh(GoogleRequest())
     return creds
 
 def load_state():
+    """
+    Load persisted export tracking state, preferring the Postgres-backed store and falling back to a legacy local JSON file if Postgres has no data.
+    
+    Returns:
+        state (dict): Mapping of per-export keys to their persisted state; empty dict if no persisted state is found.
+    """
+    state = pg_load_all_export_state()
+    if state:
+        return state
+    # Fallback: try legacy JSON file if PG returned empty (first run after migration)
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE) as f: return json.load(f)
-        except: pass
+        except (OSError, ValueError): pass
     return {}
 
-def save_state(data):
-    try:
-        import shutil
-        if os.path.exists(STATE_FILE):
-            shutil.copy2(STATE_FILE, STATE_FILE + '.bak')
-        tmp = STATE_FILE + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, STATE_FILE)
-    except Exception as e: print(f'  WARNING: {e}')
-
 def load_account_lookup(creds):
+    """
+    Load account representative lookup mapping from the Account Rep sheet.
+    
+    Parameters:
+        creds: Google service account credentials used to access the spreadsheet.
+    
+    Returns:
+        dict: Mapping from account identifier (str) to a dict with keys "rep" (representative name) and "email" (representative email). Returns an empty dict if the sheet cannot be read or no valid rows are found.
+    """
     try:
         gc=gspread.authorize(creds)
         ws=gc.open_by_key(SHEET_ID).worksheet(ACCOUNT_LOOKUP_TAB)
@@ -204,10 +272,10 @@ def load_account_lookup(creds):
             if len(row)>=3 and row[0].strip():
                 a,r,e=row[0].strip(),row[1].strip(),row[2].strip()
                 if a and e: lookup[a]={"rep":r,"email":e}
-        print(f"  Loaded {len(lookup)} account(s)")
+        log.info("Loaded accounts", extra={"count": len(lookup)})
         return lookup
     except Exception as e:
-        print(f"  WARNING: {e}"); return {}
+        log.warning("Failed to load account lookup", extra={"error": str(e)}); return {}
 
 def get_account_tabs(sheet,lookup):
     return [ws.title for ws in sheet.worksheets() if ws.title not in SKIP_TABS and ws.title in lookup]
@@ -221,7 +289,7 @@ def get_sheet_hyperlinks(creds,sheet_id,tab_name):
         rows=resp.json()["sheets"][0]["data"][0].get("rowData",[])
         return [[cell.get("hyperlink") for cell in row.get("values",[])] for row in rows]
     except Exception as e:
-        print(f"  WARNING: hyperlink fetch failed: {e}"); return []
+        log.warning("Hyperlink fetch failed", extra={"error": str(e)}); return []
 
 def _parse_date(s):
     s=s.strip()
@@ -232,7 +300,7 @@ def _parse_date(s):
             dt=datetime.strptime(s,fmt)
             if dt.year==1900: dt=dt.replace(year=yr)
             return dt
-        except: continue
+        except (ValueError, TypeError): continue
     return None
 
 def _cutoff_alert(s):
@@ -265,7 +333,7 @@ def detect_ssl_line(vessel, carrier, ssl_links):
 def jsoncargo_bol_lookup(booking_num, ssl_line):
     cached = _jc_cache_get(f"bol:{booking_num}")
     if cached is not None:
-        print(f"    BOL lookup: cache hit for {booking_num}")
+        log.info("BOL lookup cache hit", extra={"booking": booking_num})
         return cached
     try:
         url=f"{JSONCARGO_BASE}/containers/bol/{booking_num}/"
@@ -275,18 +343,21 @@ def jsoncargo_bol_lookup(booking_num, ssl_line):
         if "data" in data:
             containers=data["data"].get("associated_container_numbers",[])
             if containers:
-                print(f"    BOL lookup: found containers {containers}")
-                _jc_cache_set(f"bol:{booking_num}", containers[0])
-                return containers[0]
-        print(f"    BOL lookup: {data.get('error',{}).get('title','no result')}")
+                log.info("BOL lookup found containers", extra={"booking": booking_num, "containers": containers})
+                if not _is_container_num(containers[0]):
+                    log.warning("BOL lookup invalid container format", extra={"booking": booking_num, "container": containers[0]})
+                else:
+                    _jc_cache_set(f"bol:{booking_num}", containers[0])
+                    return containers[0]
+        log.info("BOL lookup no result", extra={"booking": booking_num, "error": data.get('error',{}).get('title','no result')})
         return None
     except Exception as e:
-        print(f"    BOL lookup error: {e}"); return None
+        log.warning("BOL lookup error", extra={"booking": booking_num, "error": str(e)}); return None
 
 def jsoncargo_container_track(container_num, ssl_line):
     cached = _jc_cache_get(container_num)
     if cached is not None:
-        print(f"    Container track: cache hit for {container_num}")
+        log.info("Container track cache hit", extra={"container": container_num})
         return cached
     try:
         url=f"{JSONCARGO_BASE}/containers/{container_num}/"
@@ -294,14 +365,14 @@ def jsoncargo_container_track(container_num, ssl_line):
                          params={"shipping_line":ssl_line},timeout=20)
         data=resp.json()
         if "error" in data:
-            print(f"    Container track: {data['error'].get('title','error')}")
+            log.info("Container track error response", extra={"container": container_num, "error": data['error'].get('title','error')})
             return None
         events=[]
         raw_events=data.get("data",{}).get("events",[]) or data.get("data",{}).get("moves",[]) or []
         for ev in raw_events:
             desc=(ev.get("description") or ev.get("move") or ev.get("status") or "").lower()
             if desc: events.append(desc)
-        print(f"    Container track: {len(events)} events found")
+        log.info("Container track events found", extra={"container": container_num, "event_count": len(events)})
         gate_in=None
         all_text=" ".join(events)
         for status in GATE_IN_STATUSES:
@@ -311,7 +382,7 @@ def jsoncargo_container_track(container_num, ssl_line):
         _jc_cache_set(container_num, result)
         return result
     except Exception as e:
-        print(f"    Container track error: {e}"); return None
+        log.warning("Container track error", extra={"container": container_num, "error": str(e)}); return None
 
 def _send_email(to,cc,subject,body):
     msg=MIMEMultipart("alternative")
@@ -323,8 +394,8 @@ def _send_email(to,cc,subject,body):
         with smtplib.SMTP(SMTP_HOST,SMTP_PORT) as s:
             s.ehlo();s.starttls();s.login(SMTP_USER,SMTP_PASSWORD)
             s.sendmail(SMTP_USER,rcpt,msg.as_string())
-        print(f"    Email sent to {to}")
-    except Exception as e: print(f"    WARNING: Email failed: {e}")
+        log.info("Email sent", extra={"to": to})
+    except Exception as e: log.warning("Email failed", extra={"to": to, "error": str(e)})
 
 def send_export_alert(tab_name,lookup,alerts):
     if not alerts: return
@@ -348,8 +419,8 @@ def send_export_alert(tab_name,lookup,alerts):
                f'<td {td}>{a["container"]}</td>'
                f'<td {td}>{a["vessel"]}</td>'
                f'<td {td}>{a["booking"]}</td>'
-               f'<td {td}>{a.get("erd") or "\u2014"}</td>'
-               f'<td {td}>{a.get("cutoff") or "\u2014"}</td>'
+               f'<td {td}>{a.get("erd") or chr(8212)}</td>'
+               f'<td {td}>{a.get("cutoff") or chr(8212)}</td>'
                f'<td {td}><b>{alert_text}</b></td>'
                f'</tr>')
     rep_line=f' &mdash; Rep: {rep_name}' if rep_name else ''
@@ -408,8 +479,8 @@ def send_archive_email(tab_name,lookup,job):
           f'<tr><td {tl}>Vessel</td><td {td}>{job["vessel"]}</td></tr>'
           f'<tr><td {tl}>Origin</td><td {td}>{job["origin"]}</td></tr>'
           f'<tr><td {tl}>Destination</td><td {td}>{job["dest"]}</td></tr>'
-          f'<tr><td {tl}>ERD</td><td {td}>{job.get("erd") or "\u2014"}</td></tr>'
-          f'<tr><td {tl}>Cutoff</td><td {td}>{job.get("cutoff") or "\u2014"}</td></tr>'
+          f'<tr><td {tl}>ERD</td><td {td}>{job.get("erd") or chr(8212)}</td></tr>'
+          f'<tr><td {tl}>Cutoff</td><td {td}>{job.get("cutoff") or chr(8212)}</td></tr>'
           f'<tr><td {tl}>Gate In</td><td {td}><b>{job["gate_in_status"]}</b></td></tr>'
           f'</table></div></div>')
     _send_email(rep,cc,subj,body)
@@ -420,19 +491,40 @@ def archive_export_row_pg(job, tab_name):
         pg_archive_shipment(job["efj"])
         sheet_archive_row(job['efj'], tab_name,
                           rep=ACCOUNT_REPS_PG.get(tab_name, {}).get('rep'))
-        print(f"    Archived {job['efj']} (Gate In)")
+        log.info("Archived export row", extra={"efj": job['efj'], "reason": "Gate In"})
         send_archive_email(tab_name, ACCOUNT_REPS_PG, job)
         return True
     except Exception as e:
-        print(f"    WARNING: Archive failed: {e}")
+        log.warning("Archive failed", extra={"efj": job['efj'], "error": str(e)})
         return False
 
 
 def run_once():
+    """
+    Perform a single poll cycle to process active Dray Export shipments from Postgres.
+    
+    Reads active "Dray Export" shipments, ensures required tracking tables exist, and processes each row:
+    - Detects ERD and cutoff changes and persists per-row state to Postgres.
+    - Generates cutoff alerts and collects per-account alert batches.
+    - Resolves steamship line (SSL) for lookups (including BOL-prefix fallback) and, when needed,
+      looks up container numbers via JsonCargo and writes assignments to Postgres and the Master Sheet.
+    - Tracks container status via JsonCargo; when a gate-in is observed, archives the export row,
+      removes persisted state, and notifies recipients.
+    - Sends email notifications for cutoff/container alerts, container assignments, and archive events.
+    
+    Side effects:
+    - Reads and updates Postgres shipment and tracking state tables.
+    - May update the Master Sheet and send HTML emails.
+    - May call external JsonCargo APIs for lookups and tracking.
+    """
     now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
-    print(f"\n[{now_str}] Export poll cycle (Postgres mode)...")
+    log.info("Export poll cycle started", extra={"mode": "Postgres", "timestamp": now_str})
+
+    # Ensure tracking state tables exist
+    pg_ensure_tracking_tables()
 
     # ── Read active dray export loads from Postgres ──────────────────────────
+    conn = None
     try:
         conn = _pg_connect()
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -449,10 +541,12 @@ def run_once():
                 ORDER BY account, efj
             """)
             all_loads = cur.fetchall()
-        conn.close()
     except Exception as exc:
-        print(f"FATAL: Could not read from Postgres: {exc}")
+        log.error("Could not read from Postgres", extra={"error": str(exc)})
         return
+    finally:
+        if conn is not None:
+            conn.close()
 
     # Group by account
     from collections import defaultdict
@@ -462,17 +556,16 @@ def run_once():
         by_account[acct].append(row)
 
     account_tabs = sorted(by_account.keys())
-    print(f"  Loaded {len(all_loads)} active Dray Export load(s) across {len(account_tabs)} account(s)")
+    log.info("Loaded active Dray Export loads", extra={"load_count": len(all_loads), "account_count": len(account_tabs)})
     if not account_tabs:
-        print("  No active export loads found.")
+        log.info("No active export loads found")
         return
 
     state = load_state()
-    new_state = dict(state)
 
     for tab_name in account_tabs:
         loads = by_account[tab_name]
-        print(f"\n  Checking {tab_name}... ({len(loads)} export row(s))")
+        log.info("Checking account", extra={"tab": tab_name, "row_count": len(loads)})
         tab_alerts = []
 
         for row in loads:
@@ -491,24 +584,24 @@ def run_once():
                 continue
 
             key = f"{tab_name}:{efj}:{container}"
-            print(f"\n  -> {efj}|{container} booking={booking} ERD={erd!r} Cutoff={cutoff!r}")
+            log.info("Processing export row", extra={"efj": efj, "container": container, "booking": booking, "erd": erd, "cutoff": cutoff})
 
             prev = state.get(key, {})
             current = {"erd": erd, "cutoff": cutoff, "cutoff_alerted": prev.get("cutoff_alerted", "")}
             changed = [f.upper() for f in ("erd", "cutoff") if current[f] != prev.get(f, "")]
             if "CUTOFF" in changed:
                 current["cutoff_alerted"] = ""
-            new_state[key] = current
+            pg_set_export_state(key, **current)
 
             alert_reason = _cutoff_alert(cutoff) if cutoff else None
             if alert_reason and current["cutoff_alerted"] == cutoff:
-                print(f"    Cutoff alert already sent for {cutoff} - skipping")
+                log.info("Cutoff alert already sent - skipping", extra={"efj": efj, "cutoff": cutoff})
                 alert_reason = None
 
             if changed or alert_reason:
                 if alert_reason:
                     current["cutoff_alerted"] = cutoff
-                    new_state[key] = current
+                    pg_set_export_state(key, **current)
                 tab_alerts.append({
                     "efj": efj, "container": container, "vessel": vessel,
                     "booking": booking, "erd": erd, "cutoff": cutoff,
@@ -520,17 +613,17 @@ def run_once():
                                    account=tab_name, move_type="Dray Export")
 
             # Resolve SSL line
-            ssl_line = _resolve_ssl_export(vessel, carrier)
+            ssl_line = _resolve_ssl_export(vessel, carrier, booking)
             if not ssl_line:
-                print(f"    SSL line not detected for {vessel}/{carrier} - skipping API")
+                log.info("SSL line not detected - skipping API", extra={"efj": efj, "vessel": vessel, "carrier": carrier, "booking": booking})
                 continue
 
             # Check if container column has booking# instead of container#
             if not _is_container_num(container):
-                print(f"    Col C is booking# - calling BOL lookup...")
+                log.info("Col C is booking# - calling BOL lookup", extra={"efj": efj, "booking": booking})
                 found_container = jsoncargo_bol_lookup(booking, ssl_line)
                 if found_container:
-                    print(f"    Container# found: {found_container}")
+                    log.info("Container# found", extra={"efj": efj, "container": found_container})
                     # Update container in Postgres
                     pg_update_shipment(efj, container=found_container,
                                        account=tab_name, move_type="Dray Export")
@@ -541,16 +634,16 @@ def run_once():
                     pg_update_shipment(efj, bot_notes=f"Container# assigned: {found_container} - {today}")
                     container = found_container
                 else:
-                    print(f"    No container# yet for {efj}")
+                    log.info("No container# yet", extra={"efj": efj})
                     continue
 
-            print(f"    Tracking container# {container}...")
+            log.info("Tracking container", extra={"efj": efj, "container": container})
             track = jsoncargo_container_track(container, ssl_line)
             if not track:
-                print(f"    No tracking data for {container}")
+                log.info("No tracking data", extra={"efj": efj, "container": container})
                 continue
             if track["gate_in"]:
-                print(f"    GATE IN: {track['gate_in']} - archiving")
+                log.info("Gate in detected - archiving", extra={"efj": efj, "container": container, "gate_in": track['gate_in']})
                 job = {
                     "efj": efj, "container": container, "booking": booking,
                     "vessel": vessel, "origin": origin, "dest": dest,
@@ -558,32 +651,57 @@ def run_once():
                 }
                 ok = archive_export_row_pg(job, tab_name)
                 if ok:
-                    new_state.pop(key, None)
+                    pg_delete_export_state(key)
             else:
-                print(f"    No gate-in yet for {container}")
+                log.info("No gate-in yet", extra={"efj": efj, "container": container})
 
         if tab_alerts:
-            print(f"\n  Sending alert for {len(tab_alerts)} row(s)...")
+            log.info("Sending alert", extra={"tab": tab_name, "alert_count": len(tab_alerts)})
             send_export_alert(tab_name, ACCOUNT_REPS_PG, tab_alerts)
         else:
-            print(f"  No alerts for {tab_name}")
+            log.info("No alerts", extra={"tab": tab_name})
 
-    save_state(new_state)
-    print("Export poll complete.")
+    # State already persisted per-row to Postgres via pg_set_export_state()
+    log.info("Export poll complete")
+
+
+def _check_jsoncargo_api():
+    """Verify JsonCargo API key is valid at startup. Logs warning if not."""
+    try:
+        resp = requests.get(
+            f"{JSONCARGO_BASE}/containers/MAEU0000000/",
+            headers={"Authorization": f"Bearer {JSONCARGO_API_KEY}"},
+            timeout=10,
+        )
+        if resp.status_code in (401, 403):
+            log.error("JsonCargo API key rejected (HTTP %d) — export tracking will fail", resp.status_code)
+            return False
+        log.info("JsonCargo API: OK (HTTP %d)", resp.status_code)
+        return True
+    except requests.Timeout:
+        log.warning("JsonCargo API timeout on startup check — will retry during normal operation")
+        return True  # Don't block startup for timeout
+    except requests.ConnectionError:
+        log.warning("JsonCargo API unreachable on startup check — will retry during normal operation")
+        return True
+    except Exception as e:
+        log.warning("JsonCargo API startup check failed: %s", e)
+        return True
 
 
 def main():
-    print("Export Monitor v3 (Postgres mode) started.")
+    log.info("Export Monitor v3 started", extra={"mode": "Postgres"})
+    _check_jsoncargo_api()
     while True:
         run_once()
-        print("  Sleeping 60 min...")
+        log.info("Sleeping 60 min")
         time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
     import sys
     if "--once" in sys.argv:
-        print("Export Monitor v3 — single run (Postgres)")
+        log.info("Export Monitor v3 - single run", extra={"mode": "Postgres"})
         run_once()
-        print("Run complete.")
+        log.info("Run complete")
     else:
         main()

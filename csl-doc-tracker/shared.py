@@ -153,6 +153,193 @@ def send_delivery_email(shipment: dict):
 
 TRACKING_CACHE_FILE = "/root/csl-bot/ftl_tracking_cache.json"
 
+
+class TrackingCache:
+    """In-memory tracking cache with debounced disk flush.
+
+    Eliminates synchronous file I/O from the webhook hot path.
+    The cache loads from disk on startup and flushes changes every 2 seconds
+    so that external processes (ftl_monitor.py) still see updates.
+
+    External-write awareness: tracks which keys we've modified (_dirty_keys).
+    Before flushing, checks if the file was modified externally (by ftl_monitor.py)
+    and merges external changes for non-dirty keys so they aren't clobbered.
+    """
+
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+        self._lock = threading.Lock()
+        self._dirty = False
+        self._dirty_keys: set = set()
+        self._data: dict = {}
+        self._last_file_mtime: float = 0
+        # Load from disk
+        try:
+            with open(TRACKING_CACHE_FILE) as f:
+                self._data = json.load(f)
+            self._last_file_mtime = os.path.getmtime(TRACKING_CACHE_FILE)
+            log.info("TrackingCache loaded %d entries from disk", len(self._data))
+        except (FileNotFoundError, json.JSONDecodeError):
+            log.info("TrackingCache starting empty (file not found or invalid)")
+        # Start background flush thread
+        self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
+        self._flush_thread.start()
+
+    def get_all(self) -> dict:
+        """Return a shallow copy of the entire cache."""
+        with self._lock:
+            return dict(self._data)
+
+    def get(self, key: str) -> dict | None:
+        """Return a cache entry by key, or None."""
+        with self._lock:
+            entry = self._data.get(key)
+            return dict(entry) if entry else None
+
+    def set(self, key: str, entry: dict):
+        """Set a cache entry and mark dirty for flush."""
+        with self._lock:
+            self._data[key] = entry
+            self._dirty = True
+            self._dirty_keys.add(key)
+
+    def update_entry(self, key: str, updates: dict):
+        """Merge updates into an existing cache entry."""
+        with self._lock:
+            if key in self._data:
+                self._data[key].update(updates)
+                self._dirty = True
+                self._dirty_keys.add(key)
+
+    def find_entry(self, load_ref: str) -> tuple[str | None, dict | None]:
+        """Find a cache entry by EFJ, load_num, mp_load_id, or key.
+        Returns (matched_key, entry_copy) or (None, None).
+        """
+        with self._lock:
+            efj_clean = load_ref.replace("EFJ", "").strip()
+            for key, entry in self._data.items():
+                efj = entry.get("efj", "")
+                load_num = entry.get("load_num", "")
+                mp_load_id = entry.get("mp_load_id", "")
+                if (efj == load_ref or efj == efj_clean or
+                        load_num == load_ref or mp_load_id == load_ref or
+                        key == efj_clean):
+                    return key, dict(entry)
+            # Suffix-stripped fallback (LAX1260308015-1 -> LAX1260308015)
+            if "-" in load_ref:
+                base_ref = load_ref.rsplit("-", 1)[0]
+                for key, entry in self._data.items():
+                    if base_ref in (entry.get("efj", ""), entry.get("load_num", ""),
+                                    entry.get("mp_load_id", ""), key):
+                        return key, dict(entry)
+            return None, None
+
+    def set_dirty(self):
+        """Mark cache as needing a flush."""
+        with self._lock:
+            self._dirty = True
+
+    def flush_now(self):
+        """Force an immediate write to disk."""
+        self._do_flush()
+
+    def _flush_loop(self):
+        """Background thread: sync external changes + flush every 2 seconds."""
+        while True:
+            _time.sleep(2)
+            self._sync_external_changes()
+            if self._dirty:
+                self._do_flush()
+
+    def _sync_external_changes(self):
+        """Reload from disk if an external process (ftl_monitor) modified the file."""
+        try:
+            current_mtime = os.path.getmtime(TRACKING_CACHE_FILE)
+        except OSError:
+            return
+        with self._lock:
+            if current_mtime <= self._last_file_mtime:
+                return
+            try:
+                with open(TRACKING_CACHE_FILE) as f:
+                    disk_data = json.load(f)
+                # Merge: for non-dirty keys, take the disk version
+                for key, value in disk_data.items():
+                    if key not in self._dirty_keys:
+                        self._data[key] = value
+                # Add any keys from disk that we don't have at all
+                for key in disk_data:
+                    if key not in self._data:
+                        self._data[key] = disk_data[key]
+                self._last_file_mtime = current_mtime
+                log.debug("TrackingCache synced external changes from disk")
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass
+
+    def _do_flush(self):
+        with self._lock:
+            if not self._dirty:
+                return
+            data_copy = dict(self._data)
+            self._dirty = False
+            self._dirty_keys.clear()
+        try:
+            tmp_path = TRACKING_CACHE_FILE + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(data_copy, f, indent=2)
+            os.replace(tmp_path, TRACKING_CACHE_FILE)
+            with self._lock:
+                self._last_file_mtime = os.path.getmtime(TRACKING_CACHE_FILE)
+        except Exception as e:
+            log.warning("TrackingCache flush failed: %s", e)
+
+
+# Global singleton — initialized on first import
+tracking_cache = TrackingCache()
+
+
+# ── SSE broadcast for real-time dashboard updates ──
+
+import asyncio as _asyncio
+
+_sse_clients: set[_asyncio.Queue] = set()
+_sse_lock = threading.Lock()
+
+
+def sse_add_client(queue: _asyncio.Queue):
+    with _sse_lock:
+        _sse_clients.add(queue)
+
+
+def sse_remove_client(queue: _asyncio.Queue):
+    with _sse_lock:
+        _sse_clients.discard(queue)
+
+
+def broadcast_tracking_update(efj: str, data: dict):
+    """Push a tracking update to all connected SSE clients."""
+    event_data = {"efj": efj, **data}
+    event_json = json.dumps(event_data)
+    with _sse_lock:
+        stale = []
+        for q in _sse_clients:
+            try:
+                q.put_nowait(event_json)
+            except Exception:
+                stale.append(q)
+        for q in stale:
+            _sse_clients.discard(q)
+
 _MP_PROGRESS_ORDER = [
     "Driver Assigned", "Ready To Track", "Arrived At Origin",
     "Departed Origin", "At Delivery", "Delivered",
@@ -172,11 +359,8 @@ _STATUS_TO_STEP = {
 
 
 def _read_tracking_cache() -> dict:
-    try:
-        with open(TRACKING_CACHE_FILE) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    """Return tracking cache data (now served from in-memory singleton)."""
+    return tracking_cache.get_all()
 
 
 def _find_tracking_entry(cache: dict, efj: str) -> dict:
@@ -450,8 +634,9 @@ REP_STYLES = {
     "John F": {"color": "var(--accent-purple)", "bg": "linear-gradient(135deg,#8b5cf6,#7c3aed)", "initials": "JF"},
     "Janice": {"color": "var(--accent-cyan)", "bg": "linear-gradient(135deg,#06b6d4,#0891b2)", "initials": "JC"},
     "Nancy": {"color": "var(--accent-blue)", "bg": "linear-gradient(135deg,#3b82f6,#2563eb)", "initials": "NF"},
-    "Allie": {"color": "var(--accent-pink)", "bg": "linear-gradient(135deg,#ec4899,#db2777)", "initials": "AM"},
+    "Allie": {"color": "var(--accent-pink)", "bg": "linear-gradient(135deg,#ec4899,#db2777)", "initials": "AL"},
     "John N": {"color": "var(--accent-indigo)", "bg": "linear-gradient(135deg,#6366f1,#4f46e5)", "initials": "JN"},
+    "Amanda": {"color": "var(--accent-violet)", "bg": "linear-gradient(135deg,#7c3aed,#6d28d9)", "initials": "AM"},
     "Climaco": {"color": "var(--accent-teal)", "bg": "linear-gradient(135deg,#14b8a6,#0d9488)", "initials": "CC"},
     "Boviet": {"color": "var(--accent-amber)", "bg": "linear-gradient(135deg,#f59e0b,#d97706)", "initials": "BV"},
     "Tolead": {"color": "var(--accent-red)", "bg": "linear-gradient(135deg,#ef4444,#dc2626)", "initials": "TL"},
