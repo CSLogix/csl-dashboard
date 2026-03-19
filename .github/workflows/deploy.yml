@@ -5,6 +5,7 @@ on:
     branches: [main]
 
 jobs:
+  # ── Frontend (React) ──────────────────────────────────────────────
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
@@ -52,3 +53,168 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_SSH_PORT }}
           script: systemctl restart csl-dashboard
+
+  # ── Backend (Python) ──────────────────────────────────────────────
+  deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for backend changes
+        id: changes
+        run: |
+          # Compare this commit against its parent
+          CHANGED=$(git diff --name-only HEAD~1 HEAD -- \
+            'csl-doc-tracker/' \
+            '*.py' \
+            'requirements.txt' \
+            'systemd/' \
+            'nginx/' \
+            | head -1)
+          if [ -n "$CHANGED" ]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Check if requirements.txt specifically changed
+          if git diff --name-only HEAD~1 HEAD | grep -q '^requirements.txt$'; then
+            echo "requirements=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "requirements=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy FastAPI app
+        if: steps.changes.outputs.backend == 'true'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          source: >-
+            csl-doc-tracker/app.py,
+            csl-doc-tracker/config.py,
+            csl-doc-tracker/database.py,
+            csl-doc-tracker/auth.py,
+            csl-doc-tracker/shared.py,
+            csl-doc-tracker/ai_assistant.py,
+            csl-doc-tracker/document_classifier.py,
+            csl-doc-tracker/load_matcher.py,
+            csl-doc-tracker/gmail_monitor.py,
+            csl-doc-tracker/gmail_auth.py,
+            csl-doc-tracker/quote_extractor.py,
+            csl-doc-tracker/quote_routes.py,
+            csl-doc-tracker/crypto.py,
+            csl-doc-tracker/csl_sheet_sync.py,
+            csl-doc-tracker/sheets_sync.py,
+            csl-doc-tracker/setup_db.sql,
+            csl-doc-tracker/routes/*
+          target: /root/csl-bot/
+          overwrite: true
+
+      - name: Deploy monitor scripts
+        if: steps.changes.outputs.backend == 'true'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          source: >-
+            csl_bot.py,
+            export_monitor.py,
+            ftl_monitor.py,
+            tolead_monitor.py,
+            boviet_monitor.py,
+            csl_inbox_scanner.py,
+            csl_email_classifier.py,
+            csl_ftl_alerts.py,
+            csl_inbox_digest.py,
+            webhook.py,
+            upload_server.py,
+            macropoint_creator.py,
+            csl_pg_writer.py,
+            csl_sheet_sync.py,
+            csl_sheet_writer.py,
+            csl_vessel_schedules.py,
+            health_check.py,
+            backup_state.py,
+            boviet_invoice_writer.py,
+            daily_summary.py,
+            dray_daily_summary.py,
+            export_daily_summary.py,
+            date_normalizer.py,
+            terminal_normalizer.py,
+            terminal_nola.py,
+            lfd_watchdog.py,
+            port_groups.py,
+            unbilled_weekly_digest.py,
+            weekly_profit_report.py,
+            requirements.txt,
+            systemd/*,
+            nginx/*
+          target: /root/csl-bot/
+          overwrite: true
+
+      - name: Deploy systemd units and nginx config
+        if: steps.changes.outputs.backend == 'true'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          script: |
+            # Only copy systemd/nginx if they changed (scp already placed them)
+            if [ -d /root/csl-bot/systemd ]; then
+              cp /root/csl-bot/systemd/*.service /etc/systemd/system/ 2>/dev/null || true
+              cp /root/csl-bot/systemd/*.timer /etc/systemd/system/ 2>/dev/null || true
+              systemctl daemon-reload
+            fi
+            if [ -d /root/csl-bot/nginx ]; then
+              cp /root/csl-bot/nginx/*.conf /etc/nginx/sites-available/ 2>/dev/null || true
+              nginx -t && systemctl reload nginx || echo "nginx config test failed, skipping reload"
+            fi
+
+      - name: Install dependencies if requirements changed
+        if: steps.changes.outputs.requirements == 'true'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          script: |
+            cd /root/csl-bot
+            pip install -r requirements.txt --break-system-packages -q
+
+      - name: Restart affected services
+        if: steps.changes.outputs.backend == 'true'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          script: |
+            echo "=== Restarting backend services ==="
+
+            # Dashboard (FastAPI) — always restart if backend changed
+            systemctl restart csl-dashboard
+
+            # Long-running monitors
+            systemctl restart csl-ftl
+            systemctl restart csl-export
+            systemctl restart csl-boviet
+            systemctl restart csl-tolead
+            systemctl restart csl-upload
+            systemctl restart csl-webhook
+
+            # Gmail/inbox services
+            systemctl restart csl-gmail-monitor || true
+
+            echo "=== Service status ==="
+            systemctl is-active csl-dashboard csl-ftl csl-export csl-boviet csl-tolead csl-upload csl-webhook
