@@ -949,7 +949,7 @@ async def api_port_codes():
 @router.get("/api/reps")
 async def api_reps():
     """Return list of account reps."""
-    return {"reps": ["Eli", "Radka", "John F", "Janice"]}
+    return {"reps": ["Radka", "John F", "Janice", "Allie", "John N", "Amanda"]}
 
 
 @router.post("/api/accounts/add")

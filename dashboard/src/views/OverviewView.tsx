@@ -5,11 +5,14 @@ import { STATUSES, STATUS_COLORS, REP_ACCOUNTS, ALL_REP_NAMES } from '../helpers
 import { isDateToday, isDateTomorrow, isDateYesterday, isDatePast, isDateFuture, getRepShipments, useIsMobile } from '../helpers/utils';
 import MyActions from '../components/MyActions';
 
-// ─── Rep avatar colors (spec: RA=cyan, JF=blue, JA=purple, BO=green, TO=amber) ───
-const OVERVIEW_REP_COLORS = {
+// ─── Rep avatar colors ───
+const OVERVIEW_REP_COLORS: Record<string, string> = {
   Radka: "#06b6d4",
   "John F": "#3B82F6",
   Janice: "#A855F7",
+  Allie: "#F59E0B",
+  "John N": "#0891B2",
+  Amanda: "#7C3AED",
   Boviet: "#22C55E",
   Tolead: "#F59E0B",
 };

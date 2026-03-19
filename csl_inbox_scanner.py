@@ -72,14 +72,13 @@ _payment_alert_queue = []  # Batched payment escalation alerts
 
 # Rep → email mapping (matches Account Rep tab in Google Sheet)
 REP_EMAILS = {
-    "Eli": "eli@evansdelivery.com",
     "Radka": "radka@evansdelivery.com",
     "John F": "john.feltz@commonsenselogistics.com",
     "Janice": "janice@evansdelivery.com",
 }
 # Account → rep mapping (mirrors frontend REP_ACCOUNTS)
 ACCOUNT_REP_MAP = {
-    "DSV": "Eli", "EShipping": "Eli", "Kishco": "Eli", "MAO": "Eli", "Rose": "Eli",
+    "DSV": "John F", "EShipping": "John F", "Kishco": "John F", "MAO": "John F", "Rose": "John F",
     "Allround": "Radka", "Cadi": "Radka", "IWS": "Radka", "Kripke": "Radka",
     "MGF": "Radka", "Meiko": "Radka", "Sutton": "Radka", "Tanera": "Radka",
     "TCR": "Radka", "Texas International": "Radka", "USHA": "Radka",

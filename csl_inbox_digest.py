@@ -48,11 +48,11 @@ DASHBOARD_URL = "https://cslogixdispatch.com/app"
 # Rep / Account mapping
 # ---------------------------------------------------------------------------
 ACCOUNT_REP_MAP = {
-    "DSV": "Eli",
-    "EShipping": "Eli",
-    "Kishco": "Eli",
-    "MAO": "Eli",
-    "Rose": "Eli",
+    "DSV": "John F",
+    "EShipping": "John F",
+    "Kishco": "John F",
+    "MAO": "John F",
+    "Rose": "John F",
     "Allround": "Radka",
     "Cadi": "Radka",
     "IWS": "Radka",
@@ -71,9 +71,8 @@ ACCOUNT_REP_MAP = {
 }
 
 REP_EMAILS = {
-    "Eli": "eli@evansdelivery.com",
-    "Radka": "radka@evansdelivery.com",
     "John F": "john.feltz@commonsenselogistics.com",
+    "Radka": "radka@evansdelivery.com",
     "Janice": "janice@evansdelivery.com",
 }
 

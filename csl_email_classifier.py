@@ -27,14 +27,13 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 EMAIL_CC = os.getenv("EMAIL_CC", "efj-operations@evansdelivery.com")
 
 REP_EMAILS = {
-    "Eli": "eli@evansdelivery.com",
     "Radka": "radka@evansdelivery.com",
     "John F": "john.feltz@commonsenselogistics.com",
     "Janice": "janice@evansdelivery.com",
 }
 
 ACCOUNT_REP_MAP = {
-    "DSV": "Eli", "EShipping": "Eli", "Kishco": "Eli", "MAO": "Eli", "Rose": "Eli",
+    "DSV": "John F", "EShipping": "John F", "Kishco": "John F", "MAO": "John F", "Rose": "John F",
     "Allround": "Radka", "Cadi": "Radka", "IWS": "Radka", "Kripke": "Radka",
     "MGF": "Radka", "Meiko": "Radka", "Sutton": "Radka", "Tanera": "Radka",
     "TCR": "Radka", "Texas International": "Radka", "USHA": "Radka",

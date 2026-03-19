@@ -28,7 +28,6 @@ SMTP_PASS = os.environ["SMTP_PASSWORD"]
 EMAIL_CC  = os.environ.get("EMAIL_CC", "efj-operations@evansdelivery.com")
 
 REPS = {
-    "Eli":    "Eli.Luchuk@evansdelivery.com",
     "Radka":  "Radka.White@evansdelivery.com",
     "John F": "John.Feltz@evansdelivery.com",
     "Janice": "Janice.Cortes@evansdelivery.com",
