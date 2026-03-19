@@ -17,7 +17,7 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
   const [lookupDone, setLookupDone] = useState(false);
   const [addingAccount, setAddingAccount] = useState(false);
   const [newAccountName, setNewAccountName] = useState("");
-  const [newAccountRep, setNewAccountRep] = useState("Eli");
+  const [newAccountRep, setNewAccountRep] = useState(MASTER_REPS[0] || "John F");
   const [pendingDocs, setPendingDocs] = useState([]);
   const [dateInputs, setDateInputs] = useState({ eta: "", lfd: "", pickupDate: "", deliveryDate: "" });
   const [bulkMode, setBulkMode] = useState(false);
@@ -427,36 +427,41 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
       <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
         <button onClick={onCancel} style={{ flex: 1, padding: "11px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "#8B95A8", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
         {!bulkMode ? (
-          <button disabled={submitting} onClick={() => {
+          <button disabled={submitting} onClick={async () => {
             setError("");
             if (!form.efj.trim()) { setError("EFJ Pro # is required"); return; }
             if (!form.origin || !form.destination) { setError("Origin and Destination are required"); return; }
             setSubmitting(true);
-            onSubmit({
-              efj: form.efj.trim(),
-              move_type: form.moveType,
-              status: form.status,
-              account: form.account,
-              carrier: form.carrier,
-              origin: form.origin,
-              destination: form.destination,
-              container: form.container,
-              pickup_date: form.pickupDate || "",
-              delivery_date: form.deliveryDate || "",
-              eta: form.eta || "",
-              lfd: form.lfd || "",
-              bol: form.bol || "",
-              customer_ref: form.customerRef || "",
-              equipment_type: form.equipmentType || "",
-              notes: form.notes,
-              rep: form.rep || "",
-              hub: form.hub || "",
-              macropoint_url: isFTL ? (form.macropointUrl || null) : null,
-              driver_phone: form.driverPhone || null,
-              trailer_number: form.trailerNumber || null,
-              carrier_email: form.carrierEmail || null,
-              pendingDocs,
-            });
+            try {
+              await onSubmit({
+                efj: form.efj.trim(),
+                move_type: form.moveType,
+                status: form.status,
+                account: form.account,
+                carrier: form.carrier,
+                origin: form.origin,
+                destination: form.destination,
+                container: form.container,
+                pickup_date: form.pickupDate || "",
+                delivery_date: form.deliveryDate || "",
+                eta: form.eta || "",
+                lfd: form.lfd || "",
+                bol: form.bol || "",
+                customer_ref: form.customerRef || "",
+                equipment_type: form.equipmentType || "",
+                notes: form.notes,
+                rep: form.rep || "",
+                hub: form.hub || "",
+                macropoint_url: isFTL ? (form.macropointUrl || null) : null,
+                driver_phone: form.driverPhone || null,
+                trailer_number: form.trailerNumber || null,
+                carrier_email: form.carrierEmail || null,
+                pendingDocs,
+              });
+            } catch (err) {
+              setError(err.message || "Failed to create load");
+              setSubmitting(false);
+            }
           }} className="btn-primary" style={{ flex: 1.5, padding: "11px", border: "none", borderRadius: 10, color: "#fff", fontSize: 12, fontWeight: 700, cursor: submitting ? "wait" : "pointer", opacity: submitting ? 0.6 : 1, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
             {submitting ? "Creating..." : "Add Load"}
           </button>
