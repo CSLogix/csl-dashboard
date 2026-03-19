@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime, date
 from decimal import Decimal
 
@@ -26,6 +27,9 @@ MODEL = os.getenv("AI_MODEL", "claude-sonnet-4-6")
 MAX_TOOL_ITERATIONS = 8
 MAX_RESPONSE_TOKENS = 4096
 
+# Session expiry in seconds (30 minutes)
+SESSION_TTL = 1800
+
 client = None
 
 def _get_client():
@@ -33,6 +37,159 @@ def _get_client():
     if client is None:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     return client
+
+
+# ---------------------------------------------------------------------------
+# Session state management (Entity Extraction approach)
+# ---------------------------------------------------------------------------
+# Instead of keeping full conversation history, we extract structured entities
+# from each exchange into a compact JSON state object. This gives multi-turn
+# context without bloating the context window.
+
+_sessions = {}  # session_id -> { state: dict, last_active: float, turns: int }
+
+
+def _get_session(session_id: str) -> dict:
+    """Get or create a session state."""
+    now = time.time()
+    # Clean expired sessions
+    expired = [k for k, v in _sessions.items() if now - v["last_active"] > SESSION_TTL]
+    for k in expired:
+        del _sessions[k]
+
+    if session_id not in _sessions:
+        _sessions[session_id] = {
+            "state": {},  # extracted entities
+            "last_active": now,
+            "turns": 0,
+            "summary": "",  # rolling summary of conversation
+        }
+    session = _sessions[session_id]
+    session["last_active"] = now
+    return session
+
+
+def _update_session_state(session_id: str, question: str, answer: str, tool_calls: list):
+    """Extract entities from the latest exchange and update session state."""
+    session = _get_session(session_id)
+    session["turns"] += 1
+
+    state = session["state"]
+
+    # Extract entities from question using patterns
+    q_lower = question.lower()
+
+    # EFJ references
+    efj_match = re.findall(r'EFJ[-\s]?\d+', question, re.I)
+    if efj_match:
+        state["last_efj"] = efj_match[-1].upper().replace(" ", "-")
+
+    # Account mentions
+    for acct in _KNOWN_ACCOUNTS:
+        if acct in q_lower:
+            state["account"] = acct.title() if len(acct) > 3 else acct.upper()
+
+    # Port/lane detection
+    for port in _KNOWN_PORTS:
+        if port in q_lower:
+            port_name = port.upper() if len(port) <= 4 else port.title()
+            if "origin" not in state or "to " + port in q_lower or "from " + port not in q_lower:
+                # Heuristic: if "to X" it's destination, if "from X" it's origin
+                if "to " + port in q_lower:
+                    state["destination"] = port_name
+                elif "from " + port in q_lower:
+                    state["origin"] = port_name
+                elif "origin" not in state:
+                    state["origin"] = port_name
+                else:
+                    state["destination"] = port_name
+
+    # Equipment type
+    equip_match = re.search(r'\b(20|40|40HC|45|53)\b', question, re.I)
+    if equip_match:
+        state["equipment_type"] = equip_match.group(1).upper()
+
+    # Move type
+    if "ftl" in q_lower or "full truckload" in q_lower:
+        state["move_type"] = "FTL"
+    elif "export" in q_lower:
+        state["move_type"] = "DRAY EXPORT"
+    elif "import" in q_lower:
+        state["move_type"] = "DRAY IMPORT"
+
+    # Carrier mentions from tool calls
+    for tc in tool_calls:
+        inp = tc.get("input", {})
+        if inp.get("carrier_name"):
+            state["last_carrier"] = inp["carrier_name"]
+        if inp.get("origin") and tc["tool"] in ("query_lane_history", "smart_dispatch_suggest"):
+            state["origin"] = inp["origin"]
+        if inp.get("destination") and tc["tool"] in ("query_lane_history", "smart_dispatch_suggest"):
+            state["destination"] = inp["destination"]
+
+    # Rate from answer
+    rate_match = re.findall(r'\$[\d,]+(?:\.\d{2})?', answer)
+    if rate_match:
+        state["last_rates_mentioned"] = rate_match[:5]
+
+    # Build rolling summary (keep it short)
+    turn_summary = f"Turn {session['turns']}: User asked about "
+    topics = []
+    if efj_match:
+        topics.append(f"load {efj_match[-1]}")
+    if state.get("origin") and state.get("destination"):
+        topics.append(f"lane {state.get('origin')}→{state.get('destination')}")
+    if state.get("account"):
+        topics.append(f"account {state['account']}")
+    if not topics:
+        topics.append(question[:50])
+    turn_summary += ", ".join(topics) + "."
+
+    # Keep only last 3 turn summaries
+    existing_summaries = session["summary"].split("\n") if session["summary"] else []
+    existing_summaries.append(turn_summary)
+    session["summary"] = "\n".join(existing_summaries[-3:])
+
+    session["state"] = state
+
+
+def _format_session_context(session_id: str) -> str:
+    """Format session state as context for the system prompt."""
+    session = _get_session(session_id)
+    if session["turns"] == 0:
+        return ""
+
+    parts = []
+    state = session["state"]
+
+    if state:
+        # Format key entities
+        entity_parts = []
+        if state.get("last_efj"):
+            entity_parts.append(f"Load: {state['last_efj']}")
+        if state.get("account"):
+            entity_parts.append(f"Account: {state['account']}")
+        if state.get("origin"):
+            entity_parts.append(f"Origin: {state['origin']}")
+        if state.get("destination"):
+            entity_parts.append(f"Destination: {state['destination']}")
+        if state.get("equipment_type"):
+            entity_parts.append(f"Equipment: {state['equipment_type']}")
+        if state.get("move_type"):
+            entity_parts.append(f"Move: {state['move_type']}")
+        if state.get("last_carrier"):
+            entity_parts.append(f"Carrier discussed: {state['last_carrier']}")
+        if state.get("last_rates_mentioned"):
+            entity_parts.append(f"Rates mentioned: {', '.join(state['last_rates_mentioned'][:3])}")
+
+        if entity_parts:
+            parts.append("Active session entities: " + " | ".join(entity_parts))
+
+    if session["summary"]:
+        parts.append("Conversation so far:\n" + session["summary"])
+
+    return "\n".join(parts)
+
 
 # ---------------------------------------------------------------------------
 # JSON serializer helper
@@ -2420,10 +2577,11 @@ def _detect_scopes(question: str, context: dict = None) -> list:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-async def ask_ai(question: str, context: dict = None) -> dict:
+async def ask_ai(question: str, context: dict = None, session_id: str = None) -> dict:
     """
     Send a question to Claude with tool access to CSL database.
-    Returns { answer: str, tool_calls: list, sources: list }
+    Supports multi-turn sessions via entity extraction state tracking.
+    Returns { answer: str, tool_calls: list, sources: list, session_id: str }
     """
     if not ANTHROPIC_API_KEY:
         return {
@@ -2431,6 +2589,11 @@ async def ask_ai(question: str, context: dict = None) -> dict:
             "tool_calls": [],
             "sources": [],
         }
+
+    # Generate session_id if not provided
+    if not session_id:
+        import uuid
+        session_id = str(uuid.uuid4())[:8]
 
     messages = [{"role": "user", "content": question}]
 
@@ -2447,10 +2610,26 @@ async def ask_ai(question: str, context: dict = None) -> dict:
         if ctx_parts:
             system += "\n\nCurrent context: " + " ".join(ctx_parts)
 
+    # Inject session state (entity extraction) for multi-turn context
+    session_context = _format_session_context(session_id)
+    if session_context:
+        system += f"\n\n## Session State (from previous turns in this conversation)\n{session_context}\nUse this context to understand follow-up questions. If the user says 'what about 40HC?' or 'try a different carrier', refer to the entities above."
+
     # Auto-inject relevant knowledge base entries
     try:
         # Extract potential scopes from question + context
         scopes = _detect_scopes(question, context)
+        # Also add scopes from session state
+        session = _get_session(session_id)
+        state = session.get("state", {})
+        if state.get("account"):
+            scopes.append(state["account"])
+        if state.get("origin"):
+            scopes.append(state["origin"])
+        if state.get("last_carrier"):
+            scopes.append(state["last_carrier"])
+        scopes = list(set(scopes))  # dedupe
+
         if scopes:
             kb_entries = db.kb_get_relevant(scopes, limit=15)
             if kb_entries:
@@ -2485,10 +2664,19 @@ async def ask_ai(question: str, context: dict = None) -> dict:
                 for block in response.content:
                     if block.type == "text":
                         answer_parts.append(block.text)
+                answer_text = "\n".join(answer_parts) if answer_parts else "I wasn't able to generate a response."
+
+                # Update session state with entity extraction
+                try:
+                    _update_session_state(session_id, question, answer_text, tool_calls_log)
+                except Exception as e:
+                    log.debug("Session state update failed: %s", e)
+
                 return {
-                    "answer": "\n".join(answer_parts) if answer_parts else "I wasn't able to generate a response.",
+                    "answer": answer_text,
                     "tool_calls": tool_calls_log,
                     "sources": sources,
+                    "session_id": session_id,
                 }
 
             # Process tool calls
@@ -2542,6 +2730,7 @@ async def ask_ai(question: str, context: dict = None) -> dict:
             "answer": "I reached the maximum number of tool calls. Please try a more specific question.",
             "tool_calls": tool_calls_log,
             "sources": sources,
+            "session_id": session_id,
         }
 
     except anthropic.RateLimitError:

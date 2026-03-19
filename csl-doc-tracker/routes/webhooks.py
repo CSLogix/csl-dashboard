@@ -1030,7 +1030,8 @@ async def api_ask_ai(request: Request):
     if not question:
         return JSONResponse({"error": "No question provided"}, status_code=400)
     context = body.get("context", {})
-    result = await ai_assistant.ask_ai(question, context)
+    session_id = body.get("session_id")
+    result = await ai_assistant.ask_ai(question, context, session_id=session_id)
     return JSONResponse(result)
 
 

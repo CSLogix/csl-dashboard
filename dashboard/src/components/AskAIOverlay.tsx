@@ -10,6 +10,17 @@ export default function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, init
   const [loading, setLoading] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [dragOverBody, setDragOverBody] = useState(false);
+  const sessionIdRef = useRef(null);
+
+  // Generate new session_id when overlay opens, preserve across messages
+  useEffect(() => {
+    if (open && !sessionIdRef.current) {
+      sessionIdRef.current = Math.random().toString(36).slice(2, 10);
+    }
+    if (!open) {
+      sessionIdRef.current = null; // reset on close
+    }
+  }, [open]);
 
   useEffect(() => { if (open && inputRef.current) setTimeout(() => inputRef.current.focus(), 80); }, [open]);
 
@@ -59,10 +70,12 @@ export default function AskAIOverlay({ open, onClose, API_BASE, apiFetchFn, init
         res = await apiFetchFn(`${API_BASE}/api/ask-ai`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: q.trim() }),
+          body: JSON.stringify({ question: q.trim(), session_id: sessionIdRef.current }),
         });
       }
       const data = await res.json();
+      // Update session_id from server if returned
+      if (data.session_id) sessionIdRef.current = data.session_id;
       const aiMsg = { role: "ai", text: data.answer || data.error || "No response", tool_calls: data.tool_calls || [], sources: data.sources || [] };
       setMessages(prev => [...prev, aiMsg]);
       // If bulk_create_loads was called, notify parent to refresh
