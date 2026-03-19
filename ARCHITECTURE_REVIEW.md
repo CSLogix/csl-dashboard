@@ -49,17 +49,9 @@ csl-doc-tracker/
 **Effort**: 2-3 hours (mechanical refactor)
 **Risk**: Low — FastAPI APIRouter is a drop-in replacement
 
-### 2. Patch Script Accumulation (142 files)
+### 2. ~~Patch Script Accumulation~~ ✅ DONE (2026-03-19)
 
-**Problem**: `patches/` contains 142 Python scripts that modify production files via string replacement. They've already been applied but remain in the repo, creating confusion about what's current code vs. historical modifications.
-
-**Solution**:
-- Archive patches/ to a separate branch or tag for historical reference
-- Delete from main branch
-- Use git for all future changes (no more text-replacement patching)
-
-**Effort**: 10 minutes
-**Risk**: None — patches are already applied
+Removed 10 dead patch/backup scripts: `cmi_patch*.py`, `patch_*.py`, `csl_bot_backup.py`, `mk_export.py`, `safe_cleanup.sh`, `csl-doc-tracker/patch_webhook_gaps.py`. All had been applied and were not imported anywhere.
 
 ### 3. No Reverse Proxy
 
@@ -74,14 +66,9 @@ csl-doc-tracker/
 **Effort**: 30 minutes
 **Risk**: Low
 
-### 4. Missing Root-Level Dependency Management
+### 4. ~~Missing Root-Level Dependency Management~~ ✅ DONE (2026-03-19)
 
-**Problem**: Only `csl-doc-tracker/requirements.txt` exists. The main bot scripts have no pinned dependencies.
-
-**Solution**: Add `requirements.txt` to root with all monitor dependencies pinned.
-
-**Effort**: 15 minutes
-**Risk**: None
+Root `requirements.txt` now covers all dependencies for both dashboard and monitors, including `httplib2` used by `csl_inbox_scanner.py`.
 
 ---
 
