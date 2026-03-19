@@ -1,0 +1,12 @@
+[Unit]
+Description=CSL State Backup (Postgres snapshots)
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/csl-bot
+ExecStart=/usr/bin/python3 backup_state.py
+EnvironmentFile=/root/csl-bot/.env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=csl-backup

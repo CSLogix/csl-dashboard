@@ -53,18 +53,9 @@ csl-doc-tracker/
 
 Removed 10 dead patch/backup scripts: `cmi_patch*.py`, `patch_*.py`, `csl_bot_backup.py`, `mk_export.py`, `safe_cleanup.sh`, `csl-doc-tracker/patch_webhook_gaps.py`. All had been applied and were not imported anywhere.
 
-### 3. No Reverse Proxy
+### 3. ~~No Reverse Proxy~~ ✅ DONE (2026-03-19)
 
-**Problem**: FastAPI/Uvicorn runs directly on port 8080. No TLS termination, no gzip, no connection buffering.
-
-**Solution**: Add nginx as reverse proxy:
-- TLS via Let's Encrypt (certbot)
-- Gzip for static assets
-- Proxy pass to uvicorn on localhost:8080
-- Rate limiting for API endpoints
-
-**Effort**: 30 minutes
-**Risk**: Low
+Nginx config added at `nginx/csl-dashboard.conf`. Includes gzip, rate limiting, security headers, SSE support, and proxy rules for dashboard (8080), webhook (5000), and upload server (5001). TLS via certbot after deploy.
 
 ### 4. ~~Missing Root-Level Dependency Management~~ ✅ DONE (2026-03-19)
 
@@ -86,11 +77,9 @@ Root `requirements.txt` now covers all dependencies for both dashboard and monit
 **Status**: Already solved. `npm run build` outputs to `static/dist/`, and FastAPI serves it.
 **Gap**: Ensure dev mode (`npm run dev`) is never used in production.
 
-### 7. Process Management Consolidation
+### 7. ~~Process Management Consolidation~~ ✅ DONE (2026-03-19)
 
-**Current**: Mix of systemd, bash PID scripts, and cron.
-**Ideal**: All services managed by systemd with proper unit files.
-**Effort**: 1 hour
+All services now have systemd unit files in `systemd/`. Long-running services (9 .service files) and scheduled jobs (5 .timer files) replace the old mix of cron + bash PID scripts. Deploy with `sudo ./deploy-services.sh`.
 
 ---
 

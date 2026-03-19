@@ -1,0 +1,17 @@
+[Unit]
+Description=CSL FTL Monitor (Macropoint tracking)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/csl-bot
+ExecStart=/usr/bin/python3 ftl_monitor.py
+EnvironmentFile=/root/csl-bot/.env
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=csl-ftl
+
+[Install]
+WantedBy=multi-user.target

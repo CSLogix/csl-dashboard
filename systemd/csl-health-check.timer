@@ -1,0 +1,9 @@
+[Unit]
+Description=Run CSL Health Check every 15 min, 6 AM-8 PM ET
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 06..19:00/15 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target

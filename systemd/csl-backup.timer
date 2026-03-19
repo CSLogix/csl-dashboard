@@ -1,0 +1,9 @@
+[Unit]
+Description=Run CSL State Backup at 5:30 AM ET daily
+
+[Timer]
+OnCalendar=*-*-* 05:30 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target
