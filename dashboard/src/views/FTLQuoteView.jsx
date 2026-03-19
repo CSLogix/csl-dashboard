@@ -151,6 +151,15 @@ export default function FTLQuoteView() {
   const [dhOriginRate, setDhOriginRate] = useState(0);
   const [dhDestRate, setDhDestRate] = useState(0);
 
+  // ── Fuel calculator ──
+  const [truckMpg, setTruckMpg] = useState(8);
+  const [dieselPrice, setDieselPrice] = useState(6.43);
+
+  // Fuel computed values (client-side, no API needed)
+  const fuelGallons = mileage > 0 && truckMpg > 0 ? Math.round((mileage / truckMpg) * 10) / 10 : 0;
+  const fuelCostPerMile = truckMpg > 0 ? Math.round((dieselPrice / truckMpg) * 1000) / 1000 : 0;
+  const fuelCostTotal = Math.round(fuelGallons * dieselPrice * 100) / 100;
+
   // ── Margin ──
   const [marginUsd, setMarginUsd] = useState(300);
   const [marginSource, setMarginSource] = useState("fixed"); // fixed | pct
@@ -501,6 +510,57 @@ export default function FTLQuoteView() {
             </div>
           </div>
 
+          {/* Fuel Cost Calculator */}
+          <div className="glass" style={{ borderRadius: 12, padding: 20, border: "1px solid rgba(255,255,255,0.06)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444" }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", textTransform: "uppercase" }}>Fuel Cost Calculator</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+              {/* Inputs */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#34d399", marginBottom: 8, textTransform: "uppercase" }}>Inputs</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>
+                      Trip Distance (miles)
+                    </label>
+                    <div style={{ padding: "8px 10px", background: "#14181d", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, color: "#F0F2F5", fontSize: 13, fontFamily: mono, fontWeight: 600 }}>
+                      {mileage > 0 ? mileage.toLocaleString() : "—"}
+                    </div>
+                    <div style={{ fontSize: 9, color: "#5A6478", marginTop: 2 }}>one-way loaded miles</div>
+                  </div>
+                  <RateInput label="Truck MPG" value={truckMpg} onChange={setTruckMpg} placeholder="8.00" prefix="" />
+                  <div style={{ fontSize: 9, color: "#5A6478", marginTop: -4 }}>avg Class 8: 5.5-7.0</div>
+                  <RateInput label="Diesel Price ($/gal)" value={dieselPrice} onChange={setDieselPrice} placeholder="6.430" />
+                  <div style={{ fontSize: 9, color: "#5A6478", marginTop: -4 }}>update from EIA weekly</div>
+                </div>
+              </div>
+              {/* Results */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#ef4444", marginBottom: 8, textTransform: "uppercase" }}>Results</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: "#8B95A8" }}>Total Miles</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, color: "#F0F2F5" }}>{mileage > 0 ? mileage.toLocaleString() : "—"}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: "#8B95A8" }}>Gallons Used</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, color: "#F0F2F5" }}>{fuelGallons > 0 ? fuelGallons.toLocaleString() : "—"}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: "#8B95A8" }}>Fuel Cost / Mile</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, color: "#F0F2F5" }}>{fuelCostPerMile > 0 ? `$${fuelCostPerMile.toFixed(3)}` : "—"}</span>
+                  </div>
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#8B95A8" }}>Fuel Cost</span>
+                    <span style={{ fontSize: 22, fontWeight: 800, fontFamily: mono, color: "#ef4444" }}>{fuelCostTotal > 0 ? `$${fuelCostTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Lane Comps */}
           {comps.length > 0 && (
             <div className="glass" style={{ borderRadius: 12, padding: 20, border: "1px solid rgba(255,255,255,0.06)" }}>
@@ -719,6 +779,30 @@ export default function FTLQuoteView() {
                     <div style={{ height: 1, background: "linear-gradient(90deg, transparent, rgba(0,212,170,0.3), transparent)", margin: "4px 0" }} />
                     <ResultRow label="Quote Customer" value={fmtDec(result.quote_customer)} rpm={mileage > 0 ? fmtRpm(result.quoted_rpm) : null} large accent="#00c853" />
                   </div>
+
+                  {/* Fuel Cost Summary */}
+                  {fuelCostTotal > 0 && (
+                    <div style={{ background: "rgba(239,68,68,0.06)", borderRadius: 10, padding: 12, marginBottom: 16, border: "1px solid rgba(239,68,68,0.12)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase" }}>Fuel Cost</span>
+                        <span style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, color: "#ef4444" }}>
+                          ${fuelCostTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                        <span style={{ fontSize: 10, color: "#5A6478" }}>Carrier Net (Target - Fuel)</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, fontFamily: mono, color: "#C8D0DC" }}>
+                          {fmtDec(result.carrier_target - fuelCostTotal)}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 10, color: "#5A6478" }}>Fuel as % of Quote</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, fontFamily: mono, color: "#8B95A8" }}>
+                          {(fuelCostTotal / result.quote_customer * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* RPM Comparison */}
                   {mileage > 0 && (
