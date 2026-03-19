@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from datetime import datetime
 
 import gspread
@@ -7,8 +8,14 @@ from fastapi import APIRouter, Query, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from google.oauth2.service_account import Credentials
 
+from psycopg2 import sql as psql
 import database as db
 from routes.email_drafts import generate_milestone_draft, MILESTONES
+
+_ALLOWED_RELATED_TABLES = frozenset({
+    "load_documents", "load_notes", "tracking_events",
+    "driver_contacts", "rate_quotes",
+})
 from shared import (
     sheet_cache,
     SHEET_ID, CREDS_FILE, COL,
@@ -22,6 +29,15 @@ from shared import (
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+_EFJ_RE = re.compile(r'^[A-Za-z0-9_-]+$')
+
+
+def _validate_efj(efj: str) -> str:
+    """Validate EFJ identifier to prevent path-traversal or injection."""
+    if not efj or not _EFJ_RE.match(efj):
+        raise HTTPException(400, "Invalid EFJ identifier")
+    return efj
 
 # Shared accounts that still need Google Sheet writes
 _SHARED_SHEET_ACCOUNTS = {"Tolead", "Boviet"}
@@ -130,7 +146,7 @@ async def api_v2_shipments(request: Request, account: str = None, status: str = 
             s["email_count"] = 0
             s["email_max_priority"] = 0
 
-    # Enrich with mp_status + mp_display_status from tracking cache
+    # Enrich with mp_status + mp_display_status + full tracking fields from cache
     try:
         _tc = _read_tracking_cache()
         for s in shipments:
@@ -143,6 +159,16 @@ async def api_v2_shipments(request: Request, account: str = None, status: str = 
                 s["mp_last_updated"] = _ce.get("last_event_at") or _ce.get("last_ping_at") or _ce.get("last_scraped") or ""
                 if not s.get("container_url") and _ce.get("macropoint_url"):
                     s["container_url"] = _ce["macropoint_url"]
+                # Full tracking fields — pre-populate so dispatch table has data on initial load
+                _st = _ce.get("stop_times") or {}
+                s["stop1_arrived"] = _st.get("stop1_arrived")
+                s["stop1_departed"] = _st.get("stop1_departed")
+                s["stop2_arrived"] = _st.get("stop2_arrived")
+                s["stop2_departed"] = _st.get("stop2_departed")
+                s["behind_schedule"] = "BEHIND" in (_ce.get("schedule_alert") or "").upper()
+                s["cant_make_it"] = bool(_ce.get("cant_make_it"))
+                s["driver_phone_cached"] = _ce.get("driver_phone", "")
+                s["trailer_cached"] = _ce.get("trailer", "")
             else:
                 s["mp_display_status"] = ""
                 s["mp_display_detail"] = ""
@@ -178,6 +204,7 @@ async def api_v2_shipments(request: Request, account: str = None, status: str = 
 @router.get("/api/v2/shipments/{efj}")
 async def api_v2_shipment_detail(efj: str, request: Request):
     """Return a single shipment from Postgres."""
+    _validate_efj(efj)
     with db.get_cursor() as cur:
         cur.execute("SELECT * FROM shipments WHERE efj = %s", (efj,))
         row = cur.fetchone()
@@ -320,6 +347,7 @@ async def api_rep_scoreboard(request: Request):
 @router.post("/api/v2/load/{efj}/status")
 async def api_v2_update_status(efj: str, request: Request, background_tasks: BackgroundTasks):
     """Update status in Postgres. Write back to Google Sheet if shared account."""
+    _validate_efj(efj)
     body = await request.json()
     new_status = body.get("status", "").strip()
     if not new_status:
@@ -461,6 +489,7 @@ def _v2_write_status_to_sheet(efj: str, new_status: str, account: str, hub: str 
 @router.post("/api/v2/load/{efj}/update")
 async def api_v2_update_field(efj: str, request: Request, background_tasks: BackgroundTasks):
     """Update any field(s) on a shipment in Postgres + write back to Master Sheet."""
+    _validate_efj(efj)
     body = await request.json()
 
     # Allowed fields to update
@@ -503,14 +532,51 @@ async def api_v2_update_field(efj: str, request: Request, background_tasks: Back
     return {"ok": True, "shipment": _shipment_row_to_dict(row)}
 
 
+@router.delete("/api/v2/load/{efj}")
+async def api_v2_delete_load(efj: str, background_tasks: BackgroundTasks):
+    """Delete a shipment from Postgres and remove its row from Google Sheet."""
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            # Fetch account before deleting (needed for sheet cleanup)
+            cur.execute("SELECT account, hub FROM shipments WHERE efj = %s", (efj,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, f"Shipment {efj} not found")
+            account = row["account"] or ""
+            hub = row.get("hub") or ""
+
+            # Delete related records first (ignore if table doesn't exist)
+            for table in ("load_documents", "load_notes", "tracking_events",
+                          "driver_contacts", "rate_quotes"):
+                assert table in _ALLOWED_RELATED_TABLES
+                try:
+                    cur.execute(psql.SQL("DELETE FROM {} WHERE efj = %s").format(
+                        psql.Identifier(table)), (efj,))
+                except Exception:
+                    pass  # Table may not exist in all environments
+            cur.execute("DELETE FROM shipments WHERE efj = %s", (efj,))
+
+    # Fire-and-forget: remove row from Google Sheet
+    if account and account not in _SHARED_SHEET_ACCOUNTS:
+        background_tasks.add_task(_delete_load_from_master_sheet, efj, account)
+
+    # Clean up uploaded files
+    upload_dir = f"/root/csl-bot/csl-doc-tracker/uploads/{efj}"
+    import shutil
+    if os.path.isdir(upload_dir):
+        background_tasks.add_task(shutil.rmtree, upload_dir, True)
+
+    log.info("Deleted load %s (account=%s)", efj, account)
+    return {"ok": True}
+
+
 @router.post("/api/v2/load/add")
 async def api_v2_add_shipment(request: Request, background_tasks: BackgroundTasks):
     """Insert a new shipment into Postgres. Write to Google Sheet."""
     body = await request.json()
     efj = body.get("efj", "").strip()
     account = body.get("account", "").strip()
-    if not efj:
-        raise HTTPException(400, "Missing EFJ #")
+    _validate_efj(efj)
     if not account:
         raise HTTPException(400, "Missing account")
 
@@ -580,6 +646,15 @@ def _add_load_to_master_sheet(efj: str, account: str, body: dict):
         sheet_add_row(efj, account, body)
     except Exception as e:
         log.warning("Sheet add-row failed for %s [%s]: %s (PG insert succeeded)", efj, account, e)
+
+
+def _delete_load_from_master_sheet(efj: str, account: str):
+    """Background task: remove a dashboard-deleted load from Master Sheet."""
+    try:
+        from csl_sheet_writer import sheet_delete_row
+        sheet_delete_row(efj, account)
+    except Exception as e:
+        log.warning("Sheet delete-row failed for %s [%s]: %s (PG delete succeeded)", efj, account, e)
 
 
 # ═══ Tracking Events Persistence ═══════════════════════════════════════════

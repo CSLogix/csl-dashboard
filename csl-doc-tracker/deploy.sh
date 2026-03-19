@@ -60,7 +60,7 @@ if [ ! -f "$DEPLOY_DIR/.env" ]; then
 # --- Gmail API ---
 GMAIL_CREDENTIALS_PATH=credentials.json
 GMAIL_TOKEN_PATH=token.json
-GMAIL_MONITORED_ACCOUNT=jfeltzjr@gmail.com
+GMAIL_MONITORED_ACCOUNT=${GMAIL_MONITORED_ACCOUNT:-""}  # Set in .env
 
 # --- Google Sheets ---
 GOOGLE_SHEETS_ID=19MB5HmmWwsVXY_nADCYYLJL-zWXYt8yWrfeRBSfB2S0

@@ -10,13 +10,16 @@ Takes screenshots at each step so you can see what's happening:
   /tmp/mp_login_4_otp_page.png
   /tmp/mp_login_5_done.png
 """
-import sys, json, time
+import sys, json, time, os
 from playwright.sync_api import sync_playwright
+from dotenv import load_dotenv
+
+load_dotenv("/root/csl-bot/.env", override=False)
 
 COOKIES_FILE   = "/root/csl-bot/mp_cookies.json"
 MACROPOINT_URL = "https://visibility.macropoint.com/"
-MP_USER        = "john.feltz@evansdelivery.com"
-MP_PASS        = "MFdoom1131@1"
+MP_USER        = os.environ["MACROPOINT_USER"]
+MP_PASS        = os.environ["MACROPOINT_PASSWORD"]
 
 
 def save_cookies():

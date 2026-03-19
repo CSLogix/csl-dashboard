@@ -1,0 +1,12 @@
+[Unit]
+Description=CSL Daily Summary Report
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/csl-bot
+ExecStart=/usr/bin/python3 daily_summary.py
+EnvironmentFile=/root/csl-bot/.env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=csl-daily-summary

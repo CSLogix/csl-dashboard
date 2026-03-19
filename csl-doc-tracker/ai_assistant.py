@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime, date
 from decimal import Decimal
 
@@ -22,9 +23,12 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-MODEL = "claude-sonnet-4-20250514"
-MAX_TOOL_ITERATIONS = 5
-MAX_RESPONSE_TOKENS = 2048
+MODEL = os.getenv("AI_MODEL", "claude-sonnet-4-6")
+MAX_TOOL_ITERATIONS = 8
+MAX_RESPONSE_TOKENS = 4096
+
+# Session expiry in seconds (30 minutes)
+SESSION_TTL = 1800
 
 client = None
 
@@ -33,6 +37,159 @@ def _get_client():
     if client is None:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     return client
+
+
+# ---------------------------------------------------------------------------
+# Session state management (Entity Extraction approach)
+# ---------------------------------------------------------------------------
+# Instead of keeping full conversation history, we extract structured entities
+# from each exchange into a compact JSON state object. This gives multi-turn
+# context without bloating the context window.
+
+_sessions = {}  # session_id -> { state: dict, last_active: float, turns: int }
+
+
+def _get_session(session_id: str) -> dict:
+    """Get or create a session state."""
+    now = time.time()
+    # Clean expired sessions
+    expired = [k for k, v in _sessions.items() if now - v["last_active"] > SESSION_TTL]
+    for k in expired:
+        del _sessions[k]
+
+    if session_id not in _sessions:
+        _sessions[session_id] = {
+            "state": {},  # extracted entities
+            "last_active": now,
+            "turns": 0,
+            "summary": "",  # rolling summary of conversation
+        }
+    session = _sessions[session_id]
+    session["last_active"] = now
+    return session
+
+
+def _update_session_state(session_id: str, question: str, answer: str, tool_calls: list):
+    """Extract entities from the latest exchange and update session state."""
+    session = _get_session(session_id)
+    session["turns"] += 1
+
+    state = session["state"]
+
+    # Extract entities from question using patterns
+    q_lower = question.lower()
+
+    # EFJ references
+    efj_match = re.findall(r'EFJ[-\s]?\d+', question, re.I)
+    if efj_match:
+        state["last_efj"] = efj_match[-1].upper().replace(" ", "-")
+
+    # Account mentions
+    for acct in _KNOWN_ACCOUNTS:
+        if acct in q_lower:
+            state["account"] = acct.title() if len(acct) > 3 else acct.upper()
+
+    # Port/lane detection
+    for port in _KNOWN_PORTS:
+        if port in q_lower:
+            port_name = port.upper() if len(port) <= 4 else port.title()
+            if "origin" not in state or "to " + port in q_lower or "from " + port not in q_lower:
+                # Heuristic: if "to X" it's destination, if "from X" it's origin
+                if "to " + port in q_lower:
+                    state["destination"] = port_name
+                elif "from " + port in q_lower:
+                    state["origin"] = port_name
+                elif "origin" not in state:
+                    state["origin"] = port_name
+                else:
+                    state["destination"] = port_name
+
+    # Equipment type
+    equip_match = re.search(r'\b(20|40|40HC|45|53)\b', question, re.I)
+    if equip_match:
+        state["equipment_type"] = equip_match.group(1).upper()
+
+    # Move type
+    if "ftl" in q_lower or "full truckload" in q_lower:
+        state["move_type"] = "FTL"
+    elif "export" in q_lower:
+        state["move_type"] = "DRAY EXPORT"
+    elif "import" in q_lower:
+        state["move_type"] = "DRAY IMPORT"
+
+    # Carrier mentions from tool calls
+    for tc in tool_calls:
+        inp = tc.get("input", {})
+        if inp.get("carrier_name"):
+            state["last_carrier"] = inp["carrier_name"]
+        if inp.get("origin") and tc["tool"] in ("query_lane_history", "smart_dispatch_suggest"):
+            state["origin"] = inp["origin"]
+        if inp.get("destination") and tc["tool"] in ("query_lane_history", "smart_dispatch_suggest"):
+            state["destination"] = inp["destination"]
+
+    # Rate from answer
+    rate_match = re.findall(r'\$[\d,]+(?:\.\d{2})?', answer)
+    if rate_match:
+        state["last_rates_mentioned"] = rate_match[:5]
+
+    # Build rolling summary (keep it short)
+    turn_summary = f"Turn {session['turns']}: User asked about "
+    topics = []
+    if efj_match:
+        topics.append(f"load {efj_match[-1]}")
+    if state.get("origin") and state.get("destination"):
+        topics.append(f"lane {state.get('origin')}→{state.get('destination')}")
+    if state.get("account"):
+        topics.append(f"account {state['account']}")
+    if not topics:
+        topics.append(question[:50])
+    turn_summary += ", ".join(topics) + "."
+
+    # Keep only last 3 turn summaries
+    existing_summaries = session["summary"].split("\n") if session["summary"] else []
+    existing_summaries.append(turn_summary)
+    session["summary"] = "\n".join(existing_summaries[-3:])
+
+    session["state"] = state
+
+
+def _format_session_context(session_id: str) -> str:
+    """Format session state as context for the system prompt."""
+    session = _get_session(session_id)
+    if session["turns"] == 0:
+        return ""
+
+    parts = []
+    state = session["state"]
+
+    if state:
+        # Format key entities
+        entity_parts = []
+        if state.get("last_efj"):
+            entity_parts.append(f"Load: {state['last_efj']}")
+        if state.get("account"):
+            entity_parts.append(f"Account: {state['account']}")
+        if state.get("origin"):
+            entity_parts.append(f"Origin: {state['origin']}")
+        if state.get("destination"):
+            entity_parts.append(f"Destination: {state['destination']}")
+        if state.get("equipment_type"):
+            entity_parts.append(f"Equipment: {state['equipment_type']}")
+        if state.get("move_type"):
+            entity_parts.append(f"Move: {state['move_type']}")
+        if state.get("last_carrier"):
+            entity_parts.append(f"Carrier discussed: {state['last_carrier']}")
+        if state.get("last_rates_mentioned"):
+            entity_parts.append(f"Rates mentioned: {', '.join(state['last_rates_mentioned'][:3])}")
+
+        if entity_parts:
+            parts.append("Active session entities: " + " | ".join(entity_parts))
+
+    if session["summary"]:
+        parts.append("Conversation so far:\n" + session["summary"])
+
+    return "\n".join(parts)
+
 
 # ---------------------------------------------------------------------------
 # JSON serializer helper
@@ -72,7 +229,7 @@ Key context:
 - Carrier tiers: 1 = preferred, 2 = standard, 3 = backup. DNU = Do Not Use
 - customer_rate = what we charge the customer, carrier_pay = what we pay the carrier, margin = customer_rate - carrier_pay
 
-Use the provided tools to look up real data before answering. You have 24 tools covering:
+Use the provided tools to look up real data before answering. Your tools cover:
 - Lane rates, margins, accessorial estimates, and smart dispatch suggestions
 - Carrier search, compliance, and what-if comparisons
 - Shipment status, full summaries, side-by-side load comparisons
@@ -81,11 +238,31 @@ Use the provided tools to look up real data before answering. You have 24 tools 
 - Detention/demurrage cost calculations
 - Transit time estimates from historical delivery data
 - Daily briefings, customer-friendly explanations, and carrier emails
+- Knowledge base: persistent operational memory with rules, preferences, and carrier notes
 
-When you receive document content (PDF, spreadsheet, email), extract all shipment/load details you can find.
-- If the user asks you to ADD or CREATE a load (single or multiple), use bulk_create_loads to INSERT them into the database. Always present the data first, then call bulk_create_loads.
-- Only use draft_new_load if the user explicitly asks to PREVIEW or DRAFT without saving.
-- Common document types: rate confirmations, load tenders, booking sheets, dispatch lists, customer POs.
+## Document → Load Creation
+When you receive document content (PDF, spreadsheet, email), IMMEDIATELY extract all shipment/load details you can find and present them in a clean summary. Then:
+1. If it looks like a BOL, rate confirmation, load tender, booking sheet, dispatch list, or customer PO — proactively ask: "Want me to create this load?" (don't wait for the user to ask).
+2. If the user confirms (or originally said "create a load from this"), call bulk_create_loads to INSERT into the database.
+3. Only use draft_new_load if the user explicitly asks to PREVIEW or DRAFT without saving.
+
+When extracting from a BOL or booking confirmation, map fields like this:
+- Container # → container | BOL/Booking # → bol | Vessel/SSL → vessel
+- Shipping line → carrier | Port/Terminal → origin | Consignee/Delivery → destination
+- ETA → eta | Cutoff → lfd | ERD → eta (for exports)
+- Move type: infer from context (import if inbound vessel + port delivery, export if outbound vessel + port pickup, FTL if no container/vessel)
+- Account: match customer/shipper name to known accounts (Allround, Boviet, Cadi, DHL, DSV, EShipping, IWS, Kripke, MAO, MGF, Rose, USHA, Tolead, Prolog, Talatrans, LS Cargo, GW-World)
+- If you can't determine account or EFJ#, ask the user before creating.
+
+## Knowledge Base & Memory
+You have a persistent memory system with save_memory and query_knowledge_base tools.
+USE save_memory whenever the user says "remember", "save", "update memory", "note that", "store this", "keep track of", or ANY request to preserve information for later.
+When the user asks to save something but doesn't repeat the details (e.g. "save the pickup address from this booking"), look back through the conversation to find and extract the relevant information — do NOT say you can't access it.
+Save each distinct piece of information as a separate memory entry (e.g. separate saves for pickup address, delivery address, contact info).
+Use query_knowledge_base proactively when you think stored context might help answer a question. Always confirm what you saved.
+- Relevant knowledge entries are automatically injected into your context when scopes are detected in the question
+- Categories: account_rule (account-specific rules), carrier_note (about a carrier), lane_tip (route/address/facility details including pickup/delivery addresses), rate_rule (pricing/margin), sop (process/procedure), preference (general preference)
+- For pickup/delivery addresses, facility details, or location-specific notes, use category "lane_tip" with scope set to the facility name, account, or lane
 
 Be concise, direct, and data-driven. Format monetary values with $ signs. When showing rates, include accessorials if non-zero. If a query returns no results, say so clearly."""
 
@@ -650,6 +827,52 @@ TOOLS = [
                             "origin",
                             "destination"
                     ]
+            }
+    },
+
+    {
+            "name": "save_memory",
+            "description": "Save operational knowledge for future reference. Use when user says 'remember that...', 'from now on...', 'note that...', or shares a rule, preference, or tip about an account, carrier, lane, or process.",
+            "input_schema": {
+                    "type": "object",
+                    "properties": {
+                            "category": {
+                                    "type": "string",
+                                    "enum": ["account_rule", "carrier_note", "lane_tip", "rate_rule", "sop", "preference"],
+                                    "description": "Type of knowledge: account_rule (account-specific), carrier_note (about a carrier), lane_tip (route-specific), rate_rule (pricing/margin), sop (process/procedure), preference (general preference)"
+                            },
+                            "scope": {
+                                    "type": "string",
+                                    "description": "What this applies to: account name, carrier name, lane (e.g. 'PNCT→Edison'), or null for global rules"
+                            },
+                            "content": {
+                                    "type": "string",
+                                    "description": "The knowledge to remember — be specific and actionable"
+                            }
+                    },
+                    "required": ["category", "content"]
+            }
+    },
+    {
+            "name": "query_knowledge_base",
+            "description": "Search stored operational knowledge, rules, and preferences. Use before answering questions about accounts, carriers, lanes, or processes to check for saved rules and institutional knowledge.",
+            "input_schema": {
+                    "type": "object",
+                    "properties": {
+                            "category": {
+                                    "type": "string",
+                                    "enum": ["account_rule", "carrier_note", "lane_tip", "rate_rule", "sop", "preference"],
+                                    "description": "Filter by knowledge type"
+                            },
+                            "scope": {
+                                    "type": "string",
+                                    "description": "Filter by account, carrier, or lane name"
+                            },
+                            "query": {
+                                    "type": "string",
+                                    "description": "Free-text search across knowledge entries"
+                            }
+                    }
             }
     },
 
@@ -2224,6 +2447,47 @@ def _exec_smart_dispatch_suggest(origin: str, destination: str,
         return {"error": str(e)}
 
 
+def _exec_save_memory(category: str, content: str, scope: str = None) -> dict:
+    """Save a piece of operational knowledge to the knowledge base."""
+    try:
+        row = db.kb_insert(
+            category=category,
+            content=content,
+            scope=scope,
+            source="ai_learned",
+        )
+        return {
+            "saved": True,
+            "id": row["id"],
+            "message": f"Saved to knowledge base: [{category}] {scope or 'global'} — {content[:80]}..."
+        }
+    except Exception as e:
+        log.exception("save_memory failed")
+        return {"error": str(e)}
+
+
+def _exec_query_knowledge_base(category: str = None, scope: str = None, query: str = None) -> dict:
+    """Search the knowledge base for saved rules and preferences."""
+    try:
+        rows = db.kb_search(category=category, scope=scope, query=query, limit=20)
+        if not rows:
+            return {"results": [], "message": "No knowledge base entries found matching criteria"}
+        # Format for readability
+        results = []
+        for r in rows:
+            results.append({
+                "id": r["id"],
+                "category": r["category"],
+                "scope": r.get("scope"),
+                "content": r["content"],
+                "source": r.get("source"),
+            })
+        return {"results": results, "count": len(results)}
+    except Exception as e:
+        log.exception("query_knowledge_base failed")
+        return {"error": str(e)}
+
+
 TOOL_DISPATCH = {
     "query_lane_history": lambda args: _exec_query_lane_history(**args),
     "query_carrier_db": lambda args: _exec_query_carrier_db(**args),
@@ -2249,6 +2513,8 @@ TOOL_DISPATCH = {
     "what_if_scenario": lambda args: _exec_what_if_scenario(**args),
     "daily_briefing": lambda args: _exec_daily_briefing(**args),
     "smart_dispatch_suggest": lambda args: _exec_smart_dispatch_suggest(**args),
+    "save_memory": lambda args: _exec_save_memory(**args),
+    "query_knowledge_base": lambda args: _exec_query_knowledge_base(**args),
 }
 
 
@@ -2266,13 +2532,68 @@ def _run_tool(name: str, input_args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Knowledge base scope detection
+# ---------------------------------------------------------------------------
+
+# Known account names for auto-detection
+_KNOWN_ACCOUNTS = {
+    "allround", "boviet", "cadi", "dhl", "dsv", "eshipping",
+    "iws", "kripke", "mao", "mgf", "rose", "usha", "tolead",
+    "prolog", "talatrans", "ls cargo", "gw-world",
+}
+
+# Common port/terminal names
+_KNOWN_PORTS = {
+    "pnct", "apm", "maher", "bayonne", "newark", "elizabeth",
+    "la/lb", "long beach", "los angeles", "savannah", "houston",
+    "charleston", "norfolk", "oakland", "garden city",
+}
+
+
+def _detect_scopes(question: str, context: dict = None) -> list:
+    """Extract account, carrier, and lane references from question + context for KB lookup."""
+    scopes = set()
+    q_lower = question.lower()
+
+    # Detect accounts
+    for acct in _KNOWN_ACCOUNTS:
+        if acct in q_lower:
+            scopes.add(acct.title() if len(acct) > 3 else acct.upper())
+
+    # Detect ports/terminals
+    for port in _KNOWN_PORTS:
+        if port in q_lower:
+            scopes.add(port.upper() if len(port) <= 4 else port.title())
+
+    # Add context-based scopes
+    if context:
+        if context.get("account"):
+            scopes.add(context["account"])
+        if context.get("current_efj"):
+            scopes.add(context["current_efj"])
+
+    # Detect EFJ references
+    efj_matches = re.findall(r'EFJ[-\s]?\d+', question, re.I)
+    for m in efj_matches:
+        scopes.add(m.upper().replace(" ", "-"))
+
+    # Always include global entries by returning at least one scope
+    # (kb_get_relevant always includes scope IS NULL)
+    if not scopes:
+        scopes.add("__global__")  # dummy to trigger global-only fetch
+
+    return list(scopes)
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
-async def ask_ai(question: str, context: dict = None) -> dict:
+async def ask_ai(question: str, context: dict = None, session_id: str = None) -> dict:
     """
     Send a question to Claude with tool access to CSL database.
-    Returns { answer: str, tool_calls: list, sources: list }
+    Supports multi-turn sessions via entity extraction state tracking.
+    Returns { answer: str, tool_calls: list, sources: list, session_id: str }
     """
     if not ANTHROPIC_API_KEY:
         return {
@@ -2280,6 +2601,11 @@ async def ask_ai(question: str, context: dict = None) -> dict:
             "tool_calls": [],
             "sources": [],
         }
+
+    # Generate session_id if not provided
+    if not session_id:
+        import uuid
+        session_id = str(uuid.uuid4())[:8]
 
     messages = [{"role": "user", "content": question}]
 
@@ -2295,6 +2621,37 @@ async def ask_ai(question: str, context: dict = None) -> dict:
             ctx_parts.append(f"Current account filter: {context['account']}.")
         if ctx_parts:
             system += "\n\nCurrent context: " + " ".join(ctx_parts)
+
+    # Inject session state (entity extraction) for multi-turn context
+    session_context = _format_session_context(session_id)
+    if session_context:
+        system += f"\n\n## Session State (from previous turns in this conversation)\n{session_context}\nUse this context to understand follow-up questions. If the user says 'what about 40HC?' or 'try a different carrier', refer to the entities above."
+
+    # Auto-inject relevant knowledge base entries
+    try:
+        # Extract potential scopes from question + context
+        scopes = _detect_scopes(question, context)
+        # Also add scopes from session state
+        session = _get_session(session_id)
+        state = session.get("state", {})
+        if state.get("account"):
+            scopes.append(state["account"])
+        if state.get("origin"):
+            scopes.append(state["origin"])
+        if state.get("last_carrier"):
+            scopes.append(state["last_carrier"])
+        scopes = list(set(scopes))  # dedupe
+
+        if scopes:
+            kb_entries = db.kb_get_relevant(scopes, limit=15)
+            if kb_entries:
+                kb_lines = []
+                for entry in kb_entries:
+                    scope_label = f"[{entry['scope']}] " if entry.get('scope') else "[Global] "
+                    kb_lines.append(f"- {scope_label}({entry['category']}) {entry['content']}")
+                system += "\n\n## Operational Knowledge (auto-loaded from your knowledge base)\n" + "\n".join(kb_lines)
+    except Exception as e:
+        log.debug("Knowledge base auto-injection failed: %s", e)
 
     tool_calls_log = []
     sources = []
@@ -2319,10 +2676,19 @@ async def ask_ai(question: str, context: dict = None) -> dict:
                 for block in response.content:
                     if block.type == "text":
                         answer_parts.append(block.text)
+                answer_text = "\n".join(answer_parts) if answer_parts else "I wasn't able to generate a response."
+
+                # Update session state with entity extraction
+                try:
+                    _update_session_state(session_id, question, answer_text, tool_calls_log)
+                except Exception as e:
+                    log.debug("Session state update failed: %s", e)
+
                 return {
-                    "answer": "\n".join(answer_parts) if answer_parts else "I wasn't able to generate a response.",
+                    "answer": answer_text,
                     "tool_calls": tool_calls_log,
                     "sources": sources,
+                    "session_id": session_id,
                 }
 
             # Process tool calls
@@ -2376,6 +2742,7 @@ async def ask_ai(question: str, context: dict = None) -> dict:
             "answer": "I reached the maximum number of tool calls. Please try a more specific question.",
             "tool_calls": tool_calls_log,
             "sources": sources,
+            "session_id": session_id,
         }
 
     except anthropic.RateLimitError:

@@ -14,7 +14,6 @@ Designed to run as cron or systemd service.
 
 import argparse
 import json
-import logging
 
 # ── Status normalizer (sheet title-case → PG snake_case) ──
 _STATUS_NORM = {
@@ -60,11 +59,10 @@ from google.oauth2.service_account import Credentials
 import config
 import database as db
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [sheet_sync] %(message)s",
-)
-log = logging.getLogger("sheet_sync")
+sys.path.insert(0, str(os.path.join(os.path.dirname(__file__), "..")))
+from csl_logging import get_logger
+
+log = get_logger("sheet_sync")
 
 CREDS_FILE = "/root/csl-credentials.json"
 BOVIET_SHEET_ID = "1OP-ZDaMCOsPxcxezHSPfN5ftUXlUcOjFgsfCQgDp3wI"
@@ -89,10 +87,11 @@ BOVIET_TAB_CONFIGS = {
                          "carrier_email_col": 10, "driver_name_col": 13,
                          "default_origin": "Greenville, NC", "default_dest": "Mexia, TX",
                          "start_row": 45},
-    "Hanson":           {"efj_col": 0, "load_id_col": 1, "status_col": 6,
-                         "pickup_col": 4, "delivery_col": 5,
-                         "phone_col": 8, "trailer_col": 10,
-                         "carrier_email_col": 7, "driver_name_col": 9},
+    "Hanson":           {"efj_col": 0, "load_id_col": 2, "status_col": 8,
+                         "pickup_col": 6, "delivery_col": 7,
+                         "phone_col": 11, "trailer_col": 13,
+                         "carrier_email_col": 10, "driver_name_col": 12,
+                         "default_origin": "Houston, TX", "default_dest": "Valera, TX"},
 }
 
 TOLEAD_HUB_CONFIGS = {

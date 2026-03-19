@@ -1,9 +1,10 @@
+import asyncio
 import os
 import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import database as db
 import config
@@ -13,6 +14,7 @@ from shared import (
     _get_bot_status_detailed, _generate_alerts,
     _read_tracking_cache, _classify_mp_display_status,
     ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, _sanitize_filename,
+    sse_add_client, sse_remove_client,
 )
 
 router = APIRouter()
@@ -219,6 +221,26 @@ async def api_team(request: Request):
 async def api_tracking_summary():
     """Return tracking status summary with stop timestamps for all FTL loads."""
     cache = _read_tracking_cache()
+
+    # Bulk-load driver_contacts from PG to enrich tracking with phone/trailer
+    _dc_map = {}  # efj_num -> {driver_phone, trailer_number}
+    try:
+        with db.get_cursor() as cur:
+            cur.execute("SELECT efj, driver_phone, trailer_number, carrier_email FROM driver_contacts")
+            for row in cur.fetchall():
+                _raw_efj = (row["efj"] or "").strip()
+                _dc_entry = {
+                    "phone": (row["driver_phone"] or "").strip(),
+                    "trailer": (row["trailer_number"] or "").strip(),
+                    "carrierEmail": (row["carrier_email"] or "").strip(),
+                }
+                # Index under both raw key ("EFJ106996") and stripped ("106996")
+                # so lookups match regardless of cache key format
+                _dc_map[_raw_efj] = _dc_entry
+                _dc_map[_raw_efj.replace("EFJ", "").strip()] = _dc_entry
+    except Exception as e:
+        log.debug("driver_contacts bulk load failed, using cache-only: %s", e)
+
     result = {}
     for efj, entry in cache.items():
         stop_times = entry.get("stop_times") or {}
@@ -246,8 +268,49 @@ async def api_tracking_summary():
             "stop2Eta": stop_times.get("stop2_eta"),
             "mpDisplayStatus": _ts_disp,
             "mpDisplayDetail": _ts_detail,
+            # Driver/trailer/email: prefer cache (real-time), fall back to PG driver_contacts
+            "driverPhone": entry.get("driver_phone", "") or _dc_map.get(efj, {}).get("phone", ""),
+            "trailer": entry.get("trailer", "") or _dc_map.get(efj, {}).get("trailer", ""),
+            "carrierEmail": _dc_map.get(efj, {}).get("carrierEmail", ""),
         }
     return {"tracking": result}
+
+
+@router.get("/api/shipments/tracking-stream")
+async def api_tracking_stream(request: Request):
+    """Server-Sent Events stream for real-time tracking updates.
+
+    Pushes individual tracking updates as they arrive from Macropoint webhooks,
+    eliminating the 30s polling delay on the dashboard.
+    """
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    sse_add_client(queue)
+
+    async def event_generator():
+        try:
+            # Send initial keepalive
+            yield ": connected\n\n"
+            while True:
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {data}\n\n"
+                except asyncio.TimeoutError:
+                    # Send keepalive comment every 30s to prevent proxy timeouts
+                    yield ": keepalive\n\n"
+        finally:
+            sse_remove_client(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        },
+    )
 
 
 @router.get("/api/shipments/document-summary")

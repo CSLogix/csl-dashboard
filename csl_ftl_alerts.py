@@ -9,7 +9,6 @@ import json
 import os
 import re
 import smtplib
-import logging
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -18,7 +17,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-log = logging.getLogger("csl_ftl_alerts")
+from csl_logging import get_logger
+
+log = get_logger("csl_ftl_alerts")
 
 # ── Config ──────────────────────────────────────────────────────────────────────
 SENT_ALERTS_FILE = "/root/csl-bot/ftl_sent_alerts.json"
@@ -38,25 +39,25 @@ ACCOUNT_REPS_PG = {
     "Cadi":     {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "CNL":      {"rep": "Janice","email": "Janice.Cortes@evansdelivery.com"},
     "DHL":      {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
-    "DSV":      {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
-    "EShipping":{"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "DSV":      {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
+    "EShipping":{"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "IWS":      {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "Kishco":   {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
-    "Kischo":   {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "Kishco":   {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
+    "Kischo":   {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "Kripke":   {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "MAO":      {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "MAO":      {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "Mamata":   {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "Meiko":    {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "MGF":      {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "Mitchell\'s Transport": {"rep": "John F", "email": "John.Feltz@evansdelivery.com"},
-    "Rose":     {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "Rose":     {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "SEI Acquisition": {"rep": "John F", "email": "John.Feltz@evansdelivery.com"},
     "Sutton":   {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "Tanera":   {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "Talatrans":{"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "Talatrans":{"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "TCR":      {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
     "Texas International": {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
-    "Tolead":   {"rep": "Eli",   "email": "Eli.Luchuk@evansdelivery.com"},
+    "Tolead":   {"rep": "John F","email": "John.Feltz@evansdelivery.com"},
     "USHA":     {"rep": "Radka", "email": "Radka.White@evansdelivery.com"},
 }
 

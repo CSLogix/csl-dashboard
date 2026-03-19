@@ -3,7 +3,10 @@ import os
 from decimal import Decimal
 from fastapi import APIRouter, Query, Request, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
+from psycopg2 import sql as psql
 import database as db
+
+_ALLOWED_RATE_TABLES = frozenset({"lane_rates", "rate_quotes"})
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -501,8 +504,11 @@ async def api_warehouse_extract(request: Request):
 
 @router.get("/api/lane-rates")
 async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Query(default=None),
-                              destination: str = Query(default=None)):
+                              destination: str = Query(default=None),
+                              move_type: str = Query(default=None)):
+    """List lane rates and recent rate quotes filtered by optional criteria."""
     with db.get_cursor() as cur:
+        # Query lane_rates table
         clauses, params = [], []
         if port:
             clauses.append("port ILIKE %s")
@@ -513,13 +519,67 @@ async def api_list_lane_rates(port: str = Query(default=None), carrier: str = Qu
         if destination:
             clauses.append("destination ILIKE %s")
             params.append(f"%{destination}%")
+        if move_type and move_type != "all":
+            clauses.append("move_type = %s")
+            params.append(move_type)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        cur.execute(f"SELECT * FROM lane_rates {where} ORDER BY port, destination, total ASC NULLS LAST LIMIT 1000", params)
+        cur.execute(f"""SELECT *,
+            TRIM(SPLIT_PART(destination, ',', 1)) AS dest_city,
+            TRIM(SPLIT_PART(TRIM(SPLIT_PART(destination, ',', 2)), ' ', 1)) AS dest_state,
+            TRIM(SPLIT_PART(port, ',', 1)) AS origin_city,
+            TRIM(SPLIT_PART(TRIM(SPLIT_PART(port, ',', 2)), ' ', 1)) AS origin_state
+            FROM lane_rates {where} ORDER BY port, destination, total ASC NULLS LAST LIMIT 1000""", params)
         rows = [_serialize_row(r) for r in cur.fetchall()]
+
+        # Also include rate_quotes (from manual intake, emails, etc.)
+        rq_clauses, rq_params = [], []
+        if port:
+            rq_clauses.append("origin ILIKE %s")
+            rq_params.append(f"%{port}%")
+        if carrier:
+            rq_clauses.append("carrier_name ILIKE %s")
+            rq_params.append(f"%{carrier}%")
+        if destination:
+            rq_clauses.append("destination ILIKE %s")
+            rq_params.append(f"%{destination}%")
+        if move_type and move_type != "all":
+            rq_clauses.append("move_type = %s")
+            rq_params.append(move_type)
+        rq_clauses.append("rate_amount IS NOT NULL")
+        rq_where = "WHERE " + " AND ".join(rq_clauses) if rq_clauses else ""
+        cur.execute(f"""
+            SELECT id, origin AS port, destination, carrier_name, carrier_email,
+                   rate_amount AS dray_rate, rate_amount AS total,
+                   NULL::numeric AS fsc, NULL::numeric AS chassis_per_day,
+                   NULL::numeric AS prepull, NULL::numeric AS storage_per_day,
+                   NULL::numeric AS detention, NULL::numeric AS chassis_split,
+                   NULL::numeric AS overweight, NULL::numeric AS tolls,
+                   NULL::numeric AS reefer, NULL::numeric AS hazmat,
+                   NULL::numeric AS triaxle, NULL::numeric AS bond_fee,
+                   NULL::numeric AS residential, NULL::numeric AS all_in_total,
+                   move_type, miles, quote_date AS created_at,
+                   source, status, NULL::int AS rank,
+                   NULL AS equipment_type, NULL AS notes,
+                   TRIM(SPLIT_PART(destination, ',', 1)) AS dest_city,
+                   TRIM(SPLIT_PART(TRIM(SPLIT_PART(destination, ',', 2)), ' ', 1)) AS dest_state,
+                   TRIM(SPLIT_PART(origin, ',', 1)) AS origin_city,
+                   TRIM(SPLIT_PART(TRIM(SPLIT_PART(origin, ',', 2)), ' ', 1)) AS origin_state
+            FROM rate_quotes {rq_where}
+            ORDER BY quote_date DESC NULLS LAST LIMIT 500
+        """, rq_params)
+        rq_rows = [_serialize_row(r) for r in cur.fetchall()]
+        # Mark source and prefix IDs to avoid collisions with lane_rates
+        for r in rq_rows:
+            r["_source"] = r.get("source") or "rate_quote"
+            r["id"] = f"rq-{r['id']}"
+        for r in rows:
+            r["id"] = f"lr-{r['id']}"
+        rows.extend(rq_rows)
+
     return JSONResponse({"lane_rates": rows, "total": len(rows)})
 
 @router.put("/api/lane-rates/{rate_id}")
-async def api_update_lane_rate(rate_id: int, request: Request):
+async def api_update_lane_rate(rate_id: str, request: Request):
     body = await request.json()
     allowed = {"port", "destination", "carrier_name", "dray_rate", "fsc", "total",
                "chassis_per_day", "prepull", "storage_per_day", "detention",
@@ -549,15 +609,48 @@ async def api_update_lane_rate(rate_id: int, request: Request):
     # Auto-recalculate total if dray_rate or fsc changed but total not explicitly sent
     if ("dray_rate" in body or "fsc" in body) and "total" not in body:
         sets.append("total = COALESCE(dray_rate, 0) + CASE WHEN fsc ~ '^[0-9.]+$' THEN fsc::numeric ELSE 0 END")
-    params.append(rate_id)
+    # Parse namespaced ID (lr-123 or rq-456 or bare integer)
+    if str(rate_id).startswith("lr-"):
+        table, real_id = "lane_rates", int(rate_id[3:])
+    elif str(rate_id).startswith("rq-"):
+        table, real_id = "rate_quotes", int(rate_id[3:])
+    else:
+        table, real_id = "lane_rates", int(rate_id)
+    if table not in _ALLOWED_RATE_TABLES:
+        raise HTTPException(400, "Invalid table")
+    params.append(real_id)
     with db.get_conn() as conn:
         with db.get_cursor(conn) as cur:
-            cur.execute(f"UPDATE lane_rates SET {', '.join(sets)} WHERE id = %s RETURNING *", params)
+            query = psql.SQL("UPDATE {} SET " + ', '.join(sets) + " WHERE id = %s RETURNING *").format(
+                psql.Identifier(table))
+            cur.execute(query, params)
             row = cur.fetchone()
     if not row:
         raise HTTPException(404, "Lane rate not found")
     return JSONResponse(_serialize_row(row))
 
+
+@router.delete("/api/lane-rates/{rate_id}")
+async def api_delete_lane_rate(rate_id: str):
+    # IDs are namespaced: "lr-123" for lane_rates, "rq-456" for rate_quotes
+    if rate_id.startswith("rq-"):
+        table, real_id = "rate_quotes", int(rate_id[3:])
+    elif rate_id.startswith("lr-"):
+        table, real_id = "lane_rates", int(rate_id[3:])
+    else:
+        # Legacy: bare integer ID — assume lane_rates
+        table, real_id = "lane_rates", int(rate_id)
+    if table not in _ALLOWED_RATE_TABLES:
+        raise HTTPException(400, "Invalid table")
+    with db.get_conn() as conn:
+        with db.get_cursor(conn) as cur:
+            query = psql.SQL("DELETE FROM {} WHERE id = %s RETURNING id").format(
+                psql.Identifier(table))
+            cur.execute(query, (real_id,))
+            row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Lane rate not found")
+    return {"ok": True, "deleted_id": rate_id}
 
 
 # ═══════════════════════════════════════════════════════════

@@ -34,70 +34,64 @@ async def api_quote_settings():
     })
 
 
-# ── Distance lookup (geocode via Nominatim, route via OSRM) ──
+# ── Distance lookup (Google Maps Distance Matrix API) ──
 
 @router.get("/api/quotes/distance")
 async def api_quote_distance(origin: str = Query(...), destination: str = Query(...)):
-    """Calculate mileage and transit time between origin and destination."""
+    """Calculate mileage and transit time between origin and destination via Google Maps."""
     import requests as _req
 
-    def _geocode(place: str):
-        r = _req.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={"q": place, "format": "json", "limit": 1, "countrycodes": "us"},
-            headers={"User-Agent": "CSLogix-Dashboard/1.0"},
-            timeout=10,
-        )
-        r.raise_for_status()
-        results = r.json()
-        if not results:
-            return None
-        return float(results[0]["lon"]), float(results[0]["lat"])
+    api_key = os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    if not api_key:
+        return JSONResponse({"error": "Google Maps API key not configured"}, status_code=500)
 
     try:
-        orig = _geocode(origin)
-        dest = _geocode(destination)
-        if not orig or not dest:
-            return JSONResponse({"error": "Could not geocode one or both locations"}, status_code=400)
-
-        # OSRM route
-        coords = f"{orig[0]},{orig[1]};{dest[0]},{dest[1]}"
         r = _req.get(
-            f"https://router.project-osrm.org/route/v1/driving/{coords}",
-            params={"overview": "false"},
-            headers={"User-Agent": "CSLogix-Dashboard/1.0"},
+            "https://maps.googleapis.com/maps/api/distancematrix/json",
+            params={
+                "origins": origin,
+                "destinations": destination,
+                "units": "imperial",
+                "key": api_key,
+            },
             timeout=10,
         )
         r.raise_for_status()
         data = r.json()
-        if data.get("code") != "Ok" or not data.get("routes"):
-            return JSONResponse({"error": "No route found"}, status_code=400)
 
-        route = data["routes"][0]
-        dist_meters = route["distance"]
-        dur_seconds = route["duration"]
+        if data.get("status") != "OK":
+            return JSONResponse({"error": f"API error: {data.get('status')}"}, status_code=502)
 
-        one_way_miles = round(dist_meters / 1609.34)
-        round_trip_miles = one_way_miles * 2
-        duration_hours = round(dur_seconds / 3600, 2)
+        element = data["rows"][0]["elements"][0]
+        if element.get("status") != "OK":
+            return JSONResponse({"error": f"Route error: {element.get('status')}"}, status_code=404)
 
-        # Transit time string: for short distances show hours, for long show days
-        if duration_hours < 8:
-            transit_time = f"{round(duration_hours)} hours"
+        meters = element["distance"]["value"]
+        one_way_miles = round(meters / 1609.344)
+        seconds = element["duration"]["value"]
+        duration_hours = round(seconds / 3600, 1)
+
+        # Transit time string
+        if one_way_miles <= 250:
+            transit_time = "1 day"
+        elif one_way_miles <= 600:
+            transit_time = "1-2 days"
+        elif one_way_miles <= 1200:
+            transit_time = "2-3 days"
+        elif one_way_miles <= 2000:
+            transit_time = "3-4 days"
         else:
-            days_low = max(1, int(duration_hours / 10))  # ~10hr driving days
-            days_high = days_low + 1
-            transit_time = f"{days_low}-{days_high} days"
+            transit_time = "4-5 days"
 
         return JSONResponse({
             "one_way_miles": one_way_miles,
-            "round_trip_miles": round_trip_miles,
+            "round_trip_miles": one_way_miles * 2,
             "duration_hours": duration_hours,
             "transit_time": transit_time,
         })
 
     except _req.exceptions.Timeout:
-        return JSONResponse({"error": "Geocoding service timeout"}, status_code=504)
+        return JSONResponse({"error": "Google Maps API timeout"}, status_code=504)
     except Exception as e:
         log.warning("Distance lookup failed: %s", e)
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -225,11 +219,19 @@ Only include fields you can confidently extract. For linehaul_items, list each c
 
 
 def _extract_with_claude(content: list) -> dict:
-    """Call Claude API with content blocks (text or image), return parsed rate data."""
+    """
+    Send content blocks to the Claude model and return the parsed rate/quote data as a dictionary.
+    
+    Parameters:
+        content (list): A list of content blocks to send to Claude. Each block may be plain text or an image payload formatted per the Anthropic client expectations.
+    
+    Returns:
+        dict: Parsed JSON object containing extracted rate/quote fields.
+    """
     import anthropic
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model="claude-sonnet-4-6",
         max_tokens=1024,
         messages=[{"role": "user", "content": content}],
     )

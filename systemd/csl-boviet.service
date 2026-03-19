@@ -1,0 +1,17 @@
+[Unit]
+Description=CSL Boviet Monitor
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/csl-bot
+ExecStart=/usr/bin/python3 boviet_monitor.py
+EnvironmentFile=/root/csl-bot/.env
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=csl-boviet
+
+[Install]
+WantedBy=multi-user.target

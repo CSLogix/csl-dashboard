@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, 
 from fastapi.responses import JSONResponse, FileResponse
 from google.oauth2.service_account import Credentials
 
+from psycopg2 import sql as psql
 import database as db
 from shared import (
     sheet_cache, log,
@@ -457,12 +458,22 @@ async def download_load_document(efj: str, doc_id: int, inline: bool = False):
 
 @router.patch("/api/load/{efj}/documents/{doc_id}")
 async def update_load_document(efj: str, doc_id: int, request: Request):
-    """Update document metadata (doc_type reclassification)."""
+    """
+    Reclassify a load document by updating its `doc_type`.
+    
+    Validates the provided `doc_type` against the allowed set and updates the matching `load_documents` record for the given `efj` and `doc_id`.
+    
+    Returns:
+        JSONResponse: On success, `{"ok": True, "doc_type": <new_type>}`.
+        If `doc_type` is invalid, returns status 400 with `{"error": "Invalid doc_type. Must be one of: <allowed_types>"}`.
+        If no matching document is found, returns status 404 with `{"error": "not found"}`.
+    """
     body = await request.json()
     new_type = body.get("doc_type", "").strip()
     valid_types = [
         "customer_rate", "carrier_rate", "rate", "unclassified",
-        "pod", "bol", "carrier_invoice", "screenshot", "email", "other",
+        "pod", "bol", "carrier_invoice", "packing_list", "msds",
+        "screenshot", "email", "other",
     ]
     if new_type not in valid_types:
         return JSONResponse(status_code=400, content={"error": f"Invalid doc_type. Must be one of: {valid_types}"})
@@ -662,10 +673,10 @@ async def api_macropoint(efj: str):
             pass
     if not shipment:
         raise HTTPException(404, f"Load {efj} not found")
-    # Also check tracking cache
+    # Read tracking cache once (in-memory, no file I/O)
     _tracking_cache = _read_tracking_cache()
-    _cached_entry = _find_tracking_entry(_tracking_cache, efj)
-    _cached_url = _cached_entry.get("macropoint_url", "")
+    cached = _find_tracking_entry(_tracking_cache, efj)
+    _cached_url = cached.get("macropoint_url", "")
 
     status = shipment.get("status", "")
     progress = _build_macropoint_progress(status)
@@ -676,10 +687,6 @@ async def api_macropoint(efj: str):
         phone_fmt = f"({phone_raw[:3]}) {phone_raw[3:6]}-{phone_raw[6:]}"
     else:
         phone_fmt = phone_raw
-
-    # ── Tracking cache (stop timeline from ftl_monitor) ──
-    tracking_cache = _read_tracking_cache()
-    cached = _find_tracking_entry(tracking_cache, efj)
 
     # ── Driver contact info (from DB, with cache fallback) ──
     contact = _get_driver_contact(efj)
@@ -942,7 +949,7 @@ async def api_port_codes():
 @router.get("/api/reps")
 async def api_reps():
     """Return list of account reps."""
-    return {"reps": ["Eli", "Radka", "John F", "Janice"]}
+    return {"reps": ["Radka", "John F", "Janice", "Allie", "John N", "Amanda"]}
 
 
 @router.post("/api/accounts/add")
@@ -1181,7 +1188,8 @@ async def apply_rate_to_shipment(efj: str, request: Request):
 
             # Write to shipments
             cur.execute(
-                f"UPDATE shipments SET {field} = %s, updated_at = NOW() WHERE efj = %s RETURNING *",
+                psql.SQL("UPDATE shipments SET {} = %s, updated_at = NOW() WHERE efj = %s RETURNING *").format(
+                    psql.Identifier(field)),
                 (quote["rate_amount"], efj),
             )
             row = cur.fetchone()

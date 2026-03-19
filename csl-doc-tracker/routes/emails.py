@@ -89,6 +89,65 @@ async def get_load_emails(efj: str):
     return JSONResponse({"emails": emails, "count": len(emails)})
 
 
+@router.get("/api/email/{email_id}/body")
+async def get_email_body(email_id: int):
+    """Fetch the full email body from Gmail for preview."""
+    with db.get_cursor() as cur:
+        cur.execute(
+            "SELECT gmail_message_id, subject, sender, recipients FROM email_threads WHERE id = %s",
+            (email_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        # Try unmatched
+        with db.get_cursor() as cur:
+            cur.execute(
+                "SELECT gmail_message_id, subject, sender, recipients FROM unmatched_inbox_emails WHERE id = %s",
+                (email_id,),
+            )
+            row = cur.fetchone()
+    if not row or not row["gmail_message_id"]:
+        return JSONResponse({"body_html": None, "body_text": None, "error": "Email not found"}, status_code=404)
+
+    try:
+        import base64
+        from gmail_monitor import _get_gmail_service
+        service = _get_gmail_service()
+        msg = service.users().messages().get(
+            userId="me", id=row["gmail_message_id"], format="full"
+        ).execute()
+
+        body_html = None
+        body_text = None
+
+        def _extract_parts(payload):
+            nonlocal body_html, body_text
+            mime = payload.get("mimeType", "")
+            if mime == "text/html" and not body_html:
+                data = payload.get("body", {}).get("data", "")
+                if data:
+                    body_html = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+            elif mime == "text/plain" and not body_text:
+                data = payload.get("body", {}).get("data", "")
+                if data:
+                    body_text = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+            for part in payload.get("parts", []):
+                _extract_parts(part)
+
+        _extract_parts(msg.get("payload", {}))
+
+        return JSONResponse({
+            "body_html": body_html,
+            "body_text": body_text,
+            "subject": row["subject"],
+            "sender": row["sender"],
+            "recipients": row["recipients"],
+        })
+    except Exception as e:
+        log.error("Failed to fetch email body for id=%d: %s", email_id, e)
+        return JSONResponse({"body_html": None, "body_text": None, "error": str(e)}, status_code=500)
+
+
 @router.post("/api/load/{efj}/summary")
 async def api_load_summary(efj: str, request: Request):
     """Generate an AI-powered operational summary for a load using Claude."""

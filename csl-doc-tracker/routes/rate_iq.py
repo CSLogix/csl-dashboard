@@ -46,6 +46,26 @@ PORT_CLUSTERS = {
     "bayonne": "NY/NJ",
     "maher": "NY/NJ",
     "newark": "NY/NJ",
+    "nynj": "NY/NJ",
+    "nj/ny": "NY/NJ",
+    "port liberty": "NY/NJ",
+    "nyc port": "NY/NJ",
+    "nyc": "NY/NJ",
+    "new york city": "NY/NJ",
+    "new york": "NY/NJ",
+    "bayonne terminal": "NY/NJ",
+    "apmt": "NY/NJ",
+    "global terminal": "NY/NJ",
+    "port liberty, ny": "NY/NJ",
+    "nyc port, ny": "NY/NJ",
+    "nyc, ny": "NY/NJ",
+    "new york city, ny": "NY/NJ",
+    "new york, ny": "NY/NJ",
+    "bayonne, nj": "NY/NJ",
+    "bayonne terminal, nj": "NY/NJ",
+    "elizabeth, nj": "NY/NJ",
+    "newark, nj": "NY/NJ",
+    "port newark, nj": "NY/NJ",
     # Savannah
     "savannah": "Savannah",
     "savannah ports": "Savannah",
@@ -55,7 +75,10 @@ PORT_CLUSTERS = {
     "houston": "Houston",
     "houston ports": "Houston",
     "barbours cut": "Houston",
+    "barbour's cut": "Houston",
     "bayport": "Houston",
+    "houston, tx": "Houston",
+    "houston tx": "Houston",
     # Charleston
     "charleston": "Charleston",
     "wando welch": "Charleston",
@@ -74,6 +97,23 @@ for _alias, _cluster in PORT_CLUSTERS.items():
     _CLUSTER_ALIASES[_cluster].add(_alias)
 
 
+def _split_city_state(location: str) -> tuple[str, str]:
+    """
+    Parse a location string of the form "City, ST" into (city, state).
+    
+    If `location` is empty or missing, returns two empty strings. The `city` is the substring before the first comma, trimmed. The `state` is the first token after the first comma, trimmed; if no comma or no token after it, `state` is an empty string.
+    
+    Returns:
+        (city, state): `city` and `state` components extracted from the input.
+    """
+    if not location:
+        return "", ""
+    parts = location.split(",", 1)
+    city = parts[0].strip()
+    state = parts[1].strip().split()[0] if len(parts) > 1 else ""
+    return city, state
+
+
 def _normalize_port(text: str) -> str:
     """Normalize a port/origin/destination string to its cluster name, or return as-is."""
     if not text:
@@ -82,10 +122,18 @@ def _normalize_port(text: str) -> str:
     # Exact match
     if lower in PORT_CLUSTERS:
         return PORT_CLUSTERS[lower]
+    # Try without state suffix: "houston, tx" → "houston"
+    no_state = re.sub(r',\s*[a-z]{2}$', '', lower).strip()
+    if no_state != lower and no_state in PORT_CLUSTERS:
+        return PORT_CLUSTERS[no_state]
     # Substring match (e.g. "Long Beach Container Terminal" contains "long beach")
     for alias, cluster in sorted(PORT_CLUSTERS.items(), key=lambda x: -len(x[0])):
         if alias in lower:
             return cluster
+    # Strip state suffix for general city grouping: "Dallas, TX" → "Dallas"
+    if no_state != lower:
+        # Title case the city name
+        return no_state.title()
     return text.strip()
 
 
@@ -149,11 +197,23 @@ Dates should be normalized to YYYY-MM-DD format. Omit $ signs and commas from nu
 
 
 def _call_claude(content: list) -> dict:
-    """Call Claude API with content blocks and return parsed JSON."""
+    """
+    Send prepared content blocks to the Claude API and return the parsed JSON response.
+    
+    Parameters:
+        content (list): List of content blocks formatted for the Anthropic/Claude request.
+    
+    Returns:
+        dict: Parsed JSON object from Claude's response.
+    
+    Raises:
+        json.JSONDecodeError: If the API response cannot be parsed as JSON.
+        Exception: Propagates errors raised by the Anthropics/Claude client (e.g., network or API errors).
+    """
     import anthropic
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model="claude-sonnet-4-6",
         max_tokens=2048,
         messages=[{"role": "user", "content": content}],
     )
@@ -543,9 +603,28 @@ async def api_outbound_quotes(
 @router.get("/api/rate-iq/search-lane")
 async def api_search_lane(origin: str = Query(""), destination: str = Query("")):
     """
-    Unified lane rate search: rate_quotes + lane_rates + won quotes.
-    Groups results by normalized lane. Returns lane_groups[] with
-    floor/avg/ceiling per lane, plus flat matches[] for backwards compat.
+    Search for lane rates across emails, imported lane rates, won quotes, and market benchmarks, and group results by normalized (bidirectional) lane.
+    
+    Given origin and/or destination search terms (port/port-cluster aware), returns matching rate records and aggregated lane groups. If both origin and destination are empty, returns empty results. Results are limited to the 100 best matches ordered by rate then date.
+    
+    Returns:
+        dict: {
+            "matches": list of matching rate records with keys:
+                - id (int): source record id
+                - lane (str): display lane (origin → destination)
+                - origin (str), destination (str)
+                - origin_city (str), origin_state (str), dest_city (str), dest_state (str)
+                - miles (int|None), carrier (str), carrier_email (str|None)
+                - rate (float|None), rate_unit (str), date (ISO str|None)
+                - status (str), source (str: "email"|"import"|"quote"|"market"), move_type (str|None)
+            "lane_groups": list of aggregated lane groups (bidirectional) with keys:
+                - lane (str), origin (str), destination (str), bidirectional (bool)
+                - count (int), rated_count (int), floor (float|None), avg (float|None), ceiling (float|None)
+                - carriers (int), last_quoted (ISO str|None), sources (dict), quotes (list of matches)
+            "carriers": list of matching carrier directory entries with keys:
+                - id, name, mc, email, phone, pickup, destination, can_dray, hazmat, overweight, date_quoted
+            "stats": overall statistics (floor, ceiling, avg, count, total_carriers, total_lanes, sources)
+        }
     """
     if not origin and not destination:
         return {"matches": [], "lane_groups": [], "carriers": [], "stats": {}}
@@ -674,11 +753,17 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
     # ── Build flat matches (backwards compat) ──
     matches = []
     for r in all_rows:
+        o_city, o_state = _split_city_state(r["origin"] or "")
+        d_city, d_state = _split_city_state(r["destination"] or "")
         matches.append({
             "id": r["id"],
             "lane": r["norm_lane"],
             "origin": r["origin"],
             "destination": r["destination"],
+            "origin_city": o_city,
+            "origin_state": o_state,
+            "dest_city": d_city,
+            "dest_state": d_state,
             "miles": r["miles"],
             "carrier": r["carrier_name"] or "Unknown",
             "carrier_email": r["carrier_email"],
@@ -690,17 +775,22 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
             "move_type": r["move_type"],
         })
 
-    # ── Group by normalized lane (port cluster aware) ──
+    # ── Group by normalized lane (bidirectional, port cluster aware) ──
+    # Merges A→B and B→A into a single lane group so round-trip lanes
+    # aren't split into separate cards.
     lane_map = defaultdict(list)
+    lane_dir_counts = defaultdict(lambda: defaultdict(int))  # biKey → {dir_string: count}
     for m in matches:
-        key = (
-            _normalize_port(m["origin"] or "").lower(),
-            _normalize_port(m["destination"] or "").lower(),
-        )
-        lane_map[key].append(m)
+        norm_o = _normalize_port(m["origin"] or "").lower()
+        norm_d = _normalize_port(m["destination"] or "").lower()
+        # Bidirectional key: sort endpoints so A→B and B→A share a key
+        bi_key = tuple(sorted([norm_o, norm_d]))
+        lane_map[bi_key].append(m)
+        dir_str = f"{norm_o}|{norm_d}"
+        lane_dir_counts[bi_key][dir_str] += 1
 
     lane_groups = []
-    for (orig_key, dest_key), group in sorted(
+    for bi_key, group in sorted(
         lane_map.items(),
         key=lambda kv: min((q["rate"] or 9e9) for q in kv[1])
     ):
@@ -709,13 +799,19 @@ async def api_search_lane(origin: str = Query(""), destination: str = Query(""))
         for q in group:
             source_counts[q["source"]] = source_counts.get(q["source"], 0) + 1
         last_date = max((q["date"] or "") for q in group) or None
-        # Use the normalized cluster name as the lane display name
-        norm_origin = _normalize_port(group[0]["origin"] or "") or group[0]["origin"]
-        norm_dest = _normalize_port(group[0]["destination"] or "") or group[0]["destination"]
+        # Use the most common direction as primary display
+        dir_counts = lane_dir_counts[bi_key]
+        primary_dir = max(dir_counts, key=dir_counts.get)
+        prim_o, prim_d = primary_dir.split("|")
+        norm_origin = _normalize_port(prim_o) or prim_o
+        norm_dest = _normalize_port(prim_d) or prim_d
+        bidirectional = len(dir_counts) > 1
+        arrow = " ↔ " if bidirectional else " → "
         lane_groups.append({
-            "lane": f"{norm_origin} → {norm_dest}",
+            "lane": f"{norm_origin}{arrow}{norm_dest}",
             "origin": norm_origin,
             "destination": norm_dest,
+            "bidirectional": bidirectional,
             "count": len(group),
             "rated_count": len(rates),
             "floor": min(rates) if rates else None,
@@ -802,19 +898,34 @@ async def api_lane_stats():
 
 # ── Manual Intake (carrier rate from email / file / text) ────────────
 
-@router.post("/api/rate-iq/manual-intake")
-async def post_manual_intake(request: Request):
-    """Extract a carrier rate from pasted text or uploaded file (image, PDF, .msg, .eml, HTML).
-    Uses Claude Vision for files, Claude text extraction for pasted text.
-    Saves extracted rate to rate_quotes table."""
+async def _parse_intake_request(request: Request):
+    """
+    Parse an incoming manual-intake or extract-preview request and extract text, file, move type, and any pre-extracted override.
+    
+    When the request is multipart/form-data, reads form fields:
+    - "text" (optional)
+    - "move_type" (optional, defaults to "dray")
+    - "file" (optional file upload; file bytes and filename are returned)
+    
+    When the request has a JSON body, reads keys:
+    - "text" (optional)
+    - "move_type" (optional, defaults to "dray")
+    - "extracted" (optional pre-reviewed extraction override)
+    
+    Returns:
+        tuple: (text, file_bytes, filename, move_type, extracted_override)
+            text (str | None): Trimmed text content if provided, otherwise None.
+            file_bytes (bytes | None): Uploaded file contents if provided, otherwise None.
+            filename (str): Uploaded filename or empty string.
+            move_type (str): Normalized move type (lowercased), defaults to "dray".
+            extracted_override (dict | None): Parsed override from JSON "extracted" key, or None.
+    """
     content_type = request.headers.get("content-type", "")
-    has_claude = bool(config.ANTHROPIC_API_KEY)
-
-    # Determine input source
     text = None
     file_bytes = None
     filename = ""
     move_type = "dray"
+    extracted_override = None
 
     if "multipart/form-data" in content_type:
         form = await request.form()
@@ -830,35 +941,83 @@ async def post_manual_intake(request: Request):
         body = await request.json()
         text = (body.get("text") or "").strip()
         move_type = (body.get("move_type") or "dray").strip().lower()
+        extracted_override = body.get("extracted")
 
-    if not text and not file_bytes:
-        return JSONResponse(status_code=400, content={"error": "No text or file provided"})
+    return text, file_bytes, filename, move_type, extracted_override
 
-    # Extract rate data
+
+def _extract_rate_data(text, file_bytes, filename, move_type):
+    """
+    Normalize and validate extracted rate data from text or an uploaded file.
+    
+    Attempts AI extraction when an Anthropic API key is configured (preferring file extraction when file bytes are present, otherwise using text); if AI is not available and only text is provided, falls back to a regex-based text parser. Ensures extracted payload contains origin and destination, normalizes origin/destination/carrier/shipment_type, and computes `rate_amount` from an explicit field or by summing `linehaul_items` when necessary.
+    
+    Parameters:
+        text (str|None): Plain-text content to extract from (may be None if a file is provided).
+        file_bytes (bytes|None): Raw uploaded file bytes to send to the extractor (preferred when present).
+        filename (str|None): The filename associated with `file_bytes` (used to determine handling).
+        move_type (str|None): Fallback shipment type to use when extraction does not provide one.
+    
+    Returns:
+        tuple: (extracted_dict, error_response)
+            - extracted_dict (dict|None): Normalized extraction result with keys including
+              `origin`, `destination`, `shipment_type`, and `rate_amount` when extraction succeeded.
+            - error_response (fastapi.responses.JSONResponse|None): A JSONResponse describing the error when
+              extraction or validation failed; `None` on success.
+    
+    Error behavior:
+        - Returns a 422 error response when a file is provided but no Anthropic API key is configured.
+        - Returns a 500 error response when AI extraction raises an unexpected exception.
+        - Returns a 400 error response when extraction returns no data or when origin/destination cannot be determined.
+    """
+    has_claude = bool(config.ANTHROPIC_API_KEY)
     extracted = None
+
+    # Text-decodable file extensions that can fall back to regex parsing
+    _TEXT_EXTS = {".txt", ".csv", ".eml", ".htm", ".html", ".tsv"}
+    file_ext = ("." + filename.rsplit(".", 1)[-1].lower()) if filename and "." in filename else ""
+
     if file_bytes and has_claude:
         try:
             blocks = _file_to_content_blocks(file_bytes, filename, _CARRIER_EXTRACT_PROMPT)
             extracted = _call_claude(blocks)
         except Exception as e:
             log.warning("Claude file extraction failed: %s", e)
-            return JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
+            # For text-like files, fall back to regex instead of failing
+            if file_ext in _TEXT_EXTS:
+                try:
+                    decoded = file_bytes.decode("utf-8", errors="ignore")
+                    from routes.quotes import _parse_rate_text
+                    extracted = _parse_rate_text(decoded)
+                except Exception:
+                    pass
+            if not extracted:
+                return None, JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
     elif text and has_claude:
         try:
             blocks = [{"type": "text", "text": _CARRIER_EXTRACT_PROMPT + "\n\n" + text[:8000]}]
             extracted = _call_claude(blocks)
         except Exception as e:
             log.warning("Claude text extraction failed: %s", e)
-            return JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
+            return None, JSONResponse(status_code=500, content={"error": f"AI extraction failed: {e}"})
     elif text:
-        # Regex fallback (basic)
         from routes.quotes import _parse_rate_text
         extracted = _parse_rate_text(text)
+    elif file_bytes and file_ext in _TEXT_EXTS:
+        # No Claude key but file is text-decodable — use regex fallback
+        try:
+            decoded = file_bytes.decode("utf-8", errors="ignore")
+            from routes.quotes import _parse_rate_text
+            extracted = _parse_rate_text(decoded)
+        except Exception:
+            pass
+        if not extracted:
+            return None, JSONResponse(status_code=422, content={"error": "Could not parse text file"})
     else:
-        return JSONResponse(status_code=422, content={"error": "File extraction requires ANTHROPIC_API_KEY"})
+        return None, JSONResponse(status_code=422, content={"error": "File extraction requires ANTHROPIC_API_KEY"})
 
     if not extracted:
-        return JSONResponse(status_code=400, content={"error": "Could not extract rate data"})
+        return None, JSONResponse(status_code=400, content={"error": "Could not extract rate data"})
 
     # Compute total rate if not directly provided
     rate_amount = None
@@ -879,34 +1038,225 @@ async def post_manual_intake(request: Request):
     carrier_name = (extracted.get("carrier_name") or "").strip()
     shipment_type = (extracted.get("shipment_type") or move_type or "dray").lower()
 
-    if not origin or not destination:
-        return JSONResponse(status_code=400, content={
-            "error": "Could not extract origin and destination",
-            "extracted": extracted,
-        })
+    # Don't fail on missing origin/dest — let the preview step surface partial extractions
+    # so the user can fill in missing fields. Validation happens in post_manual_intake.
 
-    lane = f"{origin} → {destination}"
     extracted["rate_amount"] = rate_amount
     extracted["origin"] = origin
     extracted["destination"] = destination
+    extracted["shipment_type"] = shipment_type
 
-    # Save to rate_quotes
+    return extracted, None
+
+
+@router.post("/api/rate-iq/extract-preview")
+async def post_extract_preview(request: Request):
+    """
+    Extract rate data from the provided file or text and return the parsed extraction for user review without persisting it.
+    
+    Returns:
+        dict: On success, a dictionary {"ok": True, "extracted": <extracted_data>} where <extracted_data> is the normalized extraction result.
+        JSONResponse: On failure, a JSONResponse with an error status and message (e.g., 400 when no input is provided or an extraction error response).
+    """
+    text, file_bytes, filename, move_type, _ = await _parse_intake_request(request)
+
+    if not text and not file_bytes:
+        return JSONResponse(status_code=400, content={"error": "No text or file provided"})
+
+    extracted, error = _extract_rate_data(text, file_bytes, filename, move_type)
+    if error:
+        return error
+
+    return {"ok": True, "extracted": extracted}
+
+
+@router.post("/api/rate-iq/manual-intake")
+async def post_manual_intake(request: Request):
+    """
+    Accept and ingest a carrier rate from pasted text or an uploaded file, saving it to rate_quotes and lane_rates.
+    
+    If an `extracted` override is provided in the request body, that pre-reviewed data is used instead of running extraction. Validates that origin and destination are present, normalizes numeric values (rates, fsc, linehaul, accessorials), and parses linehaul_items and accessorials into structured fields used for database inserts. Inserts a row into rate_quotes and attempts to insert a detailed row into lane_rates; lane_rates insertion is deduplicated by carrier + origin + destination + total, and deduplication is reported. If carrier MC number or email is present, the carriers directory is created or updated.
+    
+    Returns:
+        dict: Result payload containing at minimum `{"ok": True, "extracted": <extracted_data>}`. If a lane_rates insert was skipped due to a duplicate, includes `duplicate_skipped: True` and `duplicate_id: <id>`.
+    """
+    text, file_bytes, filename, move_type, extracted_override = await _parse_intake_request(request)
+
+    if extracted_override:
+        # User already reviewed — use pre-reviewed data directly
+        extracted = extracted_override
+        origin = (extracted.get("origin") or "").strip()
+        destination = (extracted.get("destination") or "").strip()
+        if not origin or not destination:
+            return JSONResponse(status_code=400, content={"error": "Origin and destination are required"})
+        # Normalize rate_amount
+        rate_amount = None
+        if extracted.get("rate_amount"):
+            try:
+                rate_amount = float(str(extracted["rate_amount"]).replace(",", "").replace("$", ""))
+            except (ValueError, TypeError):
+                pass
+        extracted["rate_amount"] = rate_amount
+        extracted["origin"] = origin
+        extracted["destination"] = destination
+        shipment_type = (extracted.get("shipment_type") or move_type or "dray").lower()
+    else:
+        if not text and not file_bytes:
+            return JSONResponse(status_code=400, content={"error": "No text or file provided"})
+
+        extracted, error = _extract_rate_data(text, file_bytes, filename, move_type)
+        if error:
+            return error
+        shipment_type = (extracted.get("shipment_type") or move_type or "dray").lower()
+
+    origin = extracted["origin"]
+    destination = extracted["destination"]
+    rate_amount = extracted.get("rate_amount")
+    carrier_name = (extracted.get("carrier_name") or "").strip()
+    lane = f"{origin} → {destination}"
+
+    # Parse accessorials from extracted data
+    carrier_email = (extracted.get("carrier_email") or extracted.get("email") or "").strip() or None
+    carrier_mc = (extracted.get("carrier_mc") or "").strip() or None
+    linehaul_items = extracted.get("linehaul_items") or []
+    accessorial_list = extracted.get("accessorials") or []
+
+    # Build accessorials JSONB and extract known fields for lane_rates
+    accessorials_jsonb = accessorial_list if accessorial_list else None
+    linehaul_amount = None
+    fsc_amount = None
+    acc_fields = {}  # for lane_rates columns
+
+    for item in linehaul_items:
+        charge = (item.get("description") or "").lower()
+        try:
+            val = float(str(item.get("rate", "0")).replace(",", "").replace("$", ""))
+        except (ValueError, TypeError):
+            continue
+        if "fuel" in charge or "fsc" in charge:
+            fsc_amount = val
+        elif "linehaul" in charge or "line haul" in charge or "base" in charge:
+            linehaul_amount = val
+
+    for acc in accessorial_list:
+        charge = (acc.get("charge") or "").lower()
+        try:
+            val = float(str(acc.get("rate", "0")).replace(",", "").replace("$", ""))
+        except (ValueError, TypeError):
+            continue
+        if "chassis" in charge and "split" not in charge:
+            acc_fields["chassis_per_day"] = val
+        elif "chassis" in charge and "split" in charge:
+            acc_fields["chassis_split"] = val
+        elif "prepull" in charge or "pre-pull" in charge:
+            acc_fields["prepull"] = val
+        elif "storage" in charge:
+            acc_fields["storage_per_day"] = val
+        elif "detention" in charge:
+            acc_fields["detention"] = str(val)
+        elif "overweight" in charge:
+            acc_fields["overweight"] = val
+        elif "toll" in charge:
+            acc_fields["tolls"] = val
+        elif "hazmat" in charge or "haz" in charge:
+            acc_fields["hazmat"] = val
+        elif "reefer" in charge:
+            acc_fields["reefer"] = val
+        elif "triaxle" in charge or "tri-axle" in charge:
+            acc_fields["triaxle"] = val
+        elif "bond" in charge:
+            acc_fields["bond_fee"] = val
+        elif "residential" in charge:
+            acc_fields["residential"] = val
+
+    # Save to rate_quotes (with accessorials)
     from datetime import date as _date
+    import json as _json
     try:
         with db.get_conn() as conn:
             with db.get_cursor(conn) as cur:
                 cur.execute(
                     "INSERT INTO rate_quotes "
-                    "(origin, destination, lane, carrier_name, rate_amount, rate_unit, "
-                    " move_type, quote_date, status, source) "
-                    "VALUES (%s,%s,%s,%s,%s,'flat',%s,%s,'quoted','manual') "
+                    "(origin, destination, lane, carrier_name, carrier_email, rate_amount, rate_unit, "
+                    " move_type, quote_date, status, source, linehaul, chassis_per_day, accessorials) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,'flat',%s,%s,'quoted','manual',%s,%s,%s) "
                     "ON CONFLICT DO NOTHING",
-                    (origin, destination, lane, carrier_name, rate_amount, shipment_type, _date.today())
+                    (origin, destination, lane, carrier_name, carrier_email, rate_amount,
+                     shipment_type, _date.today(), linehaul_amount,
+                     acc_fields.get("chassis_per_day"),
+                     _json.dumps(accessorials_jsonb) if accessorials_jsonb else None)
                 )
     except Exception as e:
         log.warning("rate_quotes insert failed: %s", e)
 
-    return {"ok": True, "extracted": extracted}
+    # Also save to lane_rates for carrier rate table display (with full accessorial breakdown)
+    # Dedup: skip if same carrier+origin+dest+total already exists
+    duplicate_skipped = False
+    duplicate_id = None
+    if carrier_name and rate_amount:
+        try:
+            with db.get_conn() as conn:
+                with db.get_cursor(conn) as cur:
+                    cur.execute(
+                        "SELECT id FROM lane_rates WHERE LOWER(carrier_name) = LOWER(%s) AND LOWER(port) = LOWER(%s) AND LOWER(destination) = LOWER(%s) AND total = %s LIMIT 1",
+                        (carrier_name, origin, destination, rate_amount)
+                    )
+                    existing = cur.fetchone()
+                    if existing:
+                        duplicate_skipped = True
+                        duplicate_id = existing["id"]
+                    else:
+                        cur.execute(
+                            """INSERT INTO lane_rates
+                            (port, destination, carrier_name, dray_rate, fsc, total,
+                             chassis_per_day, prepull, storage_per_day, detention, chassis_split,
+                             overweight, tolls, hazmat, reefer, triaxle, bond_fee, residential,
+                             move_type, source)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'email_intake')""",
+                            (origin, destination, carrier_name,
+                             linehaul_amount, str(fsc_amount) if fsc_amount else None, rate_amount,
+                             acc_fields.get("chassis_per_day"), acc_fields.get("prepull"),
+                             acc_fields.get("storage_per_day"), acc_fields.get("detention"),
+                             acc_fields.get("chassis_split"), acc_fields.get("overweight"),
+                             acc_fields.get("tolls"), acc_fields.get("hazmat"),
+                             acc_fields.get("reefer"), acc_fields.get("triaxle"),
+                             acc_fields.get("bond_fee"), acc_fields.get("residential"),
+                             shipment_type)
+                        )
+        except Exception as e:
+            log.warning("lane_rates insert failed: %s", e)
+
+    # Update carrier directory with MC# and email if found
+    if carrier_name and (carrier_mc or carrier_email):
+        try:
+            with db.get_conn() as conn:
+                with db.get_cursor(conn) as cur:
+                    cur.execute("SELECT id FROM carriers WHERE LOWER(carrier_name) = LOWER(%s)", (carrier_name,))
+                    row = cur.fetchone()
+                    if row:
+                        updates, params = [], []
+                        if carrier_mc:
+                            updates.append("mc_number = COALESCE(mc_number, %s)")
+                            params.append(carrier_mc)
+                        if carrier_email:
+                            updates.append("contact_email = COALESCE(contact_email, %s)")
+                            params.append(carrier_email)
+                        if updates:
+                            params.append(row["id"])
+                            cur.execute(f"UPDATE carriers SET {', '.join(updates)} WHERE id = %s", params)
+                    else:
+                        cur.execute(
+                            "INSERT INTO carriers (carrier_name, mc_number, contact_email, source) VALUES (%s,%s,%s,'email_intake')",
+                            (carrier_name, carrier_mc, carrier_email)
+                        )
+        except Exception as e:
+            log.warning("carrier directory update failed: %s", e)
+
+    result = {"ok": True, "extracted": extracted}
+    if duplicate_skipped:
+        result["duplicate_skipped"] = True
+        result["duplicate_id"] = duplicate_id
+    return result
 
 
 # ── Market Rates (LoadMatch / benchmark data — no carrier) ──────────
@@ -1218,3 +1568,41 @@ async def delete_market_rate(rate_id: int):
             if cur.rowcount == 0:
                 return JSONResponse(status_code=404, content={"error": "Rate not found"})
     return {"ok": True}
+
+
+# ── Rate accuracy feedback ────────────────────────────────────────────
+
+@router.post("/api/rate-iq/feedback")
+async def post_rate_feedback(request: Request):
+    """Record user feedback on market rate accuracy for a lane."""
+    body = await request.json()
+    lane = body.get("lane", "")
+    rating = body.get("rating", "")  # 'accurate' or 'inaccurate'
+    avg_rate = body.get("avg_rate")
+    count = body.get("count")
+
+    if not lane or not rating:
+        return JSONResponse(status_code=400, content={"error": "lane and rating required"})
+
+    try:
+        with db.get_conn() as conn:
+            with db.get_cursor(conn) as cur:
+                cur.execute(
+                    """CREATE TABLE IF NOT EXISTS rate_feedback (
+                        id SERIAL PRIMARY KEY,
+                        lane TEXT NOT NULL,
+                        rating TEXT NOT NULL,
+                        avg_rate NUMERIC,
+                        data_points INTEGER,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )"""
+                )
+                cur.execute(
+                    "INSERT INTO rate_feedback (lane, rating, avg_rate, data_points) VALUES (%s,%s,%s,%s)",
+                    (lane, rating, avg_rate, count)
+                )
+    except Exception as e:
+        log.warning("rate feedback insert failed: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+    return {"ok": True, "lane": lane, "rating": rating}

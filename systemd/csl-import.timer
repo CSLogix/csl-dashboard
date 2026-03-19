@@ -1,0 +1,10 @@
+[Unit]
+Description=Run CSL Dray Import Bot at 7:30 AM and 1:30 PM ET, Mon-Fri
+
+[Timer]
+OnCalendar=Mon..Fri 07:30 America/New_York
+OnCalendar=Mon..Fri 13:30 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target

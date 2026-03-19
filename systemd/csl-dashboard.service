@@ -1,0 +1,17 @@
+[Unit]
+Description=CSL Dashboard (FastAPI on port 8080)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/csl-bot/csl-doc-tracker
+ExecStart=/usr/bin/python3 app.py
+EnvironmentFile=/root/csl-bot/csl-doc-tracker/.env
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=csl-dashboard
+
+[Install]
+WantedBy=multi-user.target

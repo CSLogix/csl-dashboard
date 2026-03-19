@@ -11,13 +11,13 @@ Deploy to: /root/csl-bot/csl_sheet_writer.py
 """
 
 import os
-import logging
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from csl_logging import get_logger
 
-log = logging.getLogger("sheet_writer")
+log = get_logger("sheet_writer")
 
 MASTER_SHEET_ID = "19MB5HmmWwsVXY_nADCYYLJL-zWXYt8yWrfeRBSfB2S0"
 CREDS_FILE = os.environ.get("GOOGLE_CREDENTIALS_FILE", "/root/csl-credentials.json")
@@ -402,6 +402,38 @@ def sheet_update_field(efj, account, updates):
 
     except Exception as e:
         log.error("Sheet write-back FAILED for %s [%s]: %s", efj, account, e)
+
+
+def sheet_delete_row(efj, account):
+    """
+    Delete a load row from the Master Sheet account tab.
+
+    Args:
+        efj: The EFJ number (e.g., "EFJ107416")
+        account: The account tab name (e.g., "Allround", "DHL")
+
+    Fire-and-forget: logs errors but never raises.
+    """
+    try:
+        gc = _get_gc()
+        if not gc:
+            return
+        sh = gc.open_by_key(MASTER_SHEET_ID)
+        try:
+            ws = sh.worksheet(account)
+        except Exception:
+            log.warning("Sheet delete-row: tab '%s' not found in Master Sheet", account)
+            return
+        row = _find_row_by_efj(ws, efj)
+        if not row:
+            log.warning("Sheet delete-row: %s not found in tab '%s'", efj, account)
+            return
+
+        ws.delete_rows(row)
+        log.info("Sheet delete-row OK: %s removed from '%s' row %d", efj, account, row)
+
+    except Exception as e:
+        log.error("Sheet delete-row FAILED for %s [%s]: %s", efj, account, e)
 
 
 def sheet_add_row(efj, account, data):
