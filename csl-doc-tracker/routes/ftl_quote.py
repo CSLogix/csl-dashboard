@@ -27,18 +27,27 @@ class FTLQuoteRequest(BaseModel):
     destination: str = ""
     mileage: float = 0
 
-    # SONAR (TRAC) inputs
-    trac_spot_current: float = 0     # TRAC Spot current flat rate
-    trac_spot_low: float = 0         # TRAC Spot low
-    trac_spot_high: float = 0        # TRAC Spot high
-    trac_contract: float = 0         # TRAC Contract flat rate
+    # SONAR TRAC Spot (3 values from Rate Intelligence)
+    trac_flat_low: float = 0         # TRAC Spot low
+    trac_flat_current: float = 0     # TRAC Spot current
+    trac_flat_high: float = 0        # TRAC Spot high
 
-    # DAT inputs
-    dat_spot_low: float = 0          # DAT RateView spot low
-    dat_spot_high: float = 0         # DAT RateView spot high
-    dat_7day: float = 0              # DAT 7-day avg
-    dat_15day: float = 0             # DAT 15-day avg
-    dat_90day: float = 0             # DAT 90-day avg
+    # SONAR Contract (3 values from Rate Intelligence)
+    contract_flat_low: float = 0     # Contract low
+    contract_flat_current: float = 0 # Contract current
+    contract_flat_high: float = 0    # Contract high
+
+    # DAT Spot (from DAT RateView)
+    dat_spot_low: float = 0          # DAT Spot low
+    dat_spot_high: float = 0         # DAT Spot high
+
+    # DAT Contract (from DAT RateView)
+    dat_contract_low: float = 0      # DAT Contract low
+    dat_contract_high: float = 0     # DAT Contract high
+
+    # Capacity / market indicators
+    capacity_conditions: str = ""    # Neutral / Difficult / Most Difficult
+    otri: float = 0                  # Outbound Tender Rejection Index
 
     # Deadhead comps (from DAT loadboard — nearby lane rates)
     dh_origin_rate: float = 0        # Best comp: deadhead-to-origin filtered rate
@@ -54,36 +63,49 @@ class FTLQuoteRequest(BaseModel):
 
 @router.post("/api/ftl-quote/calculate")
 async def ftl_quote_calculate(data: FTLQuoteRequest):
-    """Calculate FTL quote from SONAR + DAT market inputs."""
+    """Calculate FTL quote from SONAR + DAT market inputs.
+
+    Avg All formula (matches Excel):
+      AVERAGE(trac_flat_current, trac_flat_high,
+              contract_flat_current, contract_flat_high,
+              dat_spot_high, dat_contract_high)
+    """
     mileage = data.mileage if data.mileage > 0 else 1  # avoid div/0
 
-    # ── Deltas ──
-    sonar_spot_delta = data.trac_spot_high - data.trac_spot_current
+    # ── Deltas (match Excel columns) ──
+    sonar_spot_delta = data.trac_flat_high - data.trac_flat_current
     dat_spot_delta = data.dat_spot_high - data.dat_spot_low
-    sonar_vs_dat_high = data.dat_spot_high - data.trac_spot_high
+    dat_high_delta = data.dat_spot_high - data.trac_flat_high  # DAT vs SONAR high comparison
 
-    # ── Averages ──
-    # Collect all non-zero rate inputs for averaging
-    rate_inputs = []
-    labels = []
-    if data.trac_spot_current > 0:
-        rate_inputs.append(data.trac_spot_current); labels.append("SONAR Spot")
-    if data.trac_spot_high > 0:
-        rate_inputs.append(data.trac_spot_high); labels.append("SONAR High")
-    if data.trac_contract > 0:
-        rate_inputs.append(data.trac_contract); labels.append("SONAR Contract")
-    if data.dat_7day > 0:
-        rate_inputs.append(data.dat_7day); labels.append("DAT 7d")
-    if data.dat_15day > 0:
-        rate_inputs.append(data.dat_15day); labels.append("DAT 15d")
-    if data.dat_90day > 0:
-        rate_inputs.append(data.dat_90day); labels.append("DAT 90d")
-    if data.dh_origin_rate > 0:
-        rate_inputs.append(data.dh_origin_rate); labels.append("DH-O Comp")
-    if data.dh_dest_rate > 0:
-        rate_inputs.append(data.dh_dest_rate); labels.append("DH-D Comp")
+    # ── Avg All: exact Excel formula ──
+    # Average of: trac_flat_current, trac_flat_high,
+    #             contract_flat_current, contract_flat_high,
+    #             dat_spot_high, dat_contract_high
+    avg_inputs = []
+    avg_labels = []
+    for val, label in [
+        (data.trac_flat_current, "TRAC Current"),
+        (data.trac_flat_high, "TRAC High"),
+        (data.contract_flat_current, "Contract Current"),
+        (data.contract_flat_high, "Contract High"),
+        (data.dat_spot_high, "DAT Spot High"),
+        (data.dat_contract_high, "DAT Contract High"),
+    ]:
+        if val > 0:
+            avg_inputs.append(val)
+            avg_labels.append(label)
 
-    avg_all = round(sum(rate_inputs) / len(rate_inputs), 2) if rate_inputs else 0
+    avg_all = round(sum(avg_inputs) / len(avg_inputs), 2) if avg_inputs else 0
+
+    # ── Sonar Analysis ──
+    # "Spot Lower" if TRAC current < Avg All, else "Spot Higher"
+    if data.trac_flat_current > 0 and avg_all > 0:
+        sonar_analysis = "Spot Lower" if data.trac_flat_current < avg_all else "Spot Higher"
+    else:
+        sonar_analysis = ""
+
+    # ── Avg vs Spot = Avg All - DAT Spot High ──
+    avg_vs_spot = round(avg_all - data.dat_spot_high, 2) if data.dat_spot_high > 0 else 0
 
     # ── Margin ──
     if data.margin_source == "pct" and data.margin_pct > 0:
@@ -99,22 +121,26 @@ async def ftl_quote_calculate(data: FTLQuoteRequest):
     margin_pct_actual = round((margin_usd / quote_customer) * 100, 2) if quote_customer > 0 else 0
 
     # ── RPM breakdown ──
-    sonar_rpm = round(data.trac_spot_current / mileage, 2) if data.trac_spot_current > 0 else 0
-    dat_rpm = round(data.dat_7day / mileage, 2) if data.dat_7day > 0 else 0
+    spot_rpm = round(data.trac_flat_current / mileage, 2) if data.trac_flat_current > 0 else 0
+    contract_rpm = round(data.contract_flat_current / mileage, 2) if data.contract_flat_current > 0 else 0
 
     return JSONResponse({
         "mileage": data.mileage,
-        # Deltas
+        # Deltas (match Excel columns V, W, U)
         "sonar_spot_delta": round(sonar_spot_delta, 2),
         "dat_spot_delta": round(dat_spot_delta, 2),
-        "sonar_vs_dat_high": round(sonar_vs_dat_high, 2),
-        # Averages
+        "dat_high_delta": round(dat_high_delta, 2),
+        # Avg All (Excel column R)
         "avg_all": avg_all,
-        "avg_inputs_used": labels,
-        "avg_inputs_count": len(rate_inputs),
+        "avg_inputs_used": avg_labels,
+        "avg_inputs_count": len(avg_inputs),
+        # Sonar Analysis (Excel column S)
+        "sonar_analysis": sonar_analysis,
+        # Avg vs Spot (Excel column T)
+        "avg_vs_spot": avg_vs_spot,
         # RPMs
-        "sonar_rpm": sonar_rpm,
-        "dat_rpm": dat_rpm,
+        "spot_rpm": spot_rpm,
+        "contract_rpm": contract_rpm,
         "carrier_rpm": carrier_rpm,
         "quoted_rpm": quoted_rpm,
         # Pricing
@@ -122,6 +148,9 @@ async def ftl_quote_calculate(data: FTLQuoteRequest):
         "margin_usd": round(margin_usd, 2),
         "margin_pct": margin_pct_actual,
         "quote_customer": quote_customer,
+        # Market context
+        "capacity_conditions": data.capacity_conditions,
+        "otri": data.otri,
     })
 
 

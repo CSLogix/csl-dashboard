@@ -125,18 +125,27 @@ export default function FTLQuoteView() {
   const [destination, setDestination] = useState("");
   const [mileage, setMileage] = useState(0);
 
-  // ── SONAR inputs ──
-  const [tracCurrent, setTracCurrent] = useState(0);
+  // ── SONAR TRAC Spot inputs ──
   const [tracLow, setTracLow] = useState(0);
+  const [tracCurrent, setTracCurrent] = useState(0);
   const [tracHigh, setTracHigh] = useState(0);
-  const [tracContract, setTracContract] = useState(0);
 
-  // ── DAT inputs ──
+  // ── SONAR Contract inputs ──
+  const [contractLow, setContractLow] = useState(0);
+  const [contractCurrent, setContractCurrent] = useState(0);
+  const [contractHigh, setContractHigh] = useState(0);
+
+  // ── DAT Spot inputs ──
   const [datLow, setDatLow] = useState(0);
   const [datHigh, setDatHigh] = useState(0);
-  const [dat7d, setDat7d] = useState(0);
-  const [dat15d, setDat15d] = useState(0);
-  const [dat90d, setDat90d] = useState(0);
+
+  // ── DAT Contract inputs ──
+  const [datContractLow, setDatContractLow] = useState(0);
+  const [datContractHigh, setDatContractHigh] = useState(0);
+
+  // ── Market indicators ──
+  const [capacityConditions, setCapacityConditions] = useState("");
+  const [otri, setOtri] = useState(0);
 
   // ── Deadhead comp inputs ──
   const [dhOriginRate, setDhOriginRate] = useState(0);
@@ -180,12 +189,12 @@ export default function FTLQuoteView() {
       const contextParts = [];
       if (origin || destination) contextParts.push(`Lane: ${origin || "?"} → ${destination || "?"}`);
       if (mileage > 0) contextParts.push(`Mileage: ${mileage}`);
-      if (tracCurrent > 0) contextParts.push(`SONAR Spot: $${tracCurrent} (Low: $${tracLow}, High: $${tracHigh})`);
-      if (tracContract > 0) contextParts.push(`SONAR Contract: $${tracContract}`);
-      if (dat7d > 0) contextParts.push(`DAT 7-day: $${dat7d}`);
-      if (dat15d > 0) contextParts.push(`DAT 15-day: $${dat15d}`);
-      if (dat90d > 0) contextParts.push(`DAT 90-day: $${dat90d}`);
-      if (datLow > 0 || datHigh > 0) contextParts.push(`DAT Spot Range: $${datLow} – $${datHigh}`);
+      if (tracCurrent > 0) contextParts.push(`SONAR TRAC Spot: $${tracCurrent} (Low: $${tracLow}, High: $${tracHigh})`);
+      if (contractCurrent > 0) contextParts.push(`SONAR Contract: $${contractCurrent} (Low: $${contractLow}, High: $${contractHigh})`);
+      if (datLow > 0 || datHigh > 0) contextParts.push(`DAT Spot: $${datLow} – $${datHigh}`);
+      if (datContractLow > 0 || datContractHigh > 0) contextParts.push(`DAT Contract: $${datContractLow} – $${datContractHigh}`);
+      if (capacityConditions) contextParts.push(`Capacity: ${capacityConditions}`);
+      if (otri > 0) contextParts.push(`OTRI: ${otri}%`);
       if (dhOriginRate > 0) contextParts.push(`DH-Origin Comp: $${dhOriginRate}`);
       if (dhDestRate > 0) contextParts.push(`DH-Dest Comp: $${dhDestRate}`);
       if (result) {
@@ -220,7 +229,7 @@ export default function FTLQuoteView() {
     }
     setAiLoading(false);
     setTimeout(() => { if (aiChatRef.current) aiChatRef.current.scrollTop = aiChatRef.current.scrollHeight; }, 50);
-  }, [origin, destination, mileage, tracCurrent, tracLow, tracHigh, tracContract, dat7d, dat15d, dat90d, datLow, datHigh, dhOriginRate, dhDestRate, result, comps]);
+  }, [origin, destination, mileage, tracCurrent, tracLow, tracHigh, contractCurrent, contractLow, contractHigh, datLow, datHigh, datContractLow, datContractHigh, capacityConditions, otri, dhOriginRate, dhDestRate, result, comps]);
 
   // ── Calculate quote ──
   const calculate = useCallback(async () => {
@@ -231,10 +240,11 @@ export default function FTLQuoteView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           origin, destination, mileage,
-          trac_spot_current: tracCurrent, trac_spot_low: tracLow,
-          trac_spot_high: tracHigh, trac_contract: tracContract,
+          trac_flat_low: tracLow, trac_flat_current: tracCurrent, trac_flat_high: tracHigh,
+          contract_flat_low: contractLow, contract_flat_current: contractCurrent, contract_flat_high: contractHigh,
           dat_spot_low: datLow, dat_spot_high: datHigh,
-          dat_7day: dat7d, dat_15day: dat15d, dat_90day: dat90d,
+          dat_contract_low: datContractLow, dat_contract_high: datContractHigh,
+          capacity_conditions: capacityConditions, otri,
           dh_origin_rate: dhOriginRate, dh_dest_rate: dhDestRate,
           margin_usd: marginUsd, margin_source: marginSource, margin_pct: marginPct,
         }),
@@ -249,11 +259,11 @@ export default function FTLQuoteView() {
 
   // ── Auto-calculate on input change (debounced) ──
   useEffect(() => {
-    const hasInput = tracCurrent > 0 || dat7d > 0 || datHigh > 0 || dhOriginRate > 0 || dhDestRate > 0;
+    const hasInput = tracCurrent > 0 || contractCurrent > 0 || datHigh > 0 || datContractHigh > 0 || dhOriginRate > 0;
     if (!hasInput) return;
     const timer = setTimeout(() => calculate(), 300);
     return () => clearTimeout(timer);
-  }, [tracCurrent, tracLow, tracHigh, tracContract, datLow, datHigh, dat7d, dat15d, dat90d, dhOriginRate, dhDestRate, marginUsd, marginSource, marginPct, mileage]);
+  }, [tracCurrent, tracLow, tracHigh, contractCurrent, contractLow, contractHigh, datLow, datHigh, datContractLow, datContractHigh, dhOriginRate, dhDestRate, marginUsd, marginSource, marginPct, mileage]);
 
   // ── Fetch lane comps ──
   const fetchComps = useCallback(async () => {
@@ -298,8 +308,9 @@ export default function FTLQuoteView() {
           quoted_rpm: result.quoted_rpm,
           notes,
           inputs_json: {
-            trac_spot_current: tracCurrent, trac_spot_high: tracHigh, trac_contract: tracContract,
-            dat_7day: dat7d, dat_15day: dat15d, dat_90day: dat90d,
+            trac_flat_current: tracCurrent, trac_flat_high: tracHigh,
+            contract_flat_current: contractCurrent, contract_flat_high: contractHigh,
+            dat_spot_high: datHigh, dat_contract_high: datContractHigh,
             dh_origin_rate: dhOriginRate, dh_dest_rate: dhDestRate,
           },
         }),
@@ -323,8 +334,10 @@ export default function FTLQuoteView() {
 
   // ── Clear all inputs ──
   const clearAll = () => {
-    setTracCurrent(0); setTracLow(0); setTracHigh(0); setTracContract(0);
-    setDatLow(0); setDatHigh(0); setDat7d(0); setDat15d(0); setDat90d(0);
+    setTracCurrent(0); setTracLow(0); setTracHigh(0);
+    setContractLow(0); setContractCurrent(0); setContractHigh(0);
+    setDatLow(0); setDatHigh(0); setDatContractLow(0); setDatContractHigh(0);
+    setCapacityConditions(""); setOtri(0);
     setDhOriginRate(0); setDhDestRate(0);
     setResult(null); setComps([]); setNotes("");
   };
@@ -364,59 +377,105 @@ export default function FTLQuoteView() {
             )}
           </div>
 
-          {/* SONAR Inputs */}
+          {/* SONAR — TRAC Spot + Contract side by side */}
           <div className="glass" style={{ borderRadius: 12, padding: 20, border: "1px solid rgba(255,255,255,0.06)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
               <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#8b5cf6" }} />
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", textTransform: "uppercase" }}>SONAR (TRAC Spot)</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", textTransform: "uppercase" }}>SONAR Rate Intelligence</span>
             </div>
-            <div style={{ display: "flex", gap: 12 }}>
-              <RateInput label="Current" value={tracCurrent} onChange={setTracCurrent} placeholder="1755" />
-              <RateInput label="Low" value={tracLow} onChange={setTracLow} placeholder="1712" />
-              <RateInput label="High" value={tracHigh} onChange={setTracHigh} placeholder="1798" />
-              <RateInput label="Contract" value={tracContract} onChange={setTracContract} placeholder="2119" />
-            </div>
-            {tracCurrent > 0 && mileage > 0 && (
-              <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 10, color: "#5A6478" }}>
-                <span>Spot RPM: <span style={{ color: "#a78bfa", fontFamily: mono }}>{fmtRpm(tracCurrent / mileage)}</span></span>
-                {tracContract > 0 && <span>Contract RPM: <span style={{ color: "#a78bfa", fontFamily: mono }}>{fmtRpm(tracContract / mileage)}</span></span>}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              {/* TRAC Spot */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#a78bfa", marginBottom: 8, textTransform: "uppercase" }}>TRAC Spot</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <RateInput label="Low" value={tracLow} onChange={setTracLow} placeholder="1712" />
+                  <RateInput label="Current" value={tracCurrent} onChange={setTracCurrent} placeholder="1755" />
+                  <RateInput label="High" value={tracHigh} onChange={setTracHigh} placeholder="1798" />
+                </div>
+                {tracCurrent > 0 && mileage > 0 && (
+                  <div style={{ marginTop: 6, fontSize: 10, color: "#5A6478" }}>
+                    Spot RPM: <span style={{ color: "#a78bfa", fontFamily: mono }}>{fmtRpm(tracCurrent / mileage)}</span>
+                  </div>
+                )}
               </div>
-            )}
+              {/* Contract */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#c084fc", marginBottom: 8, textTransform: "uppercase" }}>Contract</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <RateInput label="Low" value={contractLow} onChange={setContractLow} placeholder="1873" />
+                  <RateInput label="Current" value={contractCurrent} onChange={setContractCurrent} placeholder="2119" />
+                  <RateInput label="High" value={contractHigh} onChange={setContractHigh} placeholder="2290" />
+                </div>
+                {contractCurrent > 0 && mileage > 0 && (
+                  <div style={{ marginTop: 6, fontSize: 10, color: "#5A6478" }}>
+                    Contract RPM: <span style={{ color: "#c084fc", fontFamily: mono }}>{fmtRpm(contractCurrent / mileage)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
-          {/* DAT Inputs */}
+          {/* DAT — Spot + Contract side by side */}
           <div className="glass" style={{ borderRadius: 12, padding: 20, border: "1px solid rgba(255,255,255,0.06)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
               <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#3b82f6" }} />
               <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", textTransform: "uppercase" }}>DAT RateView</span>
             </div>
-            <div style={{ display: "flex", gap: 12, marginBottom: 10 }}>
-              <RateInput label="7-Day Avg" value={dat7d} onChange={setDat7d} placeholder="1926" />
-              <RateInput label="15-Day" value={dat15d} onChange={setDat15d} placeholder="2023" />
-              <RateInput label="90-Day" value={dat90d} onChange={setDat90d} placeholder="1991" />
-            </div>
-            <div style={{ display: "flex", gap: 12 }}>
-              <RateInput label="Spot Low" value={datLow} onChange={setDatLow} placeholder="1743" />
-              <RateInput label="Spot High" value={datHigh} onChange={setDatHigh} placeholder="2044" />
-            </div>
-            {dat7d > 0 && mileage > 0 && (
-              <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 10, color: "#5A6478" }}>
-                <span>7d RPM: <span style={{ color: "#60a5fa", fontFamily: mono }}>{fmtRpm(dat7d / mileage)}</span></span>
-                {dat15d > 0 && <span>15d RPM: <span style={{ color: "#60a5fa", fontFamily: mono }}>{fmtRpm(dat15d / mileage)}</span></span>}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              {/* DAT Spot */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#60a5fa", marginBottom: 8, textTransform: "uppercase" }}>DAT Spot</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <RateInput label="Low" value={datLow} onChange={setDatLow} placeholder="1398" />
+                  <RateInput label="High" value={datHigh} onChange={setDatHigh} placeholder="1559" />
+                </div>
               </div>
-            )}
+              {/* DAT Contract */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#93c5fd", marginBottom: 8, textTransform: "uppercase" }}>DAT Contract</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <RateInput label="Low" value={datContractLow} onChange={setDatContractLow} placeholder="1627" />
+                  <RateInput label="High" value={datContractHigh} onChange={setDatContractHigh} placeholder="1788" />
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Deadhead Comps */}
+          {/* Market Indicators + Deadhead Comps */}
           <div className="glass" style={{ borderRadius: 12, padding: 20, border: "1px solid rgba(255,255,255,0.06)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b" }} />
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#8B95A8", letterSpacing: "0.5px", textTransform: "uppercase" }}>Deadhead Comps (DAT Loadboard)</span>
-            </div>
-            <div style={{ fontSize: 10, color: "#5A6478", marginBottom: 12 }}>Best matching rates from DH-O / DH-D sorted results</div>
-            <div style={{ display: "flex", gap: 12 }}>
-              <RateInput label="DH-Origin Comp" value={dhOriginRate} onChange={setDhOriginRate} placeholder="Closest DH-O rate" />
-              <RateInput label="DH-Dest Comp" value={dhDestRate} onChange={setDhDestRate} placeholder="Closest DH-D rate" />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              {/* Market Conditions */}
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#10b981" }} />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", textTransform: "uppercase" }}>Market Conditions</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>Capacity</label>
+                    <select value={capacityConditions} onChange={e => setCapacityConditions(e.target.value)}
+                      style={{ width: "100%", padding: "8px 10px", background: "#14181d", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, color: "#F0F2F5", fontSize: 12, fontFamily: "inherit", outline: "none" }}>
+                      <option value="">Select...</option>
+                      <option value="Neutral">Neutral</option>
+                      <option value="Difficult">Difficult</option>
+                      <option value="Most Difficult">Most Difficult</option>
+                    </select>
+                  </div>
+                  <RateInput label="OTRI %" value={otri} onChange={setOtri} placeholder="4.64" prefix="%" />
+                </div>
+              </div>
+              {/* Deadhead Comps */}
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b" }} />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#8B95A8", textTransform: "uppercase" }}>Deadhead Comps</span>
+                </div>
+                <div style={{ fontSize: 9, color: "#5A6478", marginBottom: 8 }}>DAT Loadboard DH-O / DH-D sorted</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <RateInput label="DH-Origin Comp" value={dhOriginRate} onChange={setDhOriginRate} placeholder="Best DH-O" />
+                  <RateInput label="DH-Dest Comp" value={dhDestRate} onChange={setDhDestRate} placeholder="Best DH-D" />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -595,21 +654,46 @@ export default function FTLQuoteView() {
                     </div>
                   )}
 
-                  {/* Deltas */}
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", letterSpacing: "0.5px", marginBottom: 6 }}>DELTAS</div>
-                    <DeltaBadge label="SONAR Spot Delta (High - Current)" value={result.sonar_spot_delta} />
-                    <DeltaBadge label="DAT Spot Range" value={result.dat_spot_delta} />
-                    <DeltaBadge label="DAT High vs SONAR High" value={result.sonar_vs_dat_high} />
+                  {/* Sonar Analysis + Capacity */}
+                  <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                    {result.sonar_analysis && (
+                      <span style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: result.sonar_analysis === "Spot Lower" ? "rgba(52,211,153,0.12)" : "rgba(251,191,36,0.12)",
+                        color: result.sonar_analysis === "Spot Lower" ? "#34d399" : "#FBBF24",
+                        border: `1px solid ${result.sonar_analysis === "Spot Lower" ? "rgba(52,211,153,0.25)" : "rgba(251,191,36,0.25)"}`,
+                      }}>
+                        {result.sonar_analysis}
+                      </span>
+                    )}
+                    {result.capacity_conditions && (
+                      <span style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: result.capacity_conditions === "Most Difficult" ? "rgba(248,113,113,0.12)" : result.capacity_conditions === "Difficult" ? "rgba(251,191,36,0.12)" : "rgba(255,255,255,0.06)",
+                        color: result.capacity_conditions === "Most Difficult" ? "#f87171" : result.capacity_conditions === "Difficult" ? "#FBBF24" : "#8B95A8",
+                        border: `1px solid ${result.capacity_conditions === "Most Difficult" ? "rgba(248,113,113,0.25)" : result.capacity_conditions === "Difficult" ? "rgba(251,191,36,0.25)" : "rgba(255,255,255,0.08)"}`,
+                      }}>
+                        {result.capacity_conditions}
+                      </span>
+                    )}
                   </div>
 
-                  {/* Market Average */}
+                  {/* Deltas (match Excel columns U, V, W) */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", letterSpacing: "0.5px", marginBottom: 6 }}>DELTAS</div>
+                    <DeltaBadge label="Sonar Spot Delta" value={result.sonar_spot_delta} />
+                    <DeltaBadge label="DAT Spot Delta" value={result.dat_spot_delta} />
+                    <DeltaBadge label="SONAR vs DAT High Delta" value={result.dat_high_delta} />
+                    {result.avg_vs_spot !== 0 && <DeltaBadge label="Avg vs DAT Spot" value={result.avg_vs_spot} />}
+                  </div>
+
+                  {/* Avg All (Excel column R) */}
                   <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: 16, marginBottom: 16 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", letterSpacing: "0.5px", marginBottom: 8 }}>
-                      MARKET AVERAGE ({result.avg_inputs_count} inputs)
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", letterSpacing: "0.5px" }}>
+                        AVG ALL ({result.avg_inputs_count}/6 inputs)
+                      </div>
                     </div>
                     <div style={{ fontSize: 36, fontWeight: 800, color: "#F0F2F5", fontFamily: mono, lineHeight: 1 }}>
-                      {fmt(result.avg_all)}
+                      {fmtDec(result.avg_all)}
                     </div>
                     {mileage > 0 && (
                       <div style={{ fontSize: 11, color: "#5A6478", fontFamily: mono, marginTop: 4 }}>
@@ -623,14 +707,17 @@ export default function FTLQuoteView() {
                         </span>
                       ))}
                     </div>
+                    <div style={{ fontSize: 9, color: "#3D4654", marginTop: 6 }}>
+                      = avg(TRAC Current, TRAC High, Contract Current, Contract High, DAT Spot High, DAT Contract High)
+                    </div>
                   </div>
 
                   {/* Pricing Breakdown */}
                   <div style={{ marginBottom: 16 }}>
-                    <ResultRow label="Carrier Target" value={fmtDec(result.carrier_target)} rpm={mileage > 0 ? fmtRpm(result.carrier_rpm) : null} />
+                    <ResultRow label="Carrier Target (Avg All)" value={fmtDec(result.carrier_target)} rpm={mileage > 0 ? fmtRpm(result.carrier_rpm) : null} />
                     <ResultRow label="Margin" value={`+${fmtDec(result.margin_usd)}`} sub={`${result.margin_pct}%`} accent="#FBBF24" />
                     <div style={{ height: 1, background: "linear-gradient(90deg, transparent, rgba(0,212,170,0.3), transparent)", margin: "4px 0" }} />
-                    <ResultRow label="Customer Quote" value={fmtDec(result.quote_customer)} rpm={mileage > 0 ? fmtRpm(result.quoted_rpm) : null} large accent="#00c853" />
+                    <ResultRow label="Quote Customer" value={fmtDec(result.quote_customer)} rpm={mileage > 0 ? fmtRpm(result.quoted_rpm) : null} large accent="#00c853" />
                   </div>
 
                   {/* RPM Comparison */}
@@ -638,21 +725,21 @@ export default function FTLQuoteView() {
                     <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: 12, marginBottom: 16 }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: "#5A6478", letterSpacing: "0.5px", marginBottom: 8 }}>RPM COMPARISON</div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, textAlign: "center" }}>
-                        {result.sonar_rpm > 0 && (
+                        {result.spot_rpm > 0 && (
                           <div>
-                            <div style={{ fontSize: 15, fontWeight: 700, fontFamily: mono, color: "#a78bfa" }}>{fmtRpm(result.sonar_rpm)}</div>
-                            <div style={{ fontSize: 9, color: "#5A6478" }}>SONAR</div>
+                            <div style={{ fontSize: 15, fontWeight: 700, fontFamily: mono, color: "#a78bfa" }}>{fmtRpm(result.spot_rpm)}</div>
+                            <div style={{ fontSize: 9, color: "#5A6478" }}>TRAC Spot</div>
                           </div>
                         )}
-                        {result.dat_rpm > 0 && (
+                        {result.contract_rpm > 0 && (
                           <div>
-                            <div style={{ fontSize: 15, fontWeight: 700, fontFamily: mono, color: "#60a5fa" }}>{fmtRpm(result.dat_rpm)}</div>
-                            <div style={{ fontSize: 9, color: "#5A6478" }}>DAT 7d</div>
+                            <div style={{ fontSize: 15, fontWeight: 700, fontFamily: mono, color: "#c084fc" }}>{fmtRpm(result.contract_rpm)}</div>
+                            <div style={{ fontSize: 9, color: "#5A6478" }}>Contract</div>
                           </div>
                         )}
                         <div>
                           <div style={{ fontSize: 15, fontWeight: 700, fontFamily: mono, color: "#00c853" }}>{fmtRpm(result.quoted_rpm)}</div>
-                          <div style={{ fontSize: 9, color: "#5A6478" }}>Your Quote</div>
+                          <div style={{ fontSize: 9, color: "#5A6478" }}>Quoted RPM</div>
                         </div>
                       </div>
                     </div>
