@@ -4,7 +4,7 @@ import re
 import smtplib
 import requests
 import gspread
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from zoneinfo import ZoneInfo
@@ -2529,16 +2529,36 @@ def run_once(args):
                     else:
                         log.info("Suppressed empty-value alert", extra={"container": container_id})
 
-                # Queue for archiving if container has been returned to port
+                # Queue for archiving if container has been returned to port (24h grace)
                 if status == "Returned to Port":
-                    archive_jobs.append({
-                        "efj":         job["efj"],
-                        "container":   container_id,
-                        "eta":         eta,
-                        "pickup":      pickup,
-                        "return_date": ret,
-                        "status":      status,
-                    })
+                    _archive_ready = False
+                    try:
+                        _aconn = _pg_connect()
+                        with _aconn.cursor() as _acur:
+                            _acur.execute(
+                                "SELECT updated_at FROM shipments WHERE efj = %s",
+                                (job["efj"],),
+                            )
+                            _arow = _acur.fetchone()
+                        _aconn.close()
+                        if _arow and _arow[0]:
+                            _age = datetime.now(timezone.utc) - _arow[0]
+                            _archive_ready = _age > timedelta(hours=24)
+                        else:
+                            _archive_ready = True  # no timestamp — archive now
+                    except Exception:
+                        _archive_ready = False
+                    if _archive_ready:
+                        archive_jobs.append({
+                            "efj":         job["efj"],
+                            "container":   container_id,
+                            "eta":         eta,
+                            "pickup":      pickup,
+                            "return_date": ret,
+                            "status":      status,
+                        })
+                    else:
+                        log.info("Returned to Port <24h, deferring archive", extra={"efj": job["efj"]})
 
             # ── Terminal cross-check for NOLA containers ────────────────────
             if _TERMINAL_NOLA_OK and not args.dry_run:

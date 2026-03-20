@@ -1,6 +1,131 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAppStore } from "../store";
 import { apiFetch, API_BASE } from "../helpers/api";
+
+function MacropointSession() {
+  const [status, setStatus] = useState<any>(null);
+  const [step, setStep] = useState<"idle" | "triggering" | "otp" | "submitting">("idle");
+  const [otp, setOtp] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const fetchStatus = useCallback(() => {
+    apiFetch(`${API_BASE}/api/mp-login/status`).then(r => r.json()).then(setStatus).catch(() => {});
+  }, []);
+
+  useEffect(() => { fetchStatus(); }, [fetchStatus]);
+
+  const triggerLogin = async () => {
+    setStep("triggering");
+    setMessage("");
+    setError("");
+    try {
+      const res = await apiFetch(`${API_BASE}/api/mp-login/trigger`, { method: "POST" });
+      const data = await res.json();
+      if (data.status === "otp_required") {
+        setStep("otp");
+        setMessage(data.message);
+      } else if (data.status === "success") {
+        setStep("idle");
+        setMessage(data.message);
+        fetchStatus();
+      } else {
+        setError(data.detail || "Unknown error");
+        setStep("idle");
+      }
+    } catch (e: any) {
+      setError(e?.message || "Trigger failed");
+      setStep("idle");
+    }
+  };
+
+  const submitOtp = async () => {
+    if (!otp.trim()) return;
+    setStep("submitting");
+    setError("");
+    try {
+      const res = await apiFetch(`${API_BASE}/api/mp-login/otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp: otp.trim() }),
+      });
+      const data = await res.json();
+      if (data.status === "success") {
+        setMessage(data.message);
+        setStep("idle");
+        setOtp("");
+        fetchStatus();
+      } else {
+        setError(data.detail || "OTP failed");
+        setStep("otp");
+      }
+    } catch (e: any) {
+      setError(e?.message || "OTP submission failed");
+      setStep("otp");
+    }
+  };
+
+  const valid = status?.valid;
+  const borderColor = valid ? "rgba(16,185,129,0.20)" : "rgba(239,68,68,0.25)";
+  const topColor = valid ? "#10b981" : "#ef4444";
+
+  return (
+    <div style={{ background: "#141A28", border: `1px solid ${borderColor}`, borderRadius: 14, padding: "14px 18px", marginBottom: 14, position: "relative", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }}>
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: topColor }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#F0F2F5", marginBottom: 4 }}>Macropoint Session</div>
+          <div style={{ fontSize: 11, color: "#5A6478" }}>
+            {status ? (
+              valid
+                ? <>Cookies valid — saved {status.age_hours}h ago ({status.cookie_count} cookies)</>
+                : <>Session expired — {status.reason || `${status.age_hours}h old`}</>
+            ) : "Loading..."}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {step === "otp" ? (
+            <>
+              <input
+                type="text"
+                value={otp}
+                onChange={e => setOtp(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && submitOtp()}
+                placeholder="Enter OTP"
+                style={{
+                  background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.15)",
+                  borderRadius: 6, padding: "6px 10px", color: "#F0F2F5", fontSize: 14,
+                  fontFamily: "'JetBrains Mono', monospace", letterSpacing: "3px",
+                  width: 120, textAlign: "center", outline: "none",
+                }}
+                autoFocus
+              />
+              <button onClick={submitOtp} disabled={step === "submitting"} style={{
+                background: "rgba(0,212,170,0.15)", border: "1px solid rgba(0,212,170,0.3)",
+                borderRadius: 8, padding: "6px 14px", cursor: "pointer",
+                color: "#00D4AA", fontSize: 11, fontWeight: 700, transition: "all 0.2s",
+              }}>
+                {step === "submitting" ? "Verifying..." : "Verify"}
+              </button>
+            </>
+          ) : (
+            <button onClick={triggerLogin} disabled={step === "triggering"} style={{
+              background: valid ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)",
+              border: `1px solid ${valid ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)"}`,
+              borderRadius: 8, padding: "6px 14px", cursor: "pointer",
+              color: valid ? "#10b981" : "#ef4444",
+              fontSize: 11, fontWeight: 700, transition: "all 0.2s",
+            }}>
+              {step === "triggering" ? "Sending OTP..." : valid ? "Refresh Session" : "Re-authenticate"}
+            </button>
+          )}
+        </div>
+      </div>
+      {message && <div style={{ marginTop: 8, fontSize: 11, color: "#10b981", background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.20)", borderRadius: 6, padding: "6px 10px" }}>{message}</div>}
+      {error && <div style={{ marginTop: 8, fontSize: 11, color: "#ef4444", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.20)", borderRadius: 6, padding: "6px 10px" }}>{error}</div>}
+    </div>
+  );
+}
 
 function DataSourceToggle() {
   const { dataSource, setDataSource, systemHealth, setSystemHealth } = useAppStore();
@@ -133,6 +258,7 @@ export default function AnalyticsView({ loaded, botStatus, botHealth, cronStatus
       </div>
 
       <DataSourceToggle />
+      <MacropointSession />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
         {services.map(([unit, svc]) => {

@@ -579,6 +579,41 @@ async def update_quote_status(quote_id: int, request: Request):
         db.put_conn(conn)
 
 
+@router.patch("/api/quotes/{quote_id}/outcome")
+async def api_update_quote_outcome(quote_id: int, request: Request):
+    """Record outcome (won/lost_price/lost_capacity/lost_service/no_response/cancelled) on a quote."""
+    body = await request.json()
+    outcome = body.get("outcome")
+    valid_outcomes = ("won", "lost_price", "lost_capacity", "lost_service", "no_response", "cancelled")
+    if outcome not in valid_outcomes:
+        return JSONResponse({"error": f"Invalid outcome. Must be one of: {', '.join(valid_outcomes)}"}, status_code=400)
+    outcome_notes = body.get("outcome_notes", "")
+    # Map outcome to a status for the status column too
+    status_map = {"won": "accepted", "lost_price": "lost", "lost_capacity": "lost",
+                  "lost_service": "lost", "no_response": "expired", "cancelled": "expired"}
+    new_status = status_map.get(outcome, "sent")
+    conn = db.get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE quotes
+               SET outcome = %s, outcome_notes = %s, status = %s, updated_at = NOW()
+               WHERE id = %s
+               RETURNING id, quote_number, status, outcome, outcome_notes""",
+            (outcome, outcome_notes, new_status, quote_id),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        if not row:
+            return JSONResponse({"error": "Quote not found"}, status_code=404)
+        return {"id": row[0], "quote_number": row[1], "status": row[2], "outcome": row[3], "outcome_notes": row[4]}
+    except Exception as e:
+        conn.rollback()
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        db.put_conn(conn)
+
+
 @router.put("/api/quotes/{quote_id}")
 async def api_update_quote(quote_id: int, request: Request):
     """Update an existing quote."""

@@ -19,6 +19,7 @@ from shared import (
     _get_driver_contact, _upsert_driver_contact,
     _build_macropoint_progress, _classify_mp_display_status,
     send_delivery_email,
+    _archive_shipment_on_close,
     SHEET_ID, CREDS_FILE, COL,
     TRACKING_PHONE, DISPATCH_EMAIL,
     BOVIET_SHEET_ID, BOVIET_TAB_CONFIGS,
@@ -842,10 +843,23 @@ async def api_update_status(efj: str, request: Request):
                 raise HTTPException(404, f"Row for {efj} not found in {tab}")
             ws.update_cell(target_row, status_col + 1, new_status)
 
-            # NOTE: billed_closed no longer auto-archives here.
-            # Archiving now ONLY fires via the billing close path:
-            # POST /api/unbilled/{id}/status → billing_status=closed → _archive_shipment_on_close()
-            # This prevents loads from disappearing before the finance cycle completes.
+            # Auto-archive on billed_closed (with unbilled-order gate)
+            if new_status.strip().lower() in ("billed_closed", "billed and closed"):
+                try:
+                    with db.get_cursor() as cur:
+                        cur.execute(
+                            "SELECT id FROM unbilled_orders "
+                            "WHERE REPLACE(order_num, ' ', '') = %s "
+                            "AND dismissed = FALSE AND billing_status != 'closed' "
+                            "LIMIT 1",
+                            (efj,),
+                        )
+                        open_unbilled = cur.fetchone()
+                    if not open_unbilled:
+                        _archive_shipment_on_close(efj)
+                        log.info("billed_closed: archived %s via legacy endpoint", efj)
+                except Exception as exc:
+                    log.warning("billed_closed archive failed for %s: %s", efj, exc)
 
         # Update cache
         shipment["status"] = new_status

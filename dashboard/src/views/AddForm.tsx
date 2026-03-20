@@ -10,6 +10,7 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
     container: "", moveType: "Dray Import", eta: "", lfd: "", pickupDate: "", deliveryDate: "", notes: "",
     macropointUrl: "", carrierEmail: "", trailerNumber: "", driverPhone: "",
     bol: "", customerRef: "", equipmentType: "", rep: "", hub: "",
+    vessel: "", pickupTime: "", deliveryTime: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -31,7 +32,8 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
   const isDray = form.moveType.startsWith("Dray");
   const isExport = form.moveType === "Dray Export";
   const isFTL = form.moveType === "FTL";
-  const equipOpts = isFTL ? FTL_EQUIPMENT : DRAY_EQUIPMENT;
+  const isLTL = form.moveType === "LTL";
+  const equipOpts = (isFTL || isLTL) ? FTL_EQUIPMENT : DRAY_EQUIPMENT;
   const isBoviet = form.account.toLowerCase() === "boviet";
   const isTolead = form.account.toLowerCase() === "tolead";
   const needsHub = isBoviet || isTolead;
@@ -141,6 +143,8 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
     for (let i = 0; i < valid.length; i++) {
       const row = valid[i];
       try {
+        const _pu = row.pickupDate || form.pickupDate || "";
+        const _dl = row.deliveryDate || form.deliveryDate || "";
         await onSubmit({
           efj: row.efj.trim(),
           move_type: form.moveType,
@@ -150,11 +154,12 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
           origin: form.origin,
           destination: form.destination,
           container: row.container || "",
-          pickup_date: row.pickupDate || form.pickupDate || "",
-          delivery_date: row.deliveryDate || form.deliveryDate || "",
+          pickup_date: _pu ? (form.pickupTime ? `${_pu} ${form.pickupTime}` : _pu) : "",
+          delivery_date: _dl ? (form.deliveryTime ? `${_dl} ${form.deliveryTime}` : _dl) : "",
           eta: form.eta || "",
           lfd: form.lfd || "",
           bol: form.bol || "",
+          vessel: form.vessel || "",
           customer_ref: row.customerRef || form.customerRef || "",
           equipment_type: form.equipmentType || "",
           notes: row.notes || form.notes,
@@ -207,7 +212,7 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
         <div>
           <label style={labelStyle}>Move Type</label>
           <select value={form.moveType} onChange={e => { set("moveType", e.target.value); set("equipmentType", ""); setLookupDone(false); }} style={inputStyle}>
-            {["Dray Import", "Dray Export", "Dray/Transload", "FTL"].map(t => <option key={t} style={{ background: "#0D1119" }}>{t}</option>)}
+            {["Dray Import", "Dray Export", "Dray/Transload", "FTL", "LTL"].map(t => <option key={t} style={{ background: "#0D1119" }}>{t}</option>)}
           </select>
         </div>
         <div>
@@ -282,10 +287,18 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
         <div>
           <label style={labelStyle}>Status</label>
           <select value={form.status} onChange={e => set("status", e.target.value)} style={inputStyle}>
-            {(isFTL ? FTL_STATUSES : STATUSES).filter(s => s.key !== "all").map(s => <option key={s.key} value={s.key} style={{ background: "#0D1119" }}>{s.label}</option>)}
+            {((isFTL || isLTL) ? FTL_STATUSES : STATUSES).filter(s => s.key !== "all").map(s => <option key={s.key} value={s.key} style={{ background: "#0D1119" }}>{s.label}</option>)}
           </select>
         </div>
       </div>
+
+      {/* Row 5b: SSL/Vessel (dray only) */}
+      {isDray && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div><label style={labelStyle}>SSL / Vessel</label><input value={form.vessel} onChange={e => set("vessel", e.target.value)} placeholder="Maersk / Ever Given" style={lookupDone && form.vessel ? autoFilledStyle : inputStyle} /></div>
+          <div />
+        </div>
+      )}
 
       {/* Row 6: Origin + Destination */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -294,7 +307,7 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
       </div>
 
       {/* Row 7: ETA/ERD + LFD/Cutoff (hidden for FTL) */}
-      {!isFTL && (
+      {!isFTL && !isLTL && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
             <label style={labelStyle}>{dateLabel1} <span style={{ fontWeight: 400, color: "#5A6478", letterSpacing: 0, textTransform: "none" }}>MM/DD</span></label>
@@ -307,7 +320,7 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
         </div>
       )}
 
-      {/* Row 8: Pickup + Delivery */}
+      {/* Row 8: Pickup + Delivery (date + time) */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div>
           <label style={labelStyle}>Pickup Date <span style={{ fontWeight: 400, color: "#5A6478", letterSpacing: 0, textTransform: "none" }}>MM/DD</span></label>
@@ -318,16 +331,21 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
           <input value={dateInputs.deliveryDate || formatMMDD(form.deliveryDate)} onChange={e => handleDateInput("deliveryDate", e.target.value)} onBlur={() => { if (!dateInputs.deliveryDate) return; const parsed = parseMMDD(dateInputs.deliveryDate); if (parsed) set("deliveryDate", parsed); }} placeholder="03/12" maxLength={5} style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} />
         </div>
       </div>
+      {/* Row 8b: Pickup + Delivery Time */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div><label style={labelStyle}>Pickup Time</label><input type="time" value={form.pickupTime} onChange={e => set("pickupTime", e.target.value)} style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} /></div>
+        <div><label style={labelStyle}>Delivery Time</label><input type="time" value={form.deliveryTime} onChange={e => set("deliveryTime", e.target.value)} style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} /></div>
+      </div>
 
       {/* Notes */}
       <div><label style={labelStyle}>Notes</label><textarea value={form.notes} onChange={e => set("notes", e.target.value)} placeholder="Load notes..." style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} /></div>
 
-      {/* FTL Details */}
-      {isFTL && (
+      {/* FTL / LTL Details */}
+      {(isFTL || isLTL) && (
         <>
           <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12, marginTop: 2 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#14b8a6", letterSpacing: "1.5px", marginBottom: 10, textTransform: "uppercase" }}>FTL Details</div>
-            <div><label style={labelStyle}>Macropoint URL</label><input value={form.macropointUrl} onChange={e => set("macropointUrl", e.target.value)} placeholder="https://visibility.macropoint.com/..." style={inputStyle} /></div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#14b8a6", letterSpacing: "1.5px", marginBottom: 10, textTransform: "uppercase" }}>{isLTL ? "LTL" : "FTL"} Details</div>
+            {isFTL && <div><label style={labelStyle}>Macropoint URL</label><input value={form.macropointUrl} onChange={e => set("macropointUrl", e.target.value)} placeholder="https://visibility.macropoint.com/..." style={inputStyle} /></div>}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div><label style={labelStyle}>Driver Phone #</label><input value={form.driverPhone} onChange={e => set("driverPhone", e.target.value)} placeholder="(555) 555-5555" style={inputStyle} /></div>
@@ -442,11 +460,12 @@ export default function AddForm({ onSubmit, onCancel, accounts }) {
                 origin: form.origin,
                 destination: form.destination,
                 container: form.container,
-                pickup_date: form.pickupDate || "",
-                delivery_date: form.deliveryDate || "",
+                pickup_date: form.pickupDate ? (form.pickupTime ? `${form.pickupDate} ${form.pickupTime}` : form.pickupDate) : "",
+                delivery_date: form.deliveryDate ? (form.deliveryTime ? `${form.deliveryDate} ${form.deliveryTime}` : form.deliveryDate) : "",
                 eta: form.eta || "",
                 lfd: form.lfd || "",
                 bol: form.bol || "",
+                vessel: form.vessel || "",
                 customer_ref: form.customerRef || "",
                 equipment_type: form.equipmentType || "",
                 notes: form.notes,

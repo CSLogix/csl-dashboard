@@ -529,10 +529,40 @@ def create_quotes_table():
                     accessorials_json JSONB,
                     terms_json JSONB,
                     route_json JSONB,
+                    created_by VARCHAR(256) DEFAULT '',
+                    valid_until DATE,
+                    source_type VARCHAR(64) DEFAULT '',
+                    source_filename VARCHAR(512) DEFAULT '',
+                    outcome VARCHAR(50),
+                    outcome_notes TEXT,
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            # Add columns if missing (existing DBs)
+            for col, coltype, default in [
+                ("created_by", "VARCHAR(256)", "''"),
+                ("valid_until", "DATE", None),
+                ("source_type", "VARCHAR(64)", "''"),
+                ("source_filename", "VARCHAR(512)", "''"),
+                ("outcome", "VARCHAR(50)", None),
+                ("outcome_notes", "TEXT", None),
+            ]:
+                try:
+                    default_clause = f" DEFAULT {default}" if default else ""
+                    cur.execute(f"ALTER TABLE quotes ADD COLUMN {col} {coltype}{default_clause}")
+                except Exception:
+                    conn.rollback()
+            # Backfill created_by on existing quotes that have empty/null value
+            try:
+                cur.execute("""
+                    UPDATE quotes SET created_by = 'system'
+                    WHERE created_by IS NULL OR created_by = ''
+                """)
+                if cur.rowcount > 0:
+                    log.info("backfilled created_by='system' on %d existing quotes", cur.rowcount)
+            except Exception:
+                conn.rollback()
     log.info("quotes table ready")
 
 
@@ -560,16 +590,18 @@ def insert_quote(data: dict) -> dict:
         with get_cursor(conn) as cur:
             cur.execute("""
                 INSERT INTO quotes
-                    (quote_number, status, pod, final_delivery, final_zip,
+                    (quote_number, created_by, status, pod, final_delivery, final_zip,
                      round_trip_miles, one_way_miles, transit_time, duration_hours,
                      shipment_type, carrier_name, carrier_total, margin_pct, margin_type,
                      sell_subtotal, accessorial_total, estimated_total,
-                     customer_name, customer_email,
-                     linehaul_json, accessorials_json, terms_json, route_json)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     customer_name, customer_email, valid_until,
+                     linehaul_json, accessorials_json, terms_json, route_json,
+                     source_type, source_filename)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 RETURNING *
             """, (
-                qn, data.get("status", "draft"),
+                qn, data.get("created_by", "system"),
+                data.get("status", "draft"),
                 data.get("pod"), data.get("final_delivery"), data.get("final_zip"),
                 data.get("round_trip_miles"), data.get("one_way_miles"),
                 data.get("transit_time"), data.get("duration_hours"),
@@ -579,10 +611,13 @@ def insert_quote(data: dict) -> dict:
                 data.get("sell_subtotal", 0), data.get("accessorial_total", 0),
                 data.get("estimated_total", 0),
                 data.get("customer_name"), data.get("customer_email"),
-                json.dumps(data.get("linehaul_items")),
-                json.dumps(data.get("accessorials")),
-                json.dumps(data.get("terms")),
-                json.dumps(data.get("route")),
+                data.get("valid_until"),
+                json.dumps(data.get("linehaul_items", [])),
+                json.dumps(data.get("accessorials", [])),
+                json.dumps(data.get("terms", [])),
+                json.dumps(data.get("route", [])),
+                data.get("source_type", "manual"),
+                data.get("source_filename", ""),
             ))
             return dict(cur.fetchone())
 

@@ -89,3 +89,33 @@ All services now have systemd unit files in `systemd/`. Long-running services (9
 2. **This week**: Clean up patches/, add root requirements.txt
 3. **Next sprint**: Add nginx reverse proxy with TLS
 4. **When needed**: Gmail Pub/Sub, systemd consolidation
+
+---
+
+## Session Log: 2026-03-20
+
+### Auto-Archive Hardening
+
+**Problem**: `billed_closed` loads set via Google Sheet by reps were never archived in PG because only the v2/legacy API endpoints had archive gates. Bot monitors and sheet sync wrote the status via `pg_update_shipment()` which had no archive logic.
+
+**Fix**: Added auto-archive to `pg_update_shipment()` in `csl_pg_writer.py` — when status is set to `billed_closed` or `billed_and_closed`, immediately sets `archived = TRUE`. Also added terminal-status auto-archive to `csl_sheet_sync.py` so Tolead/Boviet loads with completed statuses get archived during sync cycles.
+
+**Empty Return grace period**: Already implemented in `csl_bot.py` — checks `updated_at` age >24h before archiving `Returned to Port` loads. Working as designed; team confusion was about lack of visibility, not a bug.
+
+### Account Name Mapping
+
+**Problem**: Google Sheet tab named "Texas" but frontend `REP_ACCOUNTS` constant expects "Texas International". Loads appeared in PG with `account = "Texas"` and were invisible under Radka's Texas International card. Direct PG `UPDATE` was reverted on every sheet sync/bot cycle.
+
+**Fix**: Added `_ACCOUNT_NAME_MAP` dict to `csl_pg_writer.py` and `ACCOUNT_NAME_MAP` to `shared.py`. Both normalize `"Texas"` → `"Texas International"` at write time, so the translation is durable across all write paths (bot monitors, sheet sync, dashboard API).
+
+### Dashboard Pill Undercounting
+
+**Problem**: RepDashboardView account cards showed `incoming` (at_port/on_vessel/pending), `active` (in_transit/out_for_delivery), `behind`, and `done`. Statuses like `scheduled`, `at_yard`, `at_terminal` fell into none of these buckets, causing MGF to show "2 in, 1 done" when 7 loads existed.
+
+**Fix**: Expanded `incoming` to include `scheduled`, `at_yard`, `at_terminal`. Expanded `active` to include `dispatched`, `departed_pickup`. All loads now map to at least one pill category.
+
+### Stale Vite Build
+
+**Problem**: AddForm already had LTL move type, SSL/Vessel field, and Pickup/Delivery Time inputs in source, but the deployed bundle was stale. Multiple old JS bundles were sitting in `static/dist/assets/` alongside the current one.
+
+**Fix**: Clean deploy — `rm -f assets/*` before copying new build output. Fresh `npm run build` + SCP to server. Always clean old assets before deploying to prevent Cloudflare serving cached stale bundles.

@@ -94,8 +94,8 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
   const color = REP_COLORS[repName] || "#94a3b8";
 
   const repShipments = getRepShipments(shipments, repName);
-  const incoming = repShipments.filter(s => ["at_port", "on_vessel", "pending"].includes(s.status)).length;
-  const activeCount = repShipments.filter(s => ["in_transit", "out_for_delivery"].includes(s.status)).length;
+  const incoming = repShipments.filter(s => ["at_port", "on_vessel", "pending", "scheduled", "at_yard", "at_terminal"].includes(s.status)).length;
+  const activeCount = repShipments.filter(s => ["in_transit", "out_for_delivery", "dispatched", "departed_pickup"].includes(s.status)).length;
   const onSchedule = repShipments.filter(s => !isPostDelivery(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))).length;
   const behindSchedule = repShipments.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !isPostDelivery(s.status)).length;
   const delivered = repShipments.filter(s => isPostDelivery(s.status)).length;
@@ -107,8 +107,8 @@ export default function RepDashboardView({ repName, shipments, onBack, handleSta
     return {
       name: acctName,
       ships: acctShips,
-      incoming: acctShips.filter(s => ["at_port", "on_vessel", "pending"].includes(s.status)).length,
-      active: acctShips.filter(s => ["in_transit", "out_for_delivery"].includes(s.status)).length,
+      incoming: acctShips.filter(s => ["at_port", "on_vessel", "pending", "scheduled", "at_yard", "at_terminal"].includes(s.status)).length,
+      active: acctShips.filter(s => ["in_transit", "out_for_delivery", "dispatched", "departed_pickup"].includes(s.status)).length,
       onSchedule: acctShips.filter(s => !isPostDelivery(s.status) && !(s.status === "issue" || (s.lfd && isDatePast(s.lfd)))).length,
       behind: acctShips.filter(s => (s.status === "issue" || (s.lfd && isDatePast(s.lfd))) && !isPostDelivery(s.status)).length,
       delivered: acctShips.filter(s => isPostDelivery(s.status)).length,
