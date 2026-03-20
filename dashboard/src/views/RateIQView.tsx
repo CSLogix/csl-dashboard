@@ -6,7 +6,7 @@ import OOGQuoteBuilder from '../OOGQuoteBuilder';
 import FTLQuoteView from './FTLQuoteView';
 import {
   LaneName, LaneCard, MarketRateCard, MarketBenchmarkCard,
-  CarrierRateTable, HistoryTabContent,
+  CarrierRateTable, HistoryTabContent, MyQuotesTab,
 } from '../components/rate-iq';
 import {
   grad, fmt, fmtDec, PORT_CLUSTERS, STATE_ABBREVS,
@@ -37,7 +37,7 @@ import {
 // ═══════════════════════════════════════════════════════════════
 export default function RateIQView() {
   // ── View state ──
-  const [view, setView] = useState("browse"); // browse | detail | intake | build-quote | scorecard | directory | history | oog | ftl-quote
+  const [view, setView] = useState("browse"); // browse | detail | intake | build-quote | scorecard | directory | history | my-quotes | oog | ftl-quote
   const [selectedLane, setSelectedLane] = useState(null); // { origin, destination }
   const [quotePrefillKey, setQuotePrefillKey] = useState(0); // increment to force QuoteBuilder remount with new prefill
 
@@ -937,7 +937,8 @@ export default function RateIQView() {
               { key: "oog", label: "OOG IQ", icon: "📦" },
               { key: "directory", label: `Directory (${dirCarriers.length})`, icon: "📖" },
               { key: "scorecard", label: "Scorecard", icon: "🏆" },
-              { key: "history", label: "History", icon: "📊" },
+              { key: "my-quotes", label: "My Quotes", icon: "\uD83D\uDCCB" },
+              { key: "history", label: "History", icon: "\uD83D\uDCCA" },
             ].map(t => (
               <button key={t.key} onClick={() => setView(t.key)}
                 style={{ padding: "6px 14px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", background: "transparent", color: "#8B95A8", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 4 }}
@@ -2561,6 +2562,24 @@ export default function RateIQView() {
           })}
           {!dirGroupView && filteredDir.length > 100 && <div style={{ padding: 12, textAlign: "center", color: "#5A6478", fontSize: 11 }}>Showing 100 of {filteredDir.length} carriers. Refine your search.</div>}
         </div>
+      </div>
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════
+  // MY QUOTES VIEW
+  // ═════════════════════════════════════════════════════════════
+  if (view === "my-quotes") {
+    return (
+      <div style={{ padding: "0 24px 24px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
+          <button onClick={() => setView("browse")}
+            style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8B95A8", fontSize: 16, cursor: "pointer", fontFamily: "inherit", lineHeight: 1 }}>
+            {"\u2190"}
+          </button>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#F0F2F5", margin: 0 }}>My Quotes</h2>
+        </div>
+        <MyQuotesTab />
       </div>
     );
   }

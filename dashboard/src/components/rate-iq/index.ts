@@ -4,4 +4,6 @@ export { default as MarketRateCard } from './MarketRateCard';
 export { default as MarketBenchmarkCard } from './MarketBenchmarkCard';
 export { default as CarrierRateTable } from './CarrierRateTable';
 export { default as HistoryTabContent } from './HistoryTabContent';
+export { default as MyQuotesTab } from './MyQuotesTab';
+export { default as QuoteOutcomeModal } from './QuoteOutcomeModal';
 export * from './constants';
