@@ -34,7 +34,8 @@ class TestDeleteEndpointLogic:
         """Verify that delete removes records from all related tables."""
         # The tables that should be cleaned up on delete
         expected_tables = {"load_documents", "load_notes", "tracking_events",
-                           "driver_contacts", "rate_quotes", "shipments"}
+                           "driver_contacts", "rate_quotes", "email_threads",
+                           "email_drafts", "customer_reply_alerts", "shipments"}
 
         # Read the v2.py source to verify all tables are referenced
         v2_path = os.path.join(os.path.dirname(__file__), "..", "csl-doc-tracker", "routes", "v2.py")
